@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kishizu</title>
+<style>
+  :root {
+    --bg: #16161a; --card: #1e1e24; --line: #2e2e38;
+    --text: #e8e6e3; --muted: #9490a0; --accent: #7c6bb0;
+    --ok: #4a9d6e; --warn: #c9a227; --bad: #b5544f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .5px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .pill {
+    display: inline-block; padding: 1px 7px; border-radius: 10px;
+    font-size: 11px; border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.no { color: var(--warn); border-color: var(--warn); }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  button.bad { background: var(--bad); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .cand {
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 8px; background: #191920;
+  }
+  .cand .title { font-size: 13px; margin-bottom: 6px; word-break: break-word; }
+  .cand .why { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+  .ep { font-weight: 600; }
+  .ep.unknown { color: var(--warn); }
+  .hidden { display: none; }
+  .offsets { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .offsets code { color: var(--text); }
+  select, input {
+    background: #12121a; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font-size: 13px;
+  }
+  .banner {
+    padding: 10px 14px; border-radius: 6px; margin-bottom: 16px;
+    background: #1f2a24; border: 1px solid var(--ok); font-size: 13px;
+  }
+  .banner.err { background: #2a1f1f; border-color: var(--bad); }
+</style>
+</head>
+<body>
+
+<h1>kishizu</h1>
+<div class="sub">seasonal anime downloader &middot; training</div>
+
+<div id="banner" class="banner hidden"></div>
+
+<div id="panel-train" class="card hidden" style="margin-bottom:20px">
+  <h2 id="train-title">Training</h2>
+  <div class="meta" id="train-meta"></div>
+  <div id="candidates"></div>
+  <div class="row">
+    <button onclick="commit()">Finish &amp; save</button>
+    <button class="ghost" onclick="cancelTrain()">Cancel</button>
+  </div>
+  <div class="offsets" id="offsets"></div>
+</div>
+
+<div class="grid" id="shows"></div>
+
+<script>
+let state = { active: false };
+
+function el(id) { return document.getElementById(id); }
+function show(id, yes) { el(id).classList.toggle('hidden', !yes); }
+
+function banner(msg, isErr) {
+  const b = el('banner');
+  b.textContent = msg;
+  b.classList.toggle('err', !!isErr);
+  show('banner', !!msg);
+}
+
+async function api(path, body) {
+  const opts = body ? { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) } : {};
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function loadShows() {
+  const shows = await api('/shows');
+  el('shows').innerHTML = shows.map(s => `
+    <div class="card">
+      <h2>${escapeHtml(s.name)}</h2>
+      <div class="meta">
+        next ep ${s.next}${s.max ? ' / ' + s.max : ''} &middot;
+        <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
+      </div>
+      <div class="row">
+        <label class="meta" for="ep-${s.id}">ep</label>
+        <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px">
+        <button onclick="startTrain(${s.id})">Train</button>
+        ${s.trained ? `<button class="ghost" onclick="showOffsets(${s.id})">Offsets</button>
+        <button class="ghost" onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Reset</button>` : ''}
+      </div>
+      <div class="offsets" id="off-${s.id}"></div>
+    </div>
+  `).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function showOffsets(id) {
+  fetch('/shows').then(r => r.json()).then(shows => {
+    const s = shows.find(x => x.id === id);
+    el('off-' + id).innerHTML = Object.keys(s.offsets).length
+      ? 'offsets: ' + Object.entries(s.offsets).map(([g,o]) => `<code>${escapeHtml(g)}=${o}</code>`).join(', ')
+      : 'no offsets';
+  });
+}
+
+// The episode is chosen by the user at training time, not fixed to "next":
+// which episode you train on is a judgement call (you may want one that has
+// already aired and has several competing releases).
+async function startTrain(showId) {
+  banner('');
+  const input = el('ep-' + showId);
+  const ep = parseInt(input && input.value, 10) || 0;
+  try {
+    const r = await api('/api/train/start', { show_id: showId, episode: ep, seed_index: -1 });
+    if (r.needs_seed) { renderSeedPicker(showId, ep, r); return; }
+    state = r;
+    renderTrain();
+  } catch (e) { banner('Could not start: ' + e.message, true); }
+}
+
+async function resetShow(showId, name) {
+  if (!confirm(`Clear learned offsets for ${name}? You can retrain afterwards.`)) return;
+  try {
+    await api('/api/train/reset', { show_id: showId });
+    banner(`Cleared offsets for ${name}.`);
+    loadShows();
+  } catch (e) { banner(e.message, true); }
+}
+
+// The newest release is often the PREVIOUS episode, so we cannot safely guess a
+// seed. Ask the user to pick the release that IS the target episode.
+function renderSeedPicker(showId, ep, r) {
+  show('panel-train', true);
+  el('train-title').textContent = 'Pick a release for episode ' + ep;
+  el('train-meta').textContent =
+    r.show + ' — no release in the feed is obviously episode ' + ep + '. Choose the right one:';
+  el('candidates').innerHTML = r.releases.map(c => `
+    <div class="cand">
+      <div class="title">
+        <span class="ep ${c.episode ? '' : 'unknown'}">${c.episode ? 'ep' + c.episode : 'ep?'}</span>
+        &nbsp;${escapeHtml(c.title)}
+      </div>
+      <div class="why">${c.seeders} seeders · ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
+      <div class="row">
+        <button onclick="seedWith(${showId}, ${ep}, ${c.index})">Use this</button>
+      </div>
+    </div>
+  `).join('');
+  el('offsets').innerHTML = '';
+}
+
+async function seedWith(showId, ep, index) {
+  try {
+    state = await api('/api/train/start', { show_id: showId, episode: ep, seed_index: index });
+    renderTrain();
+  } catch (e) { banner(e.message, true); }
+}
+
+function renderTrain() {
+  show('panel-train', state.active);
+  if (!state.active) return;
+
+  el('train-title').textContent = 'Training: ' + state.show;
+  el('train-meta').textContent =
+    `episode ${state.episode} · ${state.accepted} accepted · ${state.rejected} rejected`;
+
+  el('candidates').innerHTML = state.candidates.map(c => `
+    <div class="cand">
+      <div class="title">
+        <span class="ep ${c.episode ? '' : 'unknown'}">${c.episode ? 'ep' + c.episode : 'ep?'}</span>
+        &nbsp;${escapeHtml(c.title)}
+      </div>
+      <div class="why">${escapeHtml(c.why)} · ${c.seeders} seeders · ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
+      <div class="row">
+        <button onclick="answer(${c.index}, true)">Yes, this is ep ${state.episode}</button>
+        <button class="bad" onclick="reject(${c.index})">No</button>
+      </div>
+    </div>
+  `).join('') || '<div class="meta">Nothing more to ask.</div>';
+
+  const offs = Object.entries(state.offsets || {});
+  el('offsets').innerHTML = offs.length
+    ? 'learned offsets: ' + offs.map(([g,o]) => `<code>${escapeHtml(g)}=${o}</code>`).join(', ')
+    : '';
+}
+
+async function answer(index, accept) {
+  try {
+    state = await api('/api/train/answer', { index, accept });
+    renderTrain();
+  } catch (e) { banner(e.message, true); }
+}
+
+async function reject(index) {
+  const reason = prompt('Why? (wrong_episode, wrong_show, batch, dub, codec, quality, other)', 'wrong_episode');
+  if (reason === null) return;
+  try {
+    state = await api('/api/train/answer', { index, accept: false, reason });
+    renderTrain();
+  } catch (e) { banner(e.message, true); }
+}
+
+async function commit() {
+  try {
+    const r = await api('/api/train/commit', {});
+    const n = (r.verified || []).length;
+    banner(`Saved. ${r.accepted} accepted, ${r.rejected} rejected. ${n} release(s) now match ep ${state.episode}.`);
+    state = { active: false };
+    renderTrain();
+    loadShows();
+  } catch (e) { banner(e.message, true); }
+}
+
+function cancelTrain() {
+  state = { active: false };
+  renderTrain();
+}
+
+loadShows();
+</script>
+</body>
+</html>

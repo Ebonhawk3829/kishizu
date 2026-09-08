@@ -1,0 +1,15 @@
+# Binaries
+/kishizu
+*.exe
+
+# Local DB — training state lives here, never commit it
+*.db
+*.db-shm
+*.db-wal
+
+# Scratch
+__pycache__/
+*.pyc
+
+# Cached scrape attempts (large, regenerable)
+testdata/search_cache/
