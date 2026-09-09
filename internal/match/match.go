@@ -30,7 +30,11 @@ type Show interface {
 type Result struct {
 	Matched bool
 	Episode int // local episode number; only meaningful when Matched
-	Reason  string
+	// Confident is true when the episode came from a known group offset rather
+	// than a guess. Callers must not ask the user about confident results: the
+	// model already has the answer, so asking wastes the user's time.
+	Confident bool
+	Reason    string
 }
 
 // Threshold is the minimum title score for a match. Measured gap on real data:
@@ -54,7 +58,7 @@ func Match(s Show, title string) Result {
 	if raw == 0 {
 		// Matches the show but the episode number is unreadable. This is the
 		// maximally informative case for training: it needs a human.
-		return Result{Matched: true, Episode: 0, Reason: "matches show, episode unreadable"}
+		return Result{Matched: true, Episode: 0, Confident: false, Reason: "matches show, episode unreadable"}
 	}
 
 	group := r.Group
@@ -67,7 +71,7 @@ func Match(s Show, title string) Result {
 		if !plausible(ep, s) {
 			return Result{Reason: fmt.Sprintf("episode %d out of range (group %q, offset %d)", ep, group, off)}
 		}
-		return Result{Matched: true, Episode: ep, Reason: fmt.Sprintf("group %q known offset %d", group, off)}
+		return Result{Matched: true, Episode: ep, Confident: true, Reason: fmt.Sprintf("group %q known offset %d", group, off)}
 	}
 
 	// Unseen group: try every offset this show has exhibited and keep the
@@ -86,7 +90,7 @@ func Match(s Show, title string) Result {
 	if best == 0 {
 		return Result{Reason: fmt.Sprintf("unseen group %q, no plausible offset", group)}
 	}
-	return Result{Matched: true, Episode: best, Reason: fmt.Sprintf("group %q unseen, inferred episode", group)}
+	return Result{Matched: true, Episode: best, Confident: false, Reason: fmt.Sprintf("group %q unseen, inferred episode", group)}
 }
 
 func plausible(ep int, s Show) bool {

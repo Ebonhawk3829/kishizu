@@ -58,6 +58,10 @@
     background: #1f2a24; border: 1px solid var(--ok); font-size: 13px;
   }
   .banner.err { background: #2a1f1f; border-color: var(--bad); }
+  .teach {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  }
+  .cand.resolved { opacity: 0.65; font-size: 12px; padding: 4px 0; border: none; }
 </style>
 </head>
 <body>
@@ -71,11 +75,20 @@
   <h2 id="train-title">Training</h2>
   <div class="meta" id="train-meta"></div>
   <div id="candidates"></div>
+  <div class="teach">
+    <div class="meta">Know a correct release? Enter it directly instead of answering questions.</div>
+    <div class="row">
+      <input id="teach-title" type="text" placeholder="[Group] Show - 07 [1080p]..." style="flex:1">
+      <input id="teach-ep" type="number" min="1" style="width:64px" title="episode">
+      <button class="ghost" onclick="teach()">Teach</button>
+    </div>
+  </div>
   <div class="row">
     <button onclick="commit()">Finish &amp; save</button>
     <button class="ghost" onclick="cancelTrain()">Cancel</button>
   </div>
   <div class="offsets" id="offsets"></div>
+  <div id="resolved"></div>
 </div>
 
 <div class="grid" id="shows"></div>
@@ -214,6 +227,27 @@ function renderTrain() {
   el('offsets').innerHTML = offs.length
     ? 'learned offsets: ' + offs.map(([g,o]) => `<code>${escapeHtml(g)}=${o}</code>`).join(', ')
     : '';
+
+  // Show what the model now resolves on its own, so learning is visible.
+  const res = state.resolved || [];
+  el('resolved').innerHTML = res.length
+    ? '<div class="meta">resolved without asking:</div>' + res.map(c => `
+      <div class="cand resolved">
+        <span class="ep">ep${c.episode}</span>&nbsp;${escapeHtml(c.title)}
+      </div>`).join('')
+    : '';
+}
+
+async function teach() {
+  const title = el('teach-title').value.trim();
+  if (!title) { banner('Paste a release title first.', true); return; }
+  const ep = parseInt(el('teach-ep').value, 10) || state.episode;
+  try {
+    state = await api('/api/train/teach', { title, episode: ep });
+    el('teach-title').value = '';
+    banner(`Learned: that release is ep ${ep}.`);
+    renderTrain();
+  } catch (e) { banner(e.message, true); }
 }
 
 async function answer(index, accept) {
