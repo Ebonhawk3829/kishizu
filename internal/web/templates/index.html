@@ -15,6 +15,12 @@
     margin: 0; padding: 24px; background: var(--bg); color: var(--text);
     font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
   }
+  /* Cap the width and centre it. On a wide monitor a full-bleed layout pushes
+     controls to opposite edges, which means travelling the whole screen to go
+     from the show list to the grading panel. */
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .attr-hint { color: var(--muted); font-size: 11px; margin-left: 8px; }
+  .attr-edit { width: 64px; padding: 3px 6px; font-size: 13px; }
   h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .5px; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
   .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
@@ -81,6 +87,7 @@
 </style>
 </head>
 <body>
+<div class="wrap">
 
 <h1>kishizu</h1>
 <div class="sub">seasonal anime downloader &middot; training</div>
@@ -123,6 +130,8 @@
 </div>
 
 <div class="grid" id="shows"></div>
+
+</div>
 
 <script>
 let state = { active: false };
@@ -291,11 +300,13 @@ async function inspectAny() {
 async function submitGradesAny() {
   if (!gradingAny) return;
   try {
+    const rel = collectEdits('any', gradingAny.release);
     const r = await api('/api/grade', {
-      title: gradingAny.release.title,
+      title: rel.title,
       show_id: gradingAny.show_id,
       episode: gradingAny.episode,
       grades: gradingAny.grades,
+      release: rel,
     });
     el('any-grade-panel').innerHTML = '';
     el('any-title').value = '';
@@ -325,7 +336,12 @@ function renderGradingInto(panelId, r, prefix) {
     ${rel.attrs.map(a => `
       <div class="attr">
         <span class="attr-name">${escapeHtml(a.label)}</span>
-        <span class="attr-val ${a.present ? '' : 'absent'}">${escapeHtml(a.value || 'absent')}</span>
+        <span class="attr-val ${a.present ? '' : 'absent'}">
+          ${a.editable
+            ? `<input class="attr-edit" data-p="${prefix}" data-k="${a.key}" value="${escapeHtml(a.value)}" style="width:64px">`
+            : escapeHtml(a.value || 'absent')}
+          ${a.hint ? `<span class="attr-hint">${escapeHtml(a.hint)}</span>` : ''}
+        </span>
         <span class="grades">
           ${['good','acceptable','wrong'].map(g => `<button class="g-${g}" data-p="${prefix}" data-k="${a.key}" data-g="${g}" onclick="setGrade('${prefix}','${a.key}','${g}')">${g}</button>`).join('')}
         </span>
@@ -346,13 +362,27 @@ function setGrade(prefix, key, g) {
     b.classList.toggle('sel', b.dataset.g === g));
 }
 
+// Pull any edited attribute values into the payload. The episode is editable
+// because the parser cannot know the user's own numbering: a title reading 47
+// may be episode 7 of this season.
+function collectEdits(prefix, release) {
+  const out = JSON.parse(JSON.stringify(release));
+  document.querySelectorAll(`input.attr-edit[data-p="${prefix}"]`).forEach(inp => {
+    const a = out.attrs.find(x => x.key === inp.dataset.k);
+    if (a) a.value = inp.value.trim();
+  });
+  return out;
+}
+
 async function submitGrades() {
   if (!grading) return;
   try {
+    const rel = collectEdits('train', grading.release);
     const r = await api('/api/train/grade', {
-      title: grading.release.title,
+      title: rel.title,
       episode: grading.episode,
       grades: grading.grades,
+      release: rel,
     });
     state = r.state;
     el('grade-panel').innerHTML = '';
