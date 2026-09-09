@@ -62,6 +62,22 @@
     margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
   }
   .cand.resolved { opacity: 0.65; font-size: 12px; padding: 4px 0; border: none; }
+  .attr {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 0; border-bottom: 1px solid var(--line);
+  }
+  .attr-name { width: 90px; font-size: 12px; color: var(--dim); }
+  .attr-val { flex: 1; font-size: 13px; }
+  .attr-val.absent { color: var(--dim); font-style: italic; }
+  .grades { display: flex; gap: 4px; }
+  .grades button {
+    padding: 3px 9px; font-size: 11px; border-radius: 4px;
+    border: 1px solid var(--line); background: transparent; color: var(--dim);
+  }
+  .grades button.sel { color: #fff; border-color: currentColor; }
+  .grades button.g-good.sel { background: #1f4d33; }
+  .grades button.g-acceptable.sel { background: #4a4326; }
+  .grades button.g-wrong.sel { background: #4d1f1f; }
 </style>
 </head>
 <body>
@@ -76,12 +92,13 @@
   <div class="meta" id="train-meta"></div>
   <div id="candidates"></div>
   <div class="teach">
-    <div class="meta">Know a correct release? Enter it directly instead of answering questions.</div>
+    <div class="meta">Grade a release: paste a Nyaa link or a release title, then mark each part good / acceptable / wrong.</div>
     <div class="row">
-      <input id="teach-title" type="text" placeholder="[Group] Show - 07 [1080p]..." style="flex:1">
+      <input id="teach-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]" style="flex:1">
       <input id="teach-ep" type="number" min="1" style="width:64px" title="episode">
-      <button class="ghost" onclick="teach()">Teach</button>
+      <button class="ghost" onclick="inspect()">Inspect</button>
     </div>
+    <div id="grade-panel"></div>
   </div>
   <div class="row">
     <button onclick="commit()">Finish &amp; save</button>
@@ -238,14 +255,58 @@ function renderTrain() {
     : '';
 }
 
-async function teach() {
-  const title = el('teach-title').value.trim();
-  if (!title) { banner('Paste a release title first.', true); return; }
+let grading = null;
+
+async function inspect() {
+  const input = el('teach-title').value.trim();
+  if (!input) { banner('Paste a Nyaa link or release title first.', true); return; }
   const ep = parseInt(el('teach-ep').value, 10) || state.episode;
   try {
-    state = await api('/api/train/teach', { title, episode: ep });
+    const r = await api('/api/train/inspect', { input, episode: ep });
+    grading = { release: r.release, episode: r.episode, grades: {} };
+    renderGrading(r);
+  } catch (e) { banner(e.message, true); }
+}
+
+function renderGrading(r) {
+  const rel = r.release;
+  el('grade-panel').innerHTML = `
+    <div class="meta" style="margin-top:8px">${escapeHtml(rel.title)}</div>
+    ${r.matched ? '' : `<div class="meta">not matched: ${escapeHtml(r.why)}</div>`}
+    ${rel.attrs.map(a => `
+      <div class="attr">
+        <span class="attr-name">${escapeHtml(a.label)}</span>
+        <span class="attr-val ${a.present ? '' : 'absent'}">${escapeHtml(a.value || 'absent')}</span>
+        <span class="grades">
+          ${['good','acceptable','wrong'].map(g => `<button class="g-${g}" data-k="${a.key}" data-g="${g}" onclick="setGrade('${a.key}','${g}')">${g}</button>`).join('')}
+        </span>
+      </div>`).join('')}
+    <div class="row">
+      <button onclick="submitGrades()">Apply grades</button>
+      <button class="ghost" onclick="el('grade-panel').innerHTML=''; grading=null;">Discard</button>
+    </div>`;
+}
+
+function setGrade(key, g) {
+  if (!grading) return;
+  grading.grades[key] = g;
+  document.querySelectorAll(`[data-k="${key}"]`).forEach(b =>
+    b.classList.toggle('sel', b.dataset.g === g));
+}
+
+async function submitGrades() {
+  if (!grading) return;
+  try {
+    const r = await api('/api/train/grade', {
+      title: grading.release.title,
+      episode: grading.episode,
+      grades: grading.grades,
+    });
+    state = r.state;
+    el('grade-panel').innerHTML = '';
     el('teach-title').value = '';
-    banner(`Learned: that release is ep ${ep}.`);
+    grading = null;
+    banner(r.notes.length ? 'Learned: ' + r.notes.join('; ') : 'No changes.');
     renderTrain();
   } catch (e) { banner(e.message, true); }
 }

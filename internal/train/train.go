@@ -68,6 +68,10 @@ type Session struct {
 	Asked    map[string]bool
 	Accepted int
 	Rejected int
+
+	// pending holds filters/preferences learned this session, written on Commit
+	// so that cancelling discards them.
+	pending []pendingWrite
 }
 
 // NewSession starts training for a show at a given episode.
@@ -269,6 +273,16 @@ func (s *Session) Reject(c Candidate, reason Reason) error {
 	return nil
 }
 
+// Show exposes the working model so callers can match against it mid-session.
+func (s *Session) Show() *match.MemShow { return s.m }
+
+// MarkAsked records a release as seen, so it is not proposed again.
+func (s *Session) MarkAsked(title string) {
+	if title != "" {
+		s.Asked[title] = true
+	}
+}
+
 // Offsets returns the current per-group offsets, for display during training.
 func (s *Session) Offsets() map[string]int {
 	out := make(map[string]int, len(s.m.Offsets))
@@ -290,7 +304,7 @@ func (s *Session) Commit() error {
 			return err
 		}
 	}
-	return nil
+	return s.flushPending()
 }
 
 func (s *Session) addAliases(title string) {

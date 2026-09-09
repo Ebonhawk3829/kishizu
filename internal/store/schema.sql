@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS filter (
     value   TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_filter_show ON filter(show_id);
+-- One rule per (show, kind, op, value). Rejecting the same thing twice must not
+-- pile up duplicate rows; it should be a no-op.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_filter ON filter(show_id, kind, op, value);
 
 -- Soft ranking. Lower rank sorts better.
 CREATE TABLE IF NOT EXISTS preference (
@@ -60,6 +63,8 @@ CREATE TABLE IF NOT EXISTS preference (
     rank    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_preference_show ON preference(show_id);
+-- One preference per (show, kind, value); re-grading updates the rank in place.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_preference ON preference(show_id, kind, value);
 
 CREATE TABLE IF NOT EXISTS episode (
     show_id       INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
