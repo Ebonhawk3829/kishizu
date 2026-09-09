@@ -115,13 +115,17 @@ func TestProposeRanksUncertaintyFirst(t *testing.T) {
 }
 
 // TestProposeSkipsAsked: the same release must not be proposed twice.
+//
+// Uses an UNSEEN group so the candidate is genuinely uncertain. A release from
+// a group whose offset is already known is no longer proposed at all (see
+// TestProposeSkipsConfident), so it would not exercise the asked-set here.
 func TestProposeSkipsAsked(t *testing.T) {
 	st := testStore(t)
 	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
 	s, _ := NewSession(st, sh, 9)
 	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
 
-	it := item("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL AAC2.0 H.264")
+	it := item("[SomeOtherGroup] Tomb Raider King - 09 (WEB 1080p)")
 	first := s.Propose([]nyaa.Item{it}, 1)
 	if len(first) != 1 {
 		t.Fatalf("first propose got %d, want 1", len(first))
@@ -131,6 +135,66 @@ func TestProposeSkipsAsked(t *testing.T) {
 	}
 	if again := s.Propose([]nyaa.Item{it}, 1); len(again) != 0 {
 		t.Errorf("asked candidate proposed again: %+v", again)
+	}
+}
+
+// TestProposeSkipsConfident: once a group's offset is known, releases from that
+// group are resolved silently instead of being asked about.
+//
+// Regression: the tool used to ask "is this ep 7?" about releases it had already
+// resolved as ep 9, which is asking the user to confirm something the model
+// claims to know is false.
+func TestProposeSkipsConfident(t *testing.T) {
+	st := testStore(t)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	s, _ := NewSession(st, sh, 9)
+	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
+
+	// Same group, a different episode: the known offset resolves it to 10.
+	it := item("[ToonsHub] Tomb Raider King S01E10 1080p CR WEB-DL")
+	if got := s.Propose([]nyaa.Item{it}, 3); len(got) != 0 {
+		t.Errorf("confident candidate was proposed: %+v", got)
+	}
+	// It should instead show up as resolved, so the learning is visible.
+	res := s.Resolved([]nyaa.Item{it}, 5)
+	if len(res) != 1 {
+		t.Fatalf("resolved got %d, want 1", len(res))
+	}
+	if res[0].Episode != 10 {
+		t.Errorf("resolved episode = %d, want 10", res[0].Episode)
+	}
+}
+
+// TestTeachRecordsManualExample: the user can supply a known-good release
+// directly, without answering questions until the model converges.
+func TestTeachRecordsManualExample(t *testing.T) {
+	st := testStore(t)
+	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War - The Calamity", []string{
+		"BLEACH Thousand Year Blood War",
+	}, 30)
+	s, _ := NewSession(st, sh, 7)
+
+	// Absolute numbering: raw 47 is episode 7, so the offset is 40.
+	if err := s.Teach("[SubsPlease] BLEACH: Sennen Kessen-hen - 47 (1080p) [ABCD1234]", 7); err != nil {
+		t.Fatalf("Teach: %v", err)
+	}
+	if got := s.m.Offsets["SubsPlease"]; got != 40 {
+		t.Errorf("SubsPlease offset = %d, want 40", got)
+	}
+}
+
+// TestTeachRejectsUnreadableTitle: a title with no episode number teaches
+// nothing, and must say so rather than silently recording a bogus offset.
+func TestTeachRejectsUnreadableTitle(t *testing.T) {
+	st := testStore(t)
+	sh := newShow(t, st, "Tomb Raider King", nil, 12)
+	s, _ := NewSession(st, sh, 9)
+
+	if err := s.Teach("[ToonsHub] Tomb Raider King 1080p CR WEB-DL", 9); err == nil {
+		t.Error("expected an error for a title with no episode number")
+	}
+	if len(s.m.Offsets) != 0 {
+		t.Errorf("offsets recorded from unreadable title: %v", s.m.Offsets)
 	}
 }
 

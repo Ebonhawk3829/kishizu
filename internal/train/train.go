@@ -111,7 +111,39 @@ func (s *Session) Seed(title string) error {
 	return nil
 }
 
+// Teach records a known-good example supplied by the user: this release title
+// is this episode. It is the same learning step as Seed, but available at any
+// point in the session rather than only at the start.
+//
+// The user often knows a correct release that the feed ranking buried, or wants
+// to correct a wrong offset directly instead of answering questions until the
+// model happens to converge.
+func (s *Session) Teach(title string, ep int) error {
+	r := release.Parse(title)
+	raw := r.RawEpisode()
+	if raw == 0 {
+		return fmt.Errorf("cannot read an episode number from %q", title)
+	}
+	if ep < 1 {
+		return fmt.Errorf("episode must be >= 1, got %d", ep)
+	}
+	group := r.Group
+	if group == "" {
+		group = "(none)"
+	}
+	s.m.Offsets[group] = raw - ep
+	s.m.Defaults = distinct(s.m.Offsets)
+	s.addAliases(title)
+	s.Accepted++
+	return nil
+}
+
 // Propose returns the candidates the tool is least certain about.
+//
+// Candidates the model can already resolve confidently are NOT proposed. Asking
+// "is this ep 7?" about a release the model reads as ep 9 is asking the user to
+// confirm something the tool claims to know is false, which is both annoying and
+// a waste of the only scarce resource here: the user's attention.
 func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 	var out []Candidate
 	for _, it := range items {
@@ -125,6 +157,11 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 
 		res := match.Match(s.m, it.Title)
 		if !res.Matched {
+			continue
+		}
+
+		// Already resolved from a known group offset: apply it silently.
+		if res.Confident {
 			continue
 		}
 
@@ -147,6 +184,31 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 		if out[i].Uncertainty != out[j].Uncertainty {
 			return out[i].Uncertainty > out[j].Uncertainty
 		}
+		return out[i].Item.Seeders > out[j].Item.Seeders
+	})
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
+// Resolved returns releases the model matched on its own from a known group
+// offset. These are deliberately excluded from Propose; they are surfaced
+// separately so the user can see the model applying what it has learned.
+func (s *Session) Resolved(items []nyaa.Item, n int) []Candidate {
+	var out []Candidate
+	for _, it := range items {
+		score := release.TitleScore(s.m.Aliases(), it.Title)
+		if score < match.Threshold {
+			continue
+		}
+		res := match.Match(s.m, it.Title)
+		if !res.Matched || !res.Confident {
+			continue
+		}
+		out = append(out, Candidate{Item: it, Episode: res.Episode, Why: res.Reason})
+	}
+	sort.Slice(out, func(i, j int) bool {
 		return out[i].Item.Seeders > out[j].Item.Seeders
 	})
 	if len(out) > n {

@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/train/answer", s.handleTrainAnswer)
 	mux.HandleFunc("POST /api/train/commit", s.handleTrainCommit)
 	mux.HandleFunc("POST /api/train/reset", s.handleTrainReset)
+	mux.HandleFunc("POST /api/train/teach", s.handleTrainTeach)
 
 	return mux
 }
@@ -221,6 +222,10 @@ type trainStateJSON struct {
 	Rejected   int             `json:"rejected"`
 	Offsets    map[string]int  `json:"offsets"`
 	Candidates []candidateJSON `json:"candidates"`
+	// Resolved are releases the model matched on its own from a known group
+	// offset. Shown so the user can see the model is applying what it learned,
+	// instead of wondering why some releases never get asked about.
+	Resolved []candidateJSON `json:"resolved"`
 }
 
 type candidateJSON struct {
@@ -249,21 +254,28 @@ func (s *Server) trainState() trainStateJSON {
 	}
 
 	for i, c := range session.sess.Propose(session.items, 3) {
-		r := release.Parse(c.Item.Title)
-		st.Candidates = append(st.Candidates, candidateJSON{
-			Index:       i,
-			Title:       c.Item.Title,
-			Episode:     c.Episode,
-			Seeders:     c.Item.Seeders,
-			Size:        c.Item.Size,
-			Resolution:  r.Resolution,
-			Codec:       r.Codec,
-			Group:       r.Group,
-			Why:         c.Why,
-			Uncertainty: c.Uncertainty,
-		})
+		st.Candidates = append(st.Candidates, s.candidateJSON(i, c))
+	}
+	for i, c := range session.sess.Resolved(session.items, 5) {
+		st.Resolved = append(st.Resolved, s.candidateJSON(i, c))
 	}
 	return st
+}
+
+func (s *Server) candidateJSON(i int, c train.Candidate) candidateJSON {
+	r := release.Parse(c.Item.Title)
+	return candidateJSON{
+		Index:       i,
+		Title:       c.Item.Title,
+		Episode:     c.Episode,
+		Seeders:     c.Item.Seeders,
+		Size:        c.Item.Size,
+		Resolution:  r.Resolution,
+		Codec:       r.Codec,
+		Group:       r.Group,
+		Why:         c.Why,
+		Uncertainty: c.Uncertainty,
+	}
 }
 
 func (s *Server) handleTrainState(w http.ResponseWriter, r *http.Request) {
@@ -360,6 +372,35 @@ func (s *Server) handleTrainReset(w http.ResponseWriter, r *http.Request) {
 		session.active = false
 	}
 	writeJSON(w, map[string]any{"reset": true, "show_id": req.ShowID})
+}
+
+// handleTrainTeach records a known-good example the user typed in directly.
+func (s *Server) handleTrainTeach(w http.ResponseWriter, r *http.Request) {
+	if !session.active {
+		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
+		return
+	}
+	var req struct {
+		Title   string `json:"title"`
+		Episode int    `json:"episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("title is required"))
+		return
+	}
+	if req.Episode == 0 {
+		req.Episode = session.ep
+	}
+	if err := session.sess.Teach(req.Title, req.Episode); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, s.trainState())
 }
 
 type verifiedJSON struct {
