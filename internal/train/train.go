@@ -72,6 +72,8 @@ type Session struct {
 	// pending holds filters/preferences learned this session, written on Commit
 	// so that cancelling discards them.
 	pending []pendingWrite
+	// retracted are rules this session contradicted, deleted on Commit.
+	retracted []store.Filter
 }
 
 // NewSession starts training for a show at a given episode.
@@ -303,6 +305,9 @@ func (s *Session) Commit() error {
 		if err := s.st.AddAlias(s.show.ID, a); err != nil {
 			return err
 		}
+	}
+	if err := s.flushRetracted(); err != nil {
+		return err
 	}
 	return s.flushPending()
 }

@@ -368,6 +368,14 @@ func (s *Store) AddFilter(showID int64, f Filter) error {
 	return err
 }
 
+// DeleteFilter removes a rule, so a later grade can retract an earlier one.
+func (s *Store) DeleteFilter(showID int64, f Filter) error {
+	_, err := s.db.Exec(
+		`DELETE FROM filter WHERE show_id = ? AND kind = ? AND op = ? AND value = ?`,
+		showID, f.Kind, f.Op, f.Value)
+	return err
+}
+
 func (s *Store) Filters(showID int64) ([]Filter, error) {
 	rows, err := s.db.Query(`SELECT kind, op, value FROM filter WHERE show_id = ? ORDER BY id`, showID)
 	if err != nil {

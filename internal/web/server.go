@@ -58,7 +58,126 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/train/inspect", s.handleTrainInspect)
 	mux.HandleFunc("POST /api/train/grade", s.handleTrainGrade)
 
+	// Session-free grading: grade a release without starting a training run.
+	mux.HandleFunc("POST /api/inspect", s.handleInspect)
+	mux.HandleFunc("POST /api/grade", s.handleGrade)
+
 	return mux
+}
+
+// resolveTitle turns a pasted link or title into a release title.
+func resolveTitle(input string) (string, error) {
+	if !nyaa.IsLink(input) {
+		return input, nil
+	}
+	return nyaa.ResolveLink(nil, input)
+}
+
+// handleInspect breaks a release into gradable attributes for a given show,
+// without needing an active training session.
+func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Input   string `json:"input"`
+		ShowID  int64  `json:"show_id"`
+		Episode int    `json:"episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	input := strings.TrimSpace(req.Input)
+	if input == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("paste a Nyaa link or release title"))
+		return
+	}
+	title, err := resolveTitle(input)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that link: %w", err))
+		return
+	}
+
+	sh, err := s.st.GetShow(req.ShowID)
+	if err != nil || sh == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ShowID))
+		return
+	}
+
+	m, err := s.st.NewMatcher(sh)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	res := match.Match(m, title)
+	resolved := 0
+	if res.Matched {
+		resolved = res.Episode
+	}
+	writeJSON(w, map[string]any{
+		"release": train.Inspect(title, resolved),
+		"episode": req.Episode,
+		"matched": res.Matched,
+		"why":     res.Reason,
+	})
+}
+
+// handleGrade applies per-attribute verdicts straight to the store, so a
+// release can be graded without a training session in flight.
+func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title   string            `json:"title"`
+		ShowID  int64             `json:"show_id"`
+		Episode int               `json:"episode"`
+		Grades  map[string]string `json:"grades"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	sh, err := s.st.GetShow(req.ShowID)
+	if err != nil || sh == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ShowID))
+		return
+	}
+
+	grades := make(map[train.Attribute]train.Grade, len(req.Grades))
+	for k, v := range req.Grades {
+		g, err := train.ParseGrade(v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		grades[train.Attribute(k)] = g
+	}
+
+	// A short-lived session gives us the same learning rules as the interactive
+	// flow, without requiring one to be open.
+	sess, err := train.NewSession(s.st, sh, req.Episode)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	m, err := s.st.NewMatcher(sh)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	res := match.Match(m, req.Title)
+	resolved := 0
+	if res.Matched {
+		resolved = res.Episode
+	}
+	g := train.Inspect(req.Title, resolved)
+
+	notes, err := sess.ApplyGrades(g, grades, req.Episode)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := sess.Commit(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]any{"notes": notes})
 }
 
 // ListenAndServe starts the server.
