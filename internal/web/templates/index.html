@@ -87,6 +87,20 @@
 
 <div id="banner" class="banner hidden"></div>
 
+<div class="card" id="panel-grade-any">
+  <h2>Grade a release</h2>
+  <div class="meta">Paste a Nyaa link or release title. Pick the show and episode, then mark each part good / acceptable / wrong.</div>
+  <div class="row">
+    <select id="any-show" style="flex:1"></select>
+    <input id="any-ep" type="number" min="1" style="width:64px" title="episode">
+  </div>
+  <div class="row">
+    <input id="any-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]" style="flex:1">
+    <button onclick="inspectAny()">Inspect</button>
+  </div>
+  <div id="any-grade-panel"></div>
+</div>
+
 <div id="panel-train" class="card hidden" style="margin-bottom:20px">
   <h2 id="train-title">Training</h2>
   <div class="meta" id="train-meta"></div>
@@ -133,6 +147,8 @@ async function api(path, body) {
 
 async function loadShows() {
   const shows = await api('/shows');
+  el('any-show').innerHTML = shows.map(s =>
+    `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
   el('shows').innerHTML = shows.map(s => `
     <div class="card">
       <h2>${escapeHtml(s.name)}</h2>
@@ -256,6 +272,38 @@ function renderTrain() {
 }
 
 let grading = null;
+let gradingAny = null;
+
+// Standalone grading: works without an active training session, so a release
+// can be graded the moment you see it rather than only mid-session.
+async function inspectAny() {
+  const input = el('any-title').value.trim();
+  if (!input) { banner('Paste a Nyaa link or release title first.', true); return; }
+  const showId = parseInt(el('any-show').value, 10);
+  const ep = parseInt(el('any-ep').value, 10) || 1;
+  try {
+    const r = await api('/api/inspect', { input, show_id: showId, episode: ep });
+    gradingAny = { release: r.release, episode: ep, show_id: showId, grades: {} };
+    renderGradingInto('any-grade-panel', r, 'any');
+  } catch (e) { banner(e.message, true); }
+}
+
+async function submitGradesAny() {
+  if (!gradingAny) return;
+  try {
+    const r = await api('/api/grade', {
+      title: gradingAny.release.title,
+      show_id: gradingAny.show_id,
+      episode: gradingAny.episode,
+      grades: gradingAny.grades,
+    });
+    el('any-grade-panel').innerHTML = '';
+    el('any-title').value = '';
+    gradingAny = null;
+    banner(r.notes.length ? 'Learned: ' + r.notes.join('; ') : 'No changes.');
+    loadShows();
+  } catch (e) { banner(e.message, true); }
+}
 
 async function inspect() {
   const input = el('teach-title').value.trim();
@@ -268,9 +316,10 @@ async function inspect() {
   } catch (e) { banner(e.message, true); }
 }
 
-function renderGrading(r) {
+// prefix keeps the two panels' buttons from selecting each other's elements.
+function renderGradingInto(panelId, r, prefix) {
   const rel = r.release;
-  el('grade-panel').innerHTML = `
+  el(panelId).innerHTML = `
     <div class="meta" style="margin-top:8px">${escapeHtml(rel.title)}</div>
     ${r.matched ? '' : `<div class="meta">not matched: ${escapeHtml(r.why)}</div>`}
     ${rel.attrs.map(a => `
@@ -278,19 +327,22 @@ function renderGrading(r) {
         <span class="attr-name">${escapeHtml(a.label)}</span>
         <span class="attr-val ${a.present ? '' : 'absent'}">${escapeHtml(a.value || 'absent')}</span>
         <span class="grades">
-          ${['good','acceptable','wrong'].map(g => `<button class="g-${g}" data-k="${a.key}" data-g="${g}" onclick="setGrade('${a.key}','${g}')">${g}</button>`).join('')}
+          ${['good','acceptable','wrong'].map(g => `<button class="g-${g}" data-p="${prefix}" data-k="${a.key}" data-g="${g}" onclick="setGrade('${prefix}','${a.key}','${g}')">${g}</button>`).join('')}
         </span>
       </div>`).join('')}
     <div class="row">
-      <button onclick="submitGrades()">Apply grades</button>
-      <button class="ghost" onclick="el('grade-panel').innerHTML=''; grading=null;">Discard</button>
+      <button onclick="${prefix === 'any' ? 'submitGradesAny()' : 'submitGrades()'}">Apply grades</button>
+      <button class="ghost" onclick="el('${panelId}').innerHTML=''; ${prefix === 'any' ? 'gradingAny' : 'grading'}=null;">Discard</button>
     </div>`;
 }
 
-function setGrade(key, g) {
-  if (!grading) return;
-  grading.grades[key] = g;
-  document.querySelectorAll(`[data-k="${key}"]`).forEach(b =>
+function renderGrading(r) { renderGradingInto('grade-panel', r, 'train'); }
+
+function setGrade(prefix, key, g) {
+  const target = prefix === 'any' ? gradingAny : grading;
+  if (!target) return;
+  target.grades[key] = g;
+  document.querySelectorAll(`[data-p="${prefix}"][data-k="${key}"]`).forEach(b =>
     b.classList.toggle('sel', b.dataset.g === g));
 }
 

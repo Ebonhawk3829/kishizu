@@ -144,12 +144,26 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 				// An acceptable resolution sets the FLOOR: anything below this
 				// is not wanted. Resolution is a floor, not a ladder.
 				if rank, ok := resolutionRank[a.Value]; ok {
+					// Accepting a resolution retracts any earlier exclusion of
+					// it. Otherwise grading 2160p wrong and later acceptable
+					// leaves both "exclude 2160p" and "min 2160p" standing,
+					// which contradict each other.
+					s.retract("filter", "resolution", "exclude", a.Value)
 					s.pending = append(s.pending, pendingWrite{
 						kind: "filter", k: "resolution", op: "min", v: a.Value, rank: rank,
 					})
 					notes = append(notes, fmt.Sprintf("resolution floor %s", a.Value))
 				}
 			case GradeWrong:
+				// Excluding a resolution retracts a floor at or below it, since
+				// "min 2160p" and "exclude 2160p" cannot both hold.
+				if rank, ok := resolutionRank[a.Value]; ok {
+					for v, r := range resolutionRank {
+						if r <= rank {
+							s.retract("filter", "resolution", "min", v)
+						}
+					}
+				}
 				s.pending = append(s.pending, pendingWrite{
 					kind: "filter", k: "resolution", op: "exclude", v: a.Value,
 				})
@@ -243,6 +257,24 @@ type pendingWrite struct {
 	rank int
 }
 
+// retract drops a pending write, and deletes any matching row already in the
+// database. Both are needed: within one session the rule may still be pending,
+// but across sessions it will already have been committed.
+func (s *Session) retract(kind, k, op, v string) {
+	kept := s.pending[:0]
+	for _, p := range s.pending {
+		if p.kind == kind && p.k == k && p.op == op && p.v == v {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	s.pending = kept
+
+	if kind == "filter" {
+		s.retracted = append(s.retracted, store.Filter{Kind: k, Op: op, Value: v})
+	}
+}
+
 func groupOf(title string) string {
 	g := release.Parse(title).Group
 	if g == "" {
@@ -281,6 +313,17 @@ func (s *Session) flushPending() error {
 		}
 	}
 	s.pending = nil
+	return nil
+}
+
+// flushRetracted deletes rules this session contradicted.
+func (s *Session) flushRetracted() error {
+	for _, f := range s.retracted {
+		if err := s.st.DeleteFilter(s.show.ID, f); err != nil {
+			return err
+		}
+	}
+	s.retracted = nil
 	return nil
 }
 
