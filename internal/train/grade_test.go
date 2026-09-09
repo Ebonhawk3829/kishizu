@@ -99,13 +99,59 @@ func TestGradeEpisodeGoodTeachesOffset(t *testing.T) {
 	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War", []string{"BLEACH Thousand Year Blood War"}, 30)
 	s, _ := NewSession(st, sh, 7)
 
-	// Raw 47 is episode 7, so the offset is 40.
+	// Raw 47 is episode 7, so the offset is 40. The episode attribute is
+	// editable and defaults to the raw number, so the user's correction to 7 is
+	// what must drive the offset.
 	g := Inspect("[SubsPlease] BLEACH: Sennen Kessen-hen - 47 (1080p)", 0)
+	if got := attrValue(g, AttrEpisode); got != "47" {
+		t.Fatalf("episode value = %q, want \"47\" (raw, before correction)", got)
+	}
+	setAttrValue(&g, AttrEpisode, "7")
+
 	if _, err := s.ApplyGrades(g, map[Attribute]Grade{AttrEpisode: GradeGood}, 7); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.m.Offsets["SubsPlease"]; got != 40 {
 		t.Errorf("SubsPlease offset = %d, want 40", got)
+	}
+}
+
+// TestEpisodeHintDistinguishesRawFromResolved: the hint must say what the title
+// literally says, so "47" is never mistaken for the user's own episode number.
+func TestEpisodeHintDistinguishesRawFromResolved(t *testing.T) {
+	g := Inspect("[SubsPlease] BLEACH: Sennen Kessen-hen - 47 (1080p)", 0)
+	var a AttrValue
+	for _, x := range g.Attrs {
+		if x.Key == AttrEpisode {
+			a = x
+		}
+	}
+	if !a.Editable {
+		t.Error("episode attribute must be editable")
+	}
+	if !strings.Contains(a.Hint, "47") {
+		t.Errorf("hint = %q, want it to mention the raw number 47", a.Hint)
+	}
+	if !strings.Contains(a.Hint, "really is") {
+		t.Errorf("hint = %q, want it to prompt for the real episode", a.Hint)
+	}
+}
+
+// TestEpisodeHintWhenOffsetApplied: once an offset is known the hint says so,
+// rather than repeating the raw number as if it were unresolved.
+func TestEpisodeHintWhenOffsetApplied(t *testing.T) {
+	g := Inspect("[SubsPlease] BLEACH: Sennen Kessen-hen - 47 (1080p)", 7)
+	var a AttrValue
+	for _, x := range g.Attrs {
+		if x.Key == AttrEpisode {
+			a = x
+		}
+	}
+	if a.Value != "7" {
+		t.Errorf("value = %q, want \"7\" (the user's episode)", a.Value)
+	}
+	if !strings.Contains(a.Hint, "47") || !strings.Contains(a.Hint, "offset") {
+		t.Errorf("hint = %q, want it to show raw 47 and note the offset", a.Hint)
 	}
 }
 
@@ -242,6 +288,16 @@ func attrValue(g GradedRelease, k Attribute) string {
 		}
 	}
 	return ""
+}
+
+// setAttrValue simulates the user correcting an editable attribute in the UI.
+func setAttrValue(g *GradedRelease, k Attribute, v string) {
+	for i := range g.Attrs {
+		if g.Attrs[i].Key == k {
+			g.Attrs[i].Value = v
+			return
+		}
+	}
 }
 
 // TestFlushPendingDeduplicates: grading the same attribute twice keeps the

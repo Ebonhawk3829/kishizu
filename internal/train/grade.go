@@ -43,6 +43,13 @@ type AttrValue struct {
 	Key   Attribute `json:"key"`
 	Label string    `json:"label"` // human-readable name
 	Value string    `json:"value"` // parsed value, "" when absent
+	// Hint is read-only context shown beside the value. Used for the episode,
+	// where the number in the title and the number in the user's list differ.
+	Hint string `json:"hint"`
+	// Editable marks a value the user can correct before grading. Only the
+	// episode is editable: it is the one attribute the parser can get right by
+	// its own rules and still be wrong for the user's list.
+	Editable bool `json:"editable"`
 	// Present is false when the title did not contain this attribute at all.
 	// Absent attributes are still shown, because "this release has no codec
 	// tag" is itself worth grading.
@@ -71,7 +78,14 @@ func Inspect(title string, resolvedEp int) GradedRelease {
 		RawEpisode: r.RawEpisode(),
 	}
 	g.Attrs = []AttrValue{
-		{Key: AttrEpisode, Label: "Episode", Value: episodeLabel(resolvedEp, r.RawEpisode()), Present: r.RawEpisode() != 0},
+		{
+			Key:      AttrEpisode,
+			Label:    "Episode",
+			Value:    episodeValue(resolvedEp, r.RawEpisode()),
+			Hint:     episodeHint(resolvedEp, r.RawEpisode()),
+			Editable: true,
+			Present:  r.RawEpisode() != 0,
+		},
 		{Key: AttrGroup, Label: "Group", Value: r.Group, Present: r.Group != ""},
 		{Key: AttrResolution, Label: "Resolution", Value: r.Resolution, Present: r.Resolution != ""},
 		{Key: AttrCodec, Label: "Codec", Value: r.Codec, Present: r.Codec != ""},
@@ -82,17 +96,33 @@ func Inspect(title string, resolvedEp int) GradedRelease {
 	return g
 }
 
-func episodeLabel(resolved, raw int) string {
+// episodeValue is the episode number in the USER's list, which is what a grade
+// refers to. It is editable because the parser cannot know it: a title reading
+// 47 may be episode 7 of this season.
+func episodeValue(resolved, raw int) string {
+	if resolved > 0 {
+		return strconv.Itoa(resolved)
+	}
+	if raw > 0 {
+		return strconv.Itoa(raw)
+	}
+	return ""
+}
+
+// episodeHint states what the title literally says, so the two numbers are
+// never confused. "47 (unresolved)" left it ambiguous whether the question was
+// about the group's number or the user's own numbering.
+func episodeHint(resolved, raw int) string {
 	if raw == 0 {
-		return "unreadable"
+		return "no number in title"
 	}
 	if resolved == 0 {
-		return fmt.Sprintf("%d (unresolved)", raw)
+		return fmt.Sprintf("title says %d — set the episode it really is", raw)
 	}
 	if resolved == raw {
-		return fmt.Sprintf("%d", raw)
+		return fmt.Sprintf("title says %d", raw)
 	}
-	return fmt.Sprintf("%d (raw %d)", resolved, raw)
+	return fmt.Sprintf("title says %d, offset applied", raw)
 }
 
 // ApplyGrades turns per-attribute verdicts into matcher updates, filters and
@@ -102,6 +132,19 @@ func episodeLabel(resolved, raw int) string {
 // Returns a summary of what changed, for display.
 func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep int) ([]string, error) {
 	var notes []string
+
+	// The episode attribute is editable, so a corrected value there wins over
+	// the caller's default. This is the BLEACH case: the title says 47, the user
+	// corrects it to 7, and the offset must be derived from 7.
+	for _, a := range g.Attrs {
+		if a.Key != AttrEpisode {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimSpace(a.Value)); err == nil && n > 0 {
+			ep = n
+		}
+		break
+	}
 
 	for _, a := range g.Attrs {
 		grade, ok := grades[a.Key]

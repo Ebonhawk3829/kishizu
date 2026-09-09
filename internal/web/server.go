@@ -124,10 +124,11 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 // release can be graded without a training session in flight.
 func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Title   string            `json:"title"`
-		ShowID  int64             `json:"show_id"`
-		Episode int               `json:"episode"`
-		Grades  map[string]string `json:"grades"`
+		Title   string               `json:"title"`
+		ShowID  int64                `json:"show_id"`
+		Episode int                  `json:"episode"`
+		Grades  map[string]string    `json:"grades"`
+		Release *train.GradedRelease `json:"release"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -167,6 +168,9 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 		resolved = res.Episode
 	}
 	g := train.Inspect(req.Title, resolved)
+	if req.Release != nil {
+		g = *req.Release
+	}
 
 	notes, err := sess.ApplyGrades(g, grades, req.Episode)
 	if err != nil {
@@ -579,9 +583,10 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Title   string            `json:"title"`
-		Episode int               `json:"episode"`
-		Grades  map[string]string `json:"grades"`
+		Title   string               `json:"title"`
+		Episode int                  `json:"episode"`
+		Grades  map[string]string    `json:"grades"`
+		Release *train.GradedRelease `json:"release"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -598,6 +603,9 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 		resolved = res.Episode
 	}
 	g := train.Inspect(req.Title, resolved)
+	if req.Release != nil {
+		g = *req.Release
+	}
 
 	grades := make(map[train.Attribute]train.Grade, len(req.Grades))
 	for k, v := range req.Grades {
