@@ -77,6 +77,10 @@ func Inspect(title string, resolvedEp int) GradedRelease {
 		Episode:    resolvedEp,
 		RawEpisode: r.RawEpisode(),
 	}
+	// Every attribute is editable. The parser is deliberately dumb, so it will
+	// always meet titles it reads wrongly — a group at the end instead of in
+	// brackets, a codec written unusually. Letting the user correct the value
+	// is cheaper and more reliable than widening the regexes forever.
 	g.Attrs = []AttrValue{
 		{
 			Key:      AttrEpisode,
@@ -86,12 +90,12 @@ func Inspect(title string, resolvedEp int) GradedRelease {
 			Editable: true,
 			Present:  r.RawEpisode() != 0,
 		},
-		{Key: AttrGroup, Label: "Group", Value: r.Group, Present: r.Group != ""},
-		{Key: AttrResolution, Label: "Resolution", Value: r.Resolution, Present: r.Resolution != ""},
-		{Key: AttrCodec, Label: "Codec", Value: r.Codec, Present: r.Codec != ""},
-		{Key: AttrSource, Label: "Source", Value: r.Source, Present: r.Source != ""},
-		{Key: AttrBatch, Label: "Batch", Value: strconv.FormatBool(r.IsBatch), Present: r.IsBatch},
-		{Key: AttrUncensored, Label: "Uncensored", Value: strconv.FormatBool(r.IsUncensored), Present: r.IsUncensored},
+		{Key: AttrGroup, Label: "Group", Value: r.Group, Editable: true, Present: r.Group != ""},
+		{Key: AttrResolution, Label: "Resolution", Value: r.Resolution, Editable: true, Present: r.Resolution != ""},
+		{Key: AttrCodec, Label: "Codec", Value: r.Codec, Editable: true, Present: r.Codec != ""},
+		{Key: AttrSource, Label: "Source", Value: r.Source, Editable: true, Present: r.Source != ""},
+		{Key: AttrBatch, Label: "Batch", Value: strconv.FormatBool(r.IsBatch), Editable: true, Present: r.IsBatch},
+		{Key: AttrUncensored, Label: "Uncensored", Value: strconv.FormatBool(r.IsUncensored), Editable: true, Present: r.IsUncensored},
 	}
 	return g
 }
@@ -146,6 +150,17 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 		break
 	}
 
+	// A corrected group must survive Teach, which re-parses the title and would
+	// otherwise recover the parser's (wrong) group. This is the VARYG case: the
+	// group sits at the end after a hyphen, and the user has to supply it.
+	correctedGroup := ""
+	for _, a := range g.Attrs {
+		if a.Key == AttrGroup {
+			correctedGroup = strings.TrimSpace(a.Value)
+			break
+		}
+	}
+
 	for _, a := range g.Attrs {
 		grade, ok := grades[a.Key]
 		if !ok || grade == GradeUnknown {
@@ -157,10 +172,19 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 			// the number is not this episode, which we cannot learn an offset
 			// from — the user should supply the right one instead.
 			if grade == GradeGood && g.RawEpisode != 0 {
-				if err := s.Teach(g.Title, ep); err != nil {
+				// Teach derives the group by parsing. When the user corrected it,
+				// apply theirs instead: otherwise the offset lands on the
+				// parser's group (often "(none)"), which would then match every
+				// release with no group at all.
+				if correctedGroup != "" {
+					s.m.Offsets[correctedGroup] = g.RawEpisode - ep
+					s.m.Defaults = distinct(s.m.Offsets)
+					s.addAliases(g.Title)
+					s.Accepted++
+				} else if err := s.Teach(g.Title, ep); err != nil {
 					return notes, err
 				}
-				notes = append(notes, fmt.Sprintf("learned offset for %q", groupOf(g.Title)))
+				notes = append(notes, fmt.Sprintf("learned offset for %q", effectiveGroup(g.Title, correctedGroup)))
 			}
 		case AttrGroup:
 			if a.Value == "" {
@@ -324,6 +348,14 @@ func groupOf(title string) string {
 		return "(none)"
 	}
 	return g
+}
+
+// effectiveGroup prefers a user-corrected group over the parsed one.
+func effectiveGroup(title, corrected string) string {
+	if corrected != "" {
+		return corrected
+	}
+	return groupOf(title)
 }
 
 // flushPending persists the deferred filters and preferences.

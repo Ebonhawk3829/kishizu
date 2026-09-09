@@ -42,6 +42,9 @@ var (
 	reSource     = regexp.MustCompile(`(?i)\b(web-?dl|webrip|web|bd|blu-?ray|remux)\b`)
 	reUncensored = regexp.MustCompile(`(?i)uncensor`)
 	reBatchRange = regexp.MustCompile(`(?i)\(\s*\d{1,4}\s*-\s*\d{1,4}\s*\)|\b\d{1,4}\s*~\s*\d{1,4}\b|\bbatch\b|\bcomplete\b`)
+	// Trailing group: "H.264-VARYG", "...AAC2.0-Group". Some uploaders put the
+	// group at the end after a hyphen instead of in brackets at the front.
+	reTrailingGroup = regexp.MustCompile(`[-–]\s*([A-Za-z0-9._]{2,20})\s*(?:\(|\||$)`)
 )
 
 // Exported for the trainer, which needs to cut a title at its episode marker
@@ -57,6 +60,13 @@ func Parse(title string) Release {
 
 	if m := reGroup.FindStringSubmatch(title); m != nil {
 		r.Group = strings.TrimSpace(m[1])
+	}
+	if r.Group == "" {
+		if m := reTrailingGroup.FindStringSubmatch(title); m != nil {
+			if g := strings.TrimSpace(m[1]); !looksLikeQuality(g) {
+				r.Group = g
+			}
+		}
 	}
 
 	if m := reSxE.FindStringSubmatch(title); m != nil {
@@ -92,6 +102,24 @@ func Parse(title string) Release {
 	r.IsBatch = reBatchRange.MatchString(title)
 
 	return r
+}
+
+// looksLikeQuality rejects trailing tokens that are quality tags rather than
+// group names, so "1080p-AAC" does not become the group "AAC".
+func looksLikeQuality(s string) bool {
+	switch strings.ToLower(s) {
+	case "aac", "aac2.0", "aac2", "ac3", "eac3", "ddp", "ddp5.1", "flac", "opus",
+		"mp3", "mp4", "mkv", "avi", "x264", "x265", "h264", "h265", "hevc", "av1",
+		"10bit", "8bit", "hi10", "dual", "multi", "raw", "sub", "subs", "subbed",
+		"dub", "dubbed", "repack", "proper", "v2", "v3", "web", "webdl", "webrip",
+		"bd", "bluray", "remux", "nf", "cr", "amzn", "dsnp", "adn", "iqiyi", "bili":
+		return true
+	}
+	// Bare resolutions and episode-ish numbers are not groups either.
+	if regexp.MustCompile(`(?i)^(?:2160p|1080p|720p|480p|4k|\d{1,4}(?:\.\d)?)$`).MatchString(s) {
+		return true
+	}
+	return false
 }
 
 // RawEpisode is the episode number as written in the title, before any offset is

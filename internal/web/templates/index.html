@@ -20,7 +20,7 @@
      from the show list to the grading panel. */
   .wrap { max-width: 1180px; margin: 0 auto; }
   .attr-hint { color: var(--muted); font-size: 11px; margin-left: 8px; }
-  .attr-edit { width: 64px; padding: 3px 6px; font-size: 13px; }
+  .attr-edit { width: 130px; padding: 3px 6px; font-size: 13px; }
   h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .5px; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
   .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
@@ -338,7 +338,7 @@ function renderGradingInto(panelId, r, prefix) {
         <span class="attr-name">${escapeHtml(a.label)}</span>
         <span class="attr-val ${a.present ? '' : 'absent'}">
           ${a.editable
-            ? `<input class="attr-edit" data-p="${prefix}" data-k="${a.key}" value="${escapeHtml(a.value)}" style="width:64px">`
+            ? `<input class="attr-edit" data-p="${prefix}" data-k="${a.key}" value="${escapeHtml(a.value)}" placeholder="absent">`
             : escapeHtml(a.value || 'absent')}
           ${a.hint ? `<span class="attr-hint">${escapeHtml(a.hint)}</span>` : ''}
         </span>
