@@ -77,7 +77,34 @@ func (s *Store) migrate() error {
 		return fmt.Errorf("read schema: %w", err)
 	}
 	if _, err := s.db.Exec(string(b)); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
+		// Older databases hold duplicate rows that the new unique indexes
+		// reject. Clean them and retry rather than failing to open.
+		if err := s.dedupe(); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(string(b)); err != nil {
+			return fmt.Errorf("apply schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// dedupe removes repeated filter/preference rows.
+//
+// Needed because these tables were originally plain INSERTs, so rejecting the
+// same thing twice produced duplicates. The unique indexes added later cannot
+// be created while duplicates exist, so old databases must be cleaned first.
+func (s *Store) dedupe() error {
+	stmts := []string{
+		`DELETE FROM filter WHERE id NOT IN (
+			SELECT MIN(id) FROM filter GROUP BY show_id, kind, op, value)`,
+		`DELETE FROM preference WHERE id NOT IN (
+			SELECT MIN(id) FROM preference GROUP BY show_id, kind, value)`,
+	}
+	for _, q := range stmts {
+		if _, err := s.db.Exec(q); err != nil {
+			return fmt.Errorf("dedupe: %w", err)
+		}
 	}
 	return nil
 }
@@ -335,7 +362,8 @@ type Preference struct {
 }
 
 func (s *Store) AddFilter(showID int64, f Filter) error {
-	_, err := s.db.Exec(`INSERT INTO filter (show_id, kind, op, value) VALUES (?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO filter (show_id, kind, op, value) VALUES (?, ?, ?, ?)
+		ON CONFLICT (show_id, kind, op, value) DO NOTHING`,
 		showID, f.Kind, f.Op, f.Value)
 	return err
 }
@@ -358,8 +386,11 @@ func (s *Store) Filters(showID int64) ([]Filter, error) {
 	return out, rows.Err()
 }
 
+// AddPreference records a soft ranking. Re-grading the same value updates the
+// rank in place rather than adding a second, conflicting row.
 func (s *Store) AddPreference(showID int64, p Preference) error {
-	_, err := s.db.Exec(`INSERT INTO preference (show_id, kind, value, rank) VALUES (?, ?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO preference (show_id, kind, value, rank) VALUES (?, ?, ?, ?)
+		ON CONFLICT (show_id, kind, value) DO UPDATE SET rank = excluded.rank`,
 		showID, p.Kind, p.Value, p.Rank)
 	return err
 }

@@ -55,6 +55,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/train/commit", s.handleTrainCommit)
 	mux.HandleFunc("POST /api/train/reset", s.handleTrainReset)
 	mux.HandleFunc("POST /api/train/teach", s.handleTrainTeach)
+	mux.HandleFunc("POST /api/train/inspect", s.handleTrainInspect)
+	mux.HandleFunc("POST /api/train/grade", s.handleTrainGrade)
 
 	return mux
 }
@@ -401,6 +403,106 @@ func (s *Server) handleTrainTeach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.trainState())
+}
+
+// handleTrainInspect resolves a pasted link or title into gradable attributes.
+func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
+	if !session.active {
+		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
+		return
+	}
+	var req struct {
+		Input   string `json:"input"`
+		Episode int    `json:"episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	input := strings.TrimSpace(req.Input)
+	if input == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("paste a Nyaa link or release title"))
+		return
+	}
+
+	title := input
+	if nyaa.IsLink(input) {
+		var err error
+		title, err = nyaa.ResolveLink(nil, input)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that link: %w", err))
+			return
+		}
+	}
+
+	ep := req.Episode
+	if ep == 0 {
+		ep = session.ep
+	}
+	res := match.Match(session.sess.Show(), title)
+	resolved := 0
+	if res.Matched {
+		resolved = res.Episode
+	}
+
+	writeJSON(w, map[string]any{
+		"release": train.Inspect(title, resolved),
+		"episode": ep,
+		"matched": res.Matched,
+		"why":     res.Reason,
+	})
+}
+
+// handleTrainGrade applies per-attribute verdicts.
+func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
+	if !session.active {
+		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
+		return
+	}
+	var req struct {
+		Title   string            `json:"title"`
+		Episode int               `json:"episode"`
+		Grades  map[string]string `json:"grades"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	ep := req.Episode
+	if ep == 0 {
+		ep = session.ep
+	}
+
+	res := match.Match(session.sess.Show(), req.Title)
+	resolved := 0
+	if res.Matched {
+		resolved = res.Episode
+	}
+	g := train.Inspect(req.Title, resolved)
+
+	grades := make(map[train.Attribute]train.Grade, len(req.Grades))
+	for k, v := range req.Grades {
+		gr, err := train.ParseGrade(v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		grades[train.Attribute(k)] = gr
+	}
+
+	notes, err := session.sess.ApplyGrades(g, grades, ep)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if grades[train.AttrEpisode] == train.GradeGood {
+		session.sess.MarkAsked(req.Title)
+	}
+
+	writeJSON(w, map[string]any{
+		"notes": notes,
+		"state": s.trainState(),
+	})
 }
 
 type verifiedJSON struct {
