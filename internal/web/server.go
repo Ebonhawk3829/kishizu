@@ -21,6 +21,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/train"
+	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
 //go:embed templates/*.html
@@ -28,8 +29,9 @@ var templateFS embed.FS
 
 // Server holds the dependencies the handlers need.
 type Server struct {
-	st   *store.Store
-	tmpl *template.Template
+	st    *store.Store
+	tmpl  *template.Template
+	watch *watch.Handler
 }
 
 // New builds a Server and parses templates.
@@ -40,6 +42,10 @@ func New(st *store.Store) (*Server, error) {
 	}
 	return &Server{st: st, tmpl: tmpl}, nil
 }
+
+// SetWatch attaches the watch handler. Optional: without it, /api/watched
+// still records state but cannot sweep files.
+func (s *Server) SetWatch(h *watch.Handler) { s.watch = h }
 
 // Handler returns the routed mux.
 func (s *Server) Handler() http.Handler {
@@ -62,7 +68,120 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/inspect", s.handleInspect)
 	mux.HandleFunc("POST /api/grade", s.handleGrade)
 
+	// Watch signal from the mpv script, and manual marking from the UI.
+	mux.HandleFunc("POST /api/watched", s.handleWatched)
+
 	return mux
+}
+
+// handleWatched records a watch signal from the mpv script or the UI.
+//
+// The filename is matched server-side: the PC sends the raw path, and the
+// server — which has the aliases, the per-group offsets and the confidence
+// model — decides which show and episode it was. A client-side parse would
+// duplicate all of that and drift.
+//
+// Uncertainty refuses: if the file does not match a tracked show, or the
+// episode is ambiguous, nothing is marked. Failure never deletes.
+func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		// Path is the full file path as mpv saw it. Only the base name is used
+		// for matching, so the PC's directory layout does not matter.
+		Path string `json:"path"`
+		// ShowID and Episode are the manual path from the UI. When both are
+		// set they take precedence over matching the path.
+		ShowID  int64 `json:"show_id"`
+		Episode int   `json:"episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var showID int64
+	var epNum int
+	var source string
+
+	if req.ShowID != 0 && req.Episode != 0 {
+		// Manual marking: the user said so, no matching needed.
+		sh, err := s.st.GetShow(req.ShowID)
+		if err != nil || sh == nil {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ShowID))
+			return
+		}
+		showID, epNum = sh.ID, req.Episode
+		source = "manual"
+	} else {
+		// mpv path: match the filename against tracked shows.
+		base := baseName(req.Path)
+		matched, ep, err := s.matchFile(base)
+		if err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, err)
+			return
+		}
+		showID, epNum = matched, ep
+		source = "mpv"
+	}
+
+	if err := s.st.UpsertEpisode(showID, epNum, episode.Watched, "", ""); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("watched: show %d ep %d (%s)", showID, epNum, source)
+
+	// Sweep is best-effort: a failed sweep leaves files on disk, which is the
+	// safe direction.
+	if s.watch != nil {
+		if deleted, kept, err := s.watch.Sweep(); err != nil {
+			log.Printf("watch sweep: %v", err)
+		} else if len(deleted) > 0 {
+			log.Printf("watch: %d deleted, %d kept", len(deleted), len(kept))
+		}
+	}
+
+	writeJSON(w, map[string]any{
+		"show_id": showID, "episode": epNum, "source": source,
+	})
+}
+
+// baseName extracts the filename from a path that may come from any OS.
+//
+// filepath.Base is not enough: the server runs on Linux, and mpv on the user's
+// PC sends Windows paths whose separator is backslash. Splitting on both
+// separators keeps the matching independent of where mpv ran.
+func baseName(path string) string {
+	if i := strings.LastIndexAny(path, `/\`); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+// matchFile matches a filename to a tracked show and episode.
+//
+// The episode latch makes this idempotent: a duplicate signal cannot rewind a
+// watched episode.
+func (s *Server) matchFile(base string) (int64, int, error) {
+	shows, err := s.st.ListShows()
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, sh := range shows {
+		m, err := s.st.NewMatcher(sh)
+		if err != nil {
+			continue
+		}
+		res := match.Match(m, base)
+		if !res.Matched || res.Episode <= 0 {
+			continue
+		}
+		// Only act on confident matches. A wrong guess here deletes a file the
+		// user may still want, so uncertainty means do nothing.
+		if !res.Confident() {
+			continue
+		}
+		return sh.ID, res.Episode, nil
+	}
+	return 0, 0, fmt.Errorf("no confident match for %q", base)
 }
 
 // resolveTitle turns a pasted link or title into a release title.
