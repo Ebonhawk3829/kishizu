@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/cycle"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
@@ -442,6 +443,11 @@ type showJSON struct {
 	// NextSchedule is the schedule's authoritative next-episode point: ep N
 	// airs at this time. Held until a download confirms the episode.
 	NextSchedule *scheduleJSON `json:"next_schedule"`
+	// State is the user-facing cycle state of the show's next episode.
+	State string `json:"state"`
+	// NeedsAttention is true when the state requires user action: no air date,
+	// or a window that closed empty.
+	NeedsAttention bool `json:"needs_attention"`
 	// Counts for the stats display.
 	Downloaded int `json:"downloaded"`
 	Watched    int `json:"watched"`
@@ -489,7 +495,9 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
+			var states []cycle.State
 			for _, ep := range eps {
+				states = append(states, cycle.StateOf(ep, time.Now()))
 				switch episode.ParseState(string(ep.State)) {
 				case episode.Downloaded:
 					j.Downloaded++
@@ -499,10 +507,36 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 					j.Deleted++
 				}
 			}
+			j.State, j.NeedsAttention = showState(states)
 		}
 		out = append(out, j)
 	}
 	writeJSON(w, out)
+}
+
+// showState condenses per-episode cycle states into one show state.
+//
+// The most demanding episode wins: hunting beats ready-to-watch beats
+// up-to-date. Any no-release-found episode sets NeedsAttention, since that is
+// the state asking the user to look at it.
+func showState(states []cycle.State) (string, bool) {
+	attention := false
+	for _, s := range states {
+		if s == cycle.NoReleaseFound {
+			attention = true
+		}
+	}
+	for _, s := range states {
+		if s == cycle.Hunting {
+			return string(cycle.Hunting), attention
+		}
+	}
+	for _, s := range states {
+		if s == cycle.ReadyToWatch {
+			return string(cycle.ReadyToWatch), attention
+		}
+	}
+	return string(cycle.UpToDate), attention
 }
 
 func nextUnwatched(st *store.Store, sh *store.Show) int {
