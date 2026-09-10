@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/cycle"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
@@ -44,6 +45,49 @@ type Listener struct {
 // New builds a Listener.
 func New(st *store.Store) *Listener {
 	return &Listener{st: st, Now: time.Now}
+}
+
+// PollShow fetches one show's feed and evaluates each item.
+func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
+	return l.pollShow(sh)
+}
+
+// DueShows returns the shows whose RSS should be polled right now, with the
+// interval each wants.
+//
+// A show is due when any of its episodes is hunting (aggressive rate) or
+// no-release-found (slow safety net). Shows with no air date at all are polled
+// on the legacy interval: without a schedule point there is no window to
+// reason about, and silently dropping them would be worse than polling.
+func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration {
+	shows, err := l.st.ListShows()
+	if err != nil {
+		return nil
+	}
+	out := map[*store.Show]time.Duration{}
+	now := l.Now()
+	for _, sh := range shows {
+		eps, err := l.st.EpisodesForShow(sh.ID)
+		if err != nil {
+			continue
+		}
+		var states []cycle.State
+		hasAirDate := false
+		for _, ep := range eps {
+			if ep.AirsAt != nil {
+				hasAirDate = true
+			}
+			states = append(states, cycle.StateOf(ep, now))
+		}
+		if d, ok := cycle.PollInterval(states); ok {
+			out[sh] = d
+			continue
+		}
+		if !hasAirDate {
+			out[sh] = legacy
+		}
+	}
+	return out
 }
 
 // Poll fetches every tracked show's feed and decides what to grab.

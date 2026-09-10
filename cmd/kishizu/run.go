@@ -8,6 +8,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/grab"
 	"github.com/Ebonhawk3829/kishizu/internal/listen"
 	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
+	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
@@ -38,33 +39,58 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 	log.Printf("listener: polling every %s (dry-run=%v, transmission=%s)",
 		interval, dryRun, rpcURL)
 
+	// lastPolled tracks when each show was last fetched, so per-show intervals
+	// are honoured: a hunting show polls every 3 minutes while an up-to-date
+	// one is never touched.
+	lastPolled := map[int64]time.Time{}
+
 	poll := func() {
-		decisions, err := l.Poll()
-		if err != nil {
-			log.Printf("listen: %v", err)
+		// Poll only the shows that are due: hunting episodes get the aggressive
+		// rate, no-release-found keeps a slow safety net, and shows without any
+		// air date stay on the legacy interval. Everything else is dormant —
+		// zero requests.
+		due := l.DueShows(interval)
+		if len(due) == 0 {
+			log.Printf("listen: nothing due")
 			return
 		}
+		now := time.Now()
+		polled := 0
+		for sh, want := range due {
+			if last, ok := lastPolled[sh.ID]; ok && now.Sub(last) < want {
+				continue // not this show's turn yet
+			}
+			lastPolled[sh.ID] = now
+			polled++
+			decisions, err := l.PollShow(sh)
+			if err != nil {
+				log.Printf("listen: %s: %v", sh.CanonicalName, err)
+				continue
+			}
 
-		// One grab per (show, episode): the best-ranked candidate wins. Without
-		// this, every release for an episode would be handed off.
-		grabs := l.FilterPreferences(decisions)
-		for _, d := range grabs {
-			if dryRun {
-				log.Printf("WOULD GRAB %s ep%d %s (%s)", d.Show, d.Episode, d.Item.Title, d.Reason)
-				continue
+			// One grab per (show, episode): the best-ranked candidate wins.
+			grabs := l.FilterPreferences(decisions)
+			for _, d := range grabs {
+				if dryRun {
+					log.Printf("WOULD GRAB %s ep%d %s (%s)", d.Show, d.Episode, d.Item.Title, d.Reason)
+					continue
+				}
+				if err := tc.AddWithDir(magnetFor(d.Item.InfoHash, d.Item.Title), library); err != nil {
+					log.Printf("transmission add: %v", err)
+					n.Send("kishizu: download failed", d.Show+" ep"+itoa(d.Episode)+": "+err.Error(), ntfy.PriorityHigh)
+					continue
+				}
+				if err := l.MarkGrabbed(d); err != nil {
+					log.Printf("mark grabbed: %v", err)
+					continue
+				}
+				log.Printf("GRABBED %s ep%d %s", d.Show, d.Episode, d.Item.Title)
+				n.Send("kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), ntfy.PriorityLow)
 			}
-			if err := tc.AddWithDir(magnetFor(d.Item.InfoHash, d.Item.Title), library); err != nil {
-				log.Printf("transmission add: %v", err)
-				n.Send("kishizu: download failed", d.Show+" ep"+itoa(d.Episode)+": "+err.Error(), ntfy.PriorityHigh)
-				continue
-			}
-			if err := l.MarkGrabbed(d); err != nil {
-				log.Printf("mark grabbed: %v", err)
-				continue
-			}
-			log.Printf("GRABBED %s ep%d %s", d.Show, d.Episode, d.Item.Title)
-			n.Send("kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), ntfy.PriorityLow)
 		}
+		// Logged every tick, including when nothing was grabbed: silence in the
+		// log is otherwise indistinguishable from a stuck loop.
+		log.Printf("listen: polled %d of %d due shows", polled, len(due))
 	}
 
 	// First sweep immediately, then on the interval.
@@ -76,10 +102,47 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 	sweep := time.NewTicker(15 * time.Minute)
 	defer sweep.Stop()
 
+	// The schedule is re-checked daily: it is the source of the air times that
+	// drive the windows, and delays move them. One request for the whole
+	// timetable, so the cost is trivial.
+	daily := time.NewTicker(24 * time.Hour)
+	defer daily.Stop()
+
+	refreshSchedule := func() {
+		sched, err := schedule.Fetch(nil)
+		if err != nil {
+			log.Printf("schedule refresh: %v", err)
+			return
+		}
+		shows, err := st.ListShows()
+		if err != nil {
+			return
+		}
+		updated := 0
+		for _, sh := range shows {
+			aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
+			if e := schedule.FindWithAliases(sched, aliases); e != nil && !e.AirsAt.IsZero() {
+				if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
+					continue
+				}
+				if err := st.ProjectAirDates(sh.ID); err != nil {
+					continue
+				}
+				updated++
+			}
+		}
+		log.Printf("schedule: refreshed, %d/%d shows have air dates", updated, len(shows))
+	}
+
+	// Refresh once at startup so the windows are current.
+	refreshSchedule()
+
 	for {
 		select {
 		case <-tick.C:
 			poll()
+		case <-daily.C:
+			refreshSchedule()
 		case <-sweep.C:
 			// Finalise finished downloads: rename into the library layout,
 			// record file_path, advance the latch. This is what makes the
