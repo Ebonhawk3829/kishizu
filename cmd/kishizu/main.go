@@ -33,7 +33,7 @@ func main() {
 	ep := flag.Int("ep", 0, "episode number to train against (0 = next unwatched)")
 	serve := flag.String("serve", "", "start the web UI on this address (e.g. 127.0.0.1:8098)")
 	rpc := flag.String("transmission", "http://100.64.0.1:9091/transmission/rpc", "Transmission RPC endpoint")
-	library := flag.String("library", "/downloads", "library root for downloaded episodes")
+	library := flag.String("library", "/downloads/anime", "library root for downloaded episodes, as Transmission sees it")
 	keep := flag.Int("keep", 2, "recently watched episodes to keep on disk")
 	interval := flag.Duration("interval", 5*time.Minute, "RSS poll interval")
 	dryRun := flag.Bool("dry-run", true, "poll and decide but do not hand off to Transmission")
