@@ -332,7 +332,8 @@ function renderGradingInto(panelId, r, prefix) {
   const rel = r.release;
   el(panelId).innerHTML = `
     <div class="meta" style="margin-top:8px">${escapeHtml(rel.title)}</div>
-    ${r.matched ? '' : `<div class="meta">not matched: ${escapeHtml(r.why)}</div>`}
+    ${r.matched ? `<div class="meta">confidence ${(rel.confidence*100).toFixed(0)}% &middot; ${escapeHtml(r.why)}</div>`
+                : `<div class="meta">not matched: ${escapeHtml(r.why)}</div>`}
     ${rel.attrs.map(a => `
       <div class="attr">
         <span class="attr-name">${escapeHtml(a.label)}</span>

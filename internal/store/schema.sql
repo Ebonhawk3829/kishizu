@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS filter (
     show_id INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
     kind    TEXT    NOT NULL,   -- group | resolution | size | source | codec
     op      TEXT    NOT NULL,   -- in | min | max | exclude
-    value   TEXT    NOT NULL
+    value   TEXT    NOT NULL,
+    -- Why this rule exists, in the user's own terms. A rule without a reason
+    -- cannot be revisited when they change their mind.
+    reason  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_filter_show ON filter(show_id);
 -- One rule per (show, kind, op, value). Rejecting the same thing twice must not
@@ -60,7 +63,8 @@ CREATE TABLE IF NOT EXISTS preference (
     show_id INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
     kind    TEXT    NOT NULL,   -- group | codec | uncensored | source
     value   TEXT    NOT NULL,
-    rank    INTEGER NOT NULL DEFAULT 0
+    rank    INTEGER NOT NULL DEFAULT 0,
+    reason  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_preference_show ON preference(show_id);
 -- One preference per (show, kind, value); re-grading updates the rank in place.

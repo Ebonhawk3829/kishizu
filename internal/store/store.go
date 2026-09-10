@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -84,6 +85,41 @@ func (s *Store) migrate() error {
 		}
 		if _, err := s.db.Exec(string(b)); err != nil {
 			return fmt.Errorf("apply schema: %w", err)
+		}
+	}
+	// Runs after the schema so columns added since this database was created
+	// are present before anything selects them.
+	return s.addColumns()
+}
+
+// addColumns brings an existing database up to date.
+//
+// CREATE TABLE IF NOT EXISTS silently skips tables that already exist, so a
+// column added later never lands on an older database. Every additive schema
+// change needs an explicit ALTER here.
+func (s *Store) addColumns() error {
+	type col struct{ table, name, def string }
+	cols := []col{
+		{"filter", "reason", "TEXT"},
+		{"preference", "reason", "TEXT"},
+	}
+	for _, c := range cols {
+		rows, err := s.db.Query(
+			`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.name)
+		if err != nil {
+			return fmt.Errorf("check column %s.%s: %w", c.table, c.name, err)
+		}
+		var n int
+		if rows.Next() {
+			_ = rows.Scan(&n)
+		}
+		rows.Close()
+		if n > 0 {
+			continue
+		}
+		if _, err := s.db.Exec(
+			fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, c.table, c.name, c.def)); err != nil {
+			return fmt.Errorf("add column %s.%s: %w", c.table, c.name, err)
 		}
 	}
 	return nil
@@ -349,23 +385,34 @@ func (s *Store) GroupOffsets(showID int64) (map[string]int, error) {
 
 // Filter is a hard accept/reject predicate.
 type Filter struct {
-	Kind  string // group | resolution | size | source | codec
-	Op    string // in | min | max | exclude
-	Value string
+	Kind   string // group | resolution | size | source | codec
+	Op     string // in | min | max | exclude
+	Value  string
+	Reason string // why the rule exists
 }
 
 // Preference is a soft ranking signal. Lower rank is better.
 type Preference struct {
-	Kind  string // group | codec | uncensored | source
-	Value string
-	Rank  int
+	Kind   string // group | codec | uncensored | source
+	Value  string
+	Rank   int
+	Reason string // why this preference exists
 }
 
 func (s *Store) AddFilter(showID int64, f Filter) error {
-	_, err := s.db.Exec(`INSERT INTO filter (show_id, kind, op, value) VALUES (?, ?, ?, ?)
-		ON CONFLICT (show_id, kind, op, value) DO NOTHING`,
-		showID, f.Kind, f.Op, f.Value)
+	_, err := s.db.Exec(`INSERT INTO filter (show_id, kind, op, value, reason) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (show_id, kind, op, value) DO UPDATE SET reason = excluded.reason`,
+		showID, f.Kind, f.Op, f.Value, nullIfEmpty(f.Reason))
 	return err
+}
+
+// nullIfEmpty keeps an absent reason NULL rather than storing "", so "no reason
+// given" stays distinguishable from "reason is empty".
+func nullIfEmpty(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
 }
 
 // DeleteFilter removes a rule, so a later grade can retract an earlier one.
@@ -377,7 +424,7 @@ func (s *Store) DeleteFilter(showID int64, f Filter) error {
 }
 
 func (s *Store) Filters(showID int64) ([]Filter, error) {
-	rows, err := s.db.Query(`SELECT kind, op, value FROM filter WHERE show_id = ? ORDER BY id`, showID)
+	rows, err := s.db.Query(`SELECT kind, op, value, COALESCE(reason,'') FROM filter WHERE show_id = ? ORDER BY id`, showID)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +433,7 @@ func (s *Store) Filters(showID int64) ([]Filter, error) {
 	var out []Filter
 	for rows.Next() {
 		var f Filter
-		if err := rows.Scan(&f.Kind, &f.Op, &f.Value); err != nil {
+		if err := rows.Scan(&f.Kind, &f.Op, &f.Value, &f.Reason); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -397,14 +444,14 @@ func (s *Store) Filters(showID int64) ([]Filter, error) {
 // AddPreference records a soft ranking. Re-grading the same value updates the
 // rank in place rather than adding a second, conflicting row.
 func (s *Store) AddPreference(showID int64, p Preference) error {
-	_, err := s.db.Exec(`INSERT INTO preference (show_id, kind, value, rank) VALUES (?, ?, ?, ?)
-		ON CONFLICT (show_id, kind, value) DO UPDATE SET rank = excluded.rank`,
-		showID, p.Kind, p.Value, p.Rank)
+	_, err := s.db.Exec(`INSERT INTO preference (show_id, kind, value, rank, reason) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (show_id, kind, value) DO UPDATE SET rank = excluded.rank, reason = excluded.reason`,
+		showID, p.Kind, p.Value, p.Rank, nullIfEmpty(p.Reason))
 	return err
 }
 
 func (s *Store) Preferences(showID int64) ([]Preference, error) {
-	rows, err := s.db.Query(`SELECT kind, value, rank FROM preference WHERE show_id = ? ORDER BY rank, id`, showID)
+	rows, err := s.db.Query(`SELECT kind, value, rank, COALESCE(reason,'') FROM preference WHERE show_id = ? ORDER BY rank, id`, showID)
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +460,7 @@ func (s *Store) Preferences(showID int64) ([]Preference, error) {
 	var out []Preference
 	for rows.Next() {
 		var p Preference
-		if err := rows.Scan(&p.Kind, &p.Value, &p.Rank); err != nil {
+		if err := rows.Scan(&p.Kind, &p.Value, &p.Rank, &p.Reason); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

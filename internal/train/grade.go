@@ -58,9 +58,12 @@ type AttrValue struct {
 
 // GradedRelease is a release broken into gradable attributes.
 type GradedRelease struct {
-	Title      string      `json:"title"`
-	Episode    int         `json:"episode"` // resolved local episode, 0 if unknown
-	RawEpisode int         `json:"raw_episode"`
+	Title      string `json:"title"`
+	Episode    int    `json:"episode"` // resolved local episode, 0 if unknown
+	RawEpisode int    `json:"raw_episode"`
+	// Confidence is the model's own estimate that this match is right. Shown
+	// so the user can see whether the model is guessing.
+	Confidence float64     `json:"confidence"`
 	Attrs      []AttrValue `json:"attrs"`
 }
 
@@ -71,11 +74,17 @@ var resolutionRank = map[string]int{
 
 // Inspect breaks a release title into the attributes the user can grade.
 func Inspect(title string, resolvedEp int) GradedRelease {
+	return InspectWithConfidence(title, resolvedEp, 0)
+}
+
+// InspectWithConfidence is Inspect plus the model's confidence in the match.
+func InspectWithConfidence(title string, resolvedEp int, conf float64) GradedRelease {
 	r := release.Parse(title)
 	g := GradedRelease{
 		Title:      title,
 		Episode:    resolvedEp,
 		RawEpisode: r.RawEpisode(),
+		Confidence: conf,
 	}
 	// Every attribute is editable. The parser is deliberately dumb, so it will
 	// always meet titles it reads wrongly — a group at the end instead of in
@@ -113,9 +122,13 @@ func episodeValue(resolved, raw int) string {
 	return ""
 }
 
-// episodeHint states what the title literally says, so the two numbers are
-// never confused. "47 (unresolved)" left it ambiguous whether the question was
-// about the group's number or the user's own numbering.
+// episodeHint states what the title literally says AND the offset that follows,
+// so the two numbers are never confused and the derivation is visible.
+//
+// Showing the arithmetic is the "which means the offset is?" step: the model
+// states its conclusion rather than computing it silently, so a wrong episode
+// is caught at the moment it is entered instead of three episodes later when
+// something downloads wrong.
 func episodeHint(resolved, raw int) string {
 	if raw == 0 {
 		return "no number in title"
@@ -123,10 +136,11 @@ func episodeHint(resolved, raw int) string {
 	if resolved == 0 {
 		return fmt.Sprintf("title says %d — set the episode it really is", raw)
 	}
-	if resolved == raw {
-		return fmt.Sprintf("title says %d", raw)
+	off := raw - resolved
+	if off == 0 {
+		return fmt.Sprintf("title says %d, so offset is 0", raw)
 	}
-	return fmt.Sprintf("title says %d, offset applied", raw)
+	return fmt.Sprintf("title says %d, so offset is %d", raw, off)
 }
 
 // ApplyGrades turns per-attribute verdicts into matcher updates, filters and
@@ -194,11 +208,13 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 			case GradeGood:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "preference", k: "group", v: a.Value, rank: 0,
+					reason: reasonFor("group", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("prefer group %q", a.Value))
 			case GradeWrong:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "filter", k: "group", op: "exclude", v: a.Value,
+					reason: reasonFor("group", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("exclude group %q", a.Value))
 			}
@@ -218,6 +234,7 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 					s.retract("filter", "resolution", "exclude", a.Value)
 					s.pending = append(s.pending, pendingWrite{
 						kind: "filter", k: "resolution", op: "min", v: a.Value, rank: rank,
+						reason: reasonFor("resolution", a.Value, grade),
 					})
 					notes = append(notes, fmt.Sprintf("resolution floor %s", a.Value))
 				}
@@ -233,6 +250,7 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 				}
 				s.pending = append(s.pending, pendingWrite{
 					kind: "filter", k: "resolution", op: "exclude", v: a.Value,
+					reason: reasonFor("resolution", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("exclude resolution %s", a.Value))
 			}
@@ -244,11 +262,13 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 			case GradeGood:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "preference", k: "codec", v: a.Value, rank: 0,
+					reason: reasonFor("codec", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("prefer codec %s", a.Value))
 			case GradeAcceptable:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "preference", k: "codec", v: a.Value, rank: 50,
+					reason: reasonFor("codec", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("accept codec %s", a.Value))
 			case GradeWrong:
@@ -256,6 +276,7 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 				// still watchable, so demote rather than exclude.
 				s.pending = append(s.pending, pendingWrite{
 					kind: "preference", k: "codec", v: a.Value, rank: 99,
+					reason: reasonFor("codec", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("demote codec %s", a.Value))
 			}
@@ -267,11 +288,13 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 			case GradeGood:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "preference", k: "source", v: a.Value, rank: 0,
+					reason: reasonFor("source", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("prefer source %s", a.Value))
 			case GradeWrong:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "filter", k: "source", op: "exclude", v: a.Value,
+					reason: reasonFor("source", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("exclude source %s", a.Value))
 			}
@@ -317,11 +340,12 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 // rejections wrote straight to the database while offsets waited for Commit,
 // so cancelling kept half the session's learning.
 type pendingWrite struct {
-	kind string // filter | preference
-	k    string
-	op   string
-	v    string
-	rank int
+	kind   string // filter | preference
+	k      string
+	op     string
+	v      string
+	rank   int
+	reason string // why, in the user's terms
 }
 
 // retract drops a pending write, and deletes any matching row already in the
@@ -340,6 +364,23 @@ func (s *Session) retract(kind, k, op, v string) {
 	if kind == "filter" {
 		s.retracted = append(s.retracted, store.Filter{Kind: k, Op: op, Value: v})
 	}
+}
+
+// reasonFor states why a rule exists, in terms the user would recognise.
+//
+// Stored alongside the rule so it can be revisited: "resolution min 1080p"
+// alone does not say whether 1080p was merely acceptable or actively wanted,
+// and a codec demoted to 99 is indistinguishable from one never graded.
+func reasonFor(kind, value string, g Grade) string {
+	switch g {
+	case GradeGood:
+		return fmt.Sprintf("graded good: %s %s is wanted", kind, value)
+	case GradeAcceptable:
+		return fmt.Sprintf("graded acceptable: %s %s is the floor", kind, value)
+	case GradeWrong:
+		return fmt.Sprintf("graded wrong: %s %s is not wanted", kind, value)
+	}
+	return ""
 }
 
 func groupOf(title string) string {
@@ -378,12 +419,12 @@ func (s *Session) flushPending() error {
 	for _, k := range order {
 		p := seen[k]
 		if p.kind == "filter" {
-			if err := s.st.AddFilter(s.show.ID, store.Filter{Kind: p.k, Op: p.op, Value: p.v}); err != nil {
+			if err := s.st.AddFilter(s.show.ID, store.Filter{Kind: p.k, Op: p.op, Value: p.v, Reason: p.reason}); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := s.st.AddPreference(s.show.ID, store.Preference{Kind: p.k, Value: p.v, Rank: p.rank}); err != nil {
+		if err := s.st.AddPreference(s.show.ID, store.Preference{Kind: p.k, Value: p.v, Rank: p.rank, Reason: p.reason}); err != nil {
 			return err
 		}
 	}

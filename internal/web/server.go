@@ -113,7 +113,7 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		resolved = res.Episode
 	}
 	writeJSON(w, map[string]any{
-		"release": train.Inspect(title, resolved),
+		"release": train.InspectWithConfidence(title, resolved, res.Confidence),
 		"episode": req.Episode,
 		"matched": res.Matched,
 		"why":     res.Reason,
@@ -167,7 +167,7 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 	if res.Matched {
 		resolved = res.Episode
 	}
-	g := train.Inspect(req.Title, resolved)
+	g := train.InspectWithConfidence(req.Title, resolved, res.Confidence)
 	if req.Release != nil {
 		g = *req.Release
 	}
@@ -569,7 +569,7 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{
-		"release": train.Inspect(title, resolved),
+		"release": train.InspectWithConfidence(title, resolved, res.Confidence),
 		"episode": ep,
 		"matched": res.Matched,
 		"why":     res.Reason,
@@ -602,7 +602,7 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 	if res.Matched {
 		resolved = res.Episode
 	}
-	g := train.Inspect(req.Title, resolved)
+	g := train.InspectWithConfidence(req.Title, resolved, res.Confidence)
 	if req.Release != nil {
 		g = *req.Release
 	}
