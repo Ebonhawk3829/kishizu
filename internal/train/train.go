@@ -166,22 +166,22 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 			continue
 		}
 
-		// Already resolved from a known group offset: apply it silently.
-		if res.Confident {
+		// Already resolved confidently: apply it silently.
+		if res.Confident() {
 			continue
 		}
 
+		// Uncertainty is the complement of the model's own confidence, so
+		// ranking follows the evidence rather than a fixed bucket. A release
+		// from a known group with a strong alias match is asked about last;
+		// one from an unseen group when the known offsets disagree is asked
+		// first. Previously these were constants, so the tool was exactly as
+		// uncertain after fifty examples as after one.
 		c := Candidate{Item: it, Episode: res.Episode, Why: res.Reason}
-		switch {
-		case res.Episode == 0:
-			// Matches the show, number unreadable: maximally informative.
+		c.Uncertainty = 1.0 - res.Confidence
+		if res.Episode == 0 {
+			// No number at all: nothing to be confident about.
 			c.Uncertainty = 1.0
-		case res.Episode == s.TargetEp:
-			// Confident and correct: low value as a question.
-			c.Uncertainty = 0.1
-		default:
-			// Resolved to a different episode: worth confirming.
-			c.Uncertainty = 0.5
 		}
 		out = append(out, c)
 	}
@@ -209,7 +209,7 @@ func (s *Session) Resolved(items []nyaa.Item, n int) []Candidate {
 			continue
 		}
 		res := match.Match(s.m, it.Title)
-		if !res.Matched || !res.Confident {
+		if !res.Matched || !res.Confident() {
 			continue
 		}
 		out = append(out, Candidate{Item: it, Episode: res.Episode, Why: res.Reason})

@@ -38,6 +38,11 @@ func (m *Matcher) Aliases() []string {
 
 func (m *Matcher) MaxEpisode() int { return m.sh.MaxEpisode }
 
+// GroupOffsets returns the offset for every known group. The matcher needs the
+// per-group map to weigh agreement: three groups concurring is stronger
+// evidence than one group on its own.
+func (m *Matcher) GroupOffsets() map[string]int { return m.off }
+
 // GroupOffset looks up a group case-insensitively and tolerates substring
 // differences, because "[SubsPlease]" in a title and "SubsPlease" in the store
 // should be the same group.
