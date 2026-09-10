@@ -17,15 +17,23 @@ import (
 type Release struct {
 	Title string // original title, unmodified
 
-	Group        string // "[SubsPlease]" -> "SubsPlease"; "" when absent
-	Season       int    // from S01E47; 0 when absent
-	Episode      int    // from S01E47; 0 when absent
-	Bare         int    // from "- 47" / "- 07"; 0 when absent
-	SeasonWord   int    // from "4th Season" / "Season 3"; 0 when absent
-	Resolution   string // "1080p", "2160p", ...
-	Codec        string // "x264", "hevc", "av1", ...
-	Source       string // "web-dl", "bd", "remux", ...
-	IsBatch      bool   // multiple episode numbers, or an explicit range
+	Group      string // "[SubsPlease]" -> "SubsPlease"; "" when absent
+	Season     int    // from S01E47; 0 when absent
+	Episode    int    // from S01E47; 0 when absent
+	Bare       int    // from "- 47" / "- 07"; 0 when absent
+	SeasonWord int    // from "4th Season" / "Season 3"; 0 when absent
+	Resolution string // "1080p", "2160p", ...
+	Codec      string // "x264", "hevc", "av1", ...
+	Source     string // "web-dl", "bd", "remux", ...
+	// Service is the streaming platform the release came from: NF, AMZN, CR,
+	// DSNP, BILI. Two releases can be identical in every other field and differ
+	// only here, so it has to be captured to tell them apart.
+	Service string
+	// Audio is the audio codec: AAC, DDP, EAC3, FLAC, Opus. Same reasoning as
+	// Service: it is often the only difference between two otherwise identical
+	// releases, and it affects whether the file plays on the user's setup.
+	Audio        string
+	IsBatch      bool // multiple episode numbers, or an explicit range
 	IsUncensored bool
 }
 
@@ -38,8 +46,14 @@ var (
 	// Codec. The optional separator between the letter and the digits matters:
 	// releases write "H.264", "H 264", "h264" and "x265" interchangeably, and a
 	// plain \b before "h" fails on "H.265" because the dot is not a word char.
-	reCodec      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(av1|x265|hevc|h[ ._-]?265|x264|h[ ._-]?264|h264)(?:[^a-z0-9]|$)`)
-	reSource     = regexp.MustCompile(`(?i)\b(web-?dl|webrip|web|bd|blu-?ray|remux)\b`)
+	reCodec  = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(av1|x265|hevc|h[ ._-]?265|x264|h[ ._-]?264|h264)(?:[^a-z0-9]|$)`)
+	reSource = regexp.MustCompile(`(?i)\b(web-?dl|webrip|web|bd|blu-?ray|remux)\b`)
+	// Streaming service. Matched as a standalone token: a bare \b is not enough
+	// because CR appears inside words, and NF/AMZN are short enough to collide
+	// with ordinary text if matched loosely.
+	reService = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(netflix|nf|amzn|amazon|crunchyroll|cr|dsnp|disney|hulu|bili|bilibili|iqiyi|adn|hidive|funimation|wakanim|animeonegai|max|hbo|paramount|peacock)(?:[^a-z0-9]|$)`)
+	// Audio codec. DDP2.0 / DDP5.1 / AAC2.0 all normalise to their base codec.
+	reAudio      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(e-?ac-?3|eac3|ddp|dd\+?|dolby|aac|flac|opus|mp3|ac3|truehd|dtshd|dts)(?:[ ._-]?\d(?:\.\d)?)?(?:[^a-z0-9]|$)`)
 	reUncensored = regexp.MustCompile(`(?i)uncensor`)
 	reBatchRange = regexp.MustCompile(`(?i)\(\s*\d{1,4}\s*-\s*\d{1,4}\s*\)|\b\d{1,4}\s*~\s*\d{1,4}\b|\bbatch\b|\bcomplete\b`)
 	// Trailing group: "H.264-VARYG", "...AAC2.0-Group". Some uploaders put the
@@ -98,10 +112,73 @@ func Parse(title string) Release {
 		r.Source = strings.ToLower(strings.ReplaceAll(m[1], "-", ""))
 	}
 
+	if m := reService.FindStringSubmatch(title); m != nil {
+		r.Service = normaliseService(m[1])
+	}
+
+	if m := reAudio.FindStringSubmatch(title); m != nil {
+		r.Audio = normaliseAudio(m[1])
+	}
+
 	r.IsUncensored = reUncensored.MatchString(title)
 	r.IsBatch = reBatchRange.MatchString(title)
 
 	return r
+}
+
+// normaliseService maps the many spellings of a platform to one token, so
+// "NF", "Netflix" and "netflix" are the same service.
+func normaliseService(s string) string {
+	switch strings.ToLower(s) {
+	case "nf", "netflix":
+		return "nf"
+	case "amzn", "amazon":
+		return "amzn"
+	case "cr", "crunchyroll":
+		return "cr"
+	case "dsnp", "disney":
+		return "dsnp"
+	case "bili", "bilibili":
+		return "bili"
+	case "iqiyi":
+		return "iqiyi"
+	case "adn":
+		return "adn"
+	case "hidive":
+		return "hidive"
+	case "funimation":
+		return "funimation"
+	case "wakanim":
+		return "wakanim"
+	case "max", "hbo":
+		return "max"
+	}
+	return strings.ToLower(s)
+}
+
+// normaliseAudio maps audio spellings to one token. DDP, DD+ and Dolby all mean
+// the same thing here, and the channel count (2.0, 5.1) is dropped since it is
+// not what distinguishes releases the user cares about.
+func normaliseAudio(s string) string {
+	switch strings.ToLower(s) {
+	case "eac3", "e-ac-3", "e-ac3", "eac-3", "ddp", "dd+", "dd", "dolby":
+		return "ddp"
+	case "aac":
+		return "aac"
+	case "flac":
+		return "flac"
+	case "opus":
+		return "opus"
+	case "mp3":
+		return "mp3"
+	case "ac3":
+		return "ac3"
+	case "truehd":
+		return "truehd"
+	case "dtshd", "dts":
+		return "dts"
+	}
+	return strings.ToLower(s)
 }
 
 // looksLikeQuality rejects trailing tokens that are quality tags rather than
