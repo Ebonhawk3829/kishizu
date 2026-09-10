@@ -162,8 +162,10 @@ async function loadShows() {
     <div class="card">
       <h2>${escapeHtml(s.name)}</h2>
       <div class="meta">
-        next ep ${s.next}${s.max ? ' / ' + s.max : ''} &middot;
-        <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
+        next ep ${s.next}${s.max ? ' / ' + s.max : ''}
+        ${s.cadence !== null && s.cadence !== undefined ? ` &middot; airs ${dayName(s.cadence)}` : ''}
+        &middot; <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
+        &middot; <span class="meta">${s.downloaded} dl &middot; ${s.watched} watched &middot; ${s.deleted} deleted</span>
       </div>
       <div class="row">
         <label class="meta" for="ep-${s.id}">ep</label>
@@ -173,6 +175,11 @@ async function loadShows() {
         ${s.trained ? `<button class="ghost" onclick="showOffsets(${s.id})">Offsets</button>
         <button class="ghost" onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Reset</button>` : ''}
       </div>
+      <div class="row">
+        <label class="meta" for="upto-${s.id}" title="mark episodes 1..N watched so old releases are never grabbed">already watched up to</label>
+        <input id="upto-${s.id}" type="number" min="0" value="${s.next - 1}" style="width:56px">
+        <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('upto-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Set</button>
+      </div>
       <div class="offsets" id="off-${s.id}"></div>
     </div>
   `).join('');
@@ -180,6 +187,10 @@ async function loadShows() {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function dayName(n) {
+  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][n] || '?';
 }
 
 // Manual watch marking. The mpv signal is eof-based, so skipping the last
@@ -191,6 +202,19 @@ async function markWatched(showId, ep) {
   try {
     const r = await api('/api/watched', { show_id: showId, episode: ep });
     banner(`Marked ep ${r.episode} watched (${r.source}).`);
+    loadShows();
+  } catch (e) { banner(e.message, true); }
+}
+
+// Latch episodes 1..n as watched, for first runs of a newly added show.
+// Without this the listener would grab everything from episode 1.
+async function watchedUpTo(showId, upto, name) {
+  upto = parseInt(upto, 10);
+  if (isNaN(upto) || upto < 0) { banner('Enter how many episodes you have seen.', true); return; }
+  if (!confirm(`Mark episodes 1..${upto} of ${name} as watched? They will never be auto-grabbed.`)) return;
+  try {
+    const r = await api('/api/watched-up-to', { show_id: showId, up_to: upto });
+    banner(`${name}: ${r.newly_marked} episode(s) latched as watched.`);
     loadShows();
   } catch (e) { banner(e.message, true); }
 }

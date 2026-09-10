@@ -98,6 +98,51 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 	return err
 }
 
+// MarkWatchedUpTo latches episodes 1..n as watched.
+//
+// For first runs of a newly added show: the user has already seen earlier
+// episodes, and without this the listener would grab everything from episode
+// 1. Watched is terminal, so those episodes are never grabbed.
+//
+// Only episodes with no state yet are touched: an episode already downloading
+// or downloaded is left alone, since deleting or re-latching it would be
+// surprising.
+func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
+	if n < 1 {
+		return 0, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT number FROM episode WHERE show_id = ? AND number <= ?`, showID, n)
+	if err != nil {
+		return 0, err
+	}
+	existing := map[int]bool{}
+	for rows.Next() {
+		var num int
+		if err := rows.Scan(&num); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		existing[num] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	marked := 0
+	for i := 1; i <= n; i++ {
+		if existing[i] {
+			continue
+		}
+		if err := s.UpsertEpisode(showID, i, episode.Watched, "", ""); err != nil {
+			return marked, err
+		}
+		marked++
+	}
+	return marked, nil
+}
+
 // SetFilePath records where an episode landed on disk.
 func (s *Store) SetFilePath(showID int64, number int, path string) error {
 	_, err := s.db.Exec(`UPDATE episode SET file_path = ? WHERE show_id = ? AND number = ?`,

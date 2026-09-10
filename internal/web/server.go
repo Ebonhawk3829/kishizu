@@ -70,8 +70,117 @@ func (s *Server) Handler() http.Handler {
 
 	// Watch signal from the mpv script, and manual marking from the UI.
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
+	mux.HandleFunc("POST /api/watched-up-to", s.handleWatchedUpTo)
+
+	// Stats for a homepage widget, and debug for troubleshooting.
+	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/debug", s.handleDebug)
 
 	return mux
+}
+
+// handleWatchedUpTo latches episodes 1..n as watched, for first runs of a
+// newly added show. Without it the listener would grab everything from
+// episode 1.
+func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ShowID int64 `json:"show_id"`
+		UpTo   int   `json:"up_to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	sh, err := s.st.GetShow(req.ShowID)
+	if err != nil || sh == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ShowID))
+		return
+	}
+	if req.UpTo < 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("up_to must be >= 0"))
+		return
+	}
+	marked, err := s.st.MarkWatchedUpTo(sh.ID, req.UpTo)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("watched-up-to: %s episodes 1..%d (%d newly latched)", sh.CanonicalName, req.UpTo, marked)
+	writeJSON(w, map[string]any{
+		"show": sh.CanonicalName, "up_to": req.UpTo, "newly_marked": marked,
+	})
+}
+
+// handleStats summarises episode state for a homepage widget.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	shows, err := s.st.ListShows()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	type perShow struct {
+		Name       string `json:"name"`
+		Next       int    `json:"next"`
+		Downloaded int    `json:"downloaded"`
+		Watched    int    `json:"watched"`
+		Deleted    int    `json:"deleted"`
+	}
+	out := struct {
+		Shows       int       `json:"shows"`
+		Downloading int       `json:"downloading"`
+		Downloaded  int       `json:"downloaded"`
+		Watched     int       `json:"watched"`
+		Deleted     int       `json:"deleted"`
+		PerShow     []perShow `json:"per_show"`
+	}{PerShow: []perShow{}}
+
+	for _, sh := range shows {
+		eps, err := s.st.EpisodesForShow(sh.ID)
+		if err != nil {
+			continue
+		}
+		p := perShow{Name: sh.CanonicalName, Next: nextUnwatched(s.st, sh)}
+		for _, ep := range eps {
+			switch episode.ParseState(string(ep.State)) {
+			case episode.Downloading:
+				out.Downloading++
+			case episode.Downloaded:
+				out.Downloaded++
+			case episode.Watched:
+				out.Watched++
+			case episode.Deleted:
+				out.Deleted++
+			}
+		}
+		out.PerShow = append(out.PerShow, p)
+	}
+	writeJSON(w, out)
+}
+
+// handleDebug dumps recent listener decisions and per-show poll state.
+func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"note":              "listener decisions are logged to the process log; this endpoint lists episode state",
+		"episodes_by_state": s.episodesByState(),
+	})
+}
+
+// episodesByState groups non-terminal episodes for the debug view.
+func (s *Server) episodesByState() map[string][]map[string]any {
+	out := map[string][]map[string]any{}
+	for _, state := range []string{"wanted", "downloading", "downloaded"} {
+		eps, err := s.st.EpisodesByState(episode.ParseState(state))
+		if err != nil {
+			continue
+		}
+		for _, ep := range eps {
+			out[state] = append(out[state], map[string]any{
+				"show_id": ep.ShowID, "episode": ep.Number,
+				"infohash": ep.InfoHash, "title": ep.ReleaseTitle,
+			})
+		}
+	}
+	return out
 }
 
 // handleWatched records a watch signal from the mpv script or the UI.
@@ -327,6 +436,13 @@ type showJSON struct {
 	Aliases []string       `json:"aliases"`
 	Offsets map[string]int `json:"offsets"`
 	Trained bool           `json:"trained"`
+	// Cadence is the air weekday, 0 = Sunday. Nil when unknown. Shown in the
+	// UI so the user can see whether a show is on air or between episodes.
+	Cadence *int `json:"cadence"`
+	// Counts for the stats display.
+	Downloaded int `json:"downloaded"`
+	Watched    int `json:"watched"`
+	Deleted    int `json:"deleted"`
 }
 
 func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
@@ -340,7 +456,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 	for _, sh := range shows {
 		next := nextUnwatched(s.st, sh)
 		offsets, _ := s.st.GroupOffsets(sh.ID)
-		out = append(out, showJSON{
+		j := showJSON{
 			ID:      sh.ID,
 			Name:    sh.CanonicalName,
 			Next:    next,
@@ -348,7 +464,21 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Aliases: sh.Aliases,
 			Offsets: offsets,
 			Trained: len(offsets) > 0,
-		})
+			Cadence: sh.CadenceWeekday,
+		}
+		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
+			for _, ep := range eps {
+				switch episode.ParseState(string(ep.State)) {
+				case episode.Downloaded:
+					j.Downloaded++
+				case episode.Watched:
+					j.Watched++
+				case episode.Deleted:
+					j.Deleted++
+				}
+			}
+		}
+		out = append(out, j)
 	}
 	writeJSON(w, out)
 }

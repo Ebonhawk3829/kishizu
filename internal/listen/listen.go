@@ -146,7 +146,19 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		return d
 	}
 
-	// 6. Confidence gate. Below this the model is guessing, and a wrong guess
+	// 6. Air-date guard. If the show's cadence is known, a release published
+	// well before this week's air date is for an older episode — either a
+	// mis-numbered back-catalogue upload or a batch. Rejecting it prevents
+	// grabbing the wrong episode during a show's first run.
+	//
+	// Lower bound only: v2 re-uploads and remakes land LATE and are good
+	// candidates, so there is deliberately no upper bound.
+	if !l.airDateOK(sh, it) {
+		d.Reason = "published before this week's air date"
+		return d
+	}
+
+	// 7. Confidence gate. Below this the model is guessing, and a wrong guess
 	// downloads the wrong episode — worse than downloading nothing.
 	if res.Confidence < match.ConfidentThreshold {
 		d.Reason = fmt.Sprintf("confidence %.2f below %.2f", res.Confidence, match.ConfidentThreshold)
@@ -156,6 +168,26 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 	d.Grab = true
 	d.Reason = res.Reason
 	return d
+}
+
+// airDateOK reports whether a release's publication date is consistent with
+// the episode being current.
+//
+// With a known cadence weekday, a release for this week's episode cannot have
+// been published before the most recent occurrence of that weekday, minus a
+// 24h margin for timezone and early-upload slop. Shows without cadence are
+// always accepted: the guard is diagnostic-quality data and must never block a
+// good grab.
+func (l *Listener) airDateOK(sh *store.Show, it nyaa.Item) bool {
+	if sh.CadenceWeekday == nil || it.PubDate.IsZero() {
+		return true
+	}
+	// Most recent occurrence of the cadence weekday, strictly before now.
+	now := l.Now()
+	daysSince := (int(now.Weekday()) - *sh.CadenceWeekday + 7) % 7
+	anchor := now.AddDate(0, 0, -daysSince)
+	anchor = time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, now.Location())
+	return !it.PubDate.Before(anchor.Add(-24 * time.Hour))
 }
 
 // applyFilters returns a rejection reason, or "" when the release passes.

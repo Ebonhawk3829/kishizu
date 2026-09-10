@@ -37,6 +37,7 @@ func main() {
 	keep := flag.Int("keep", 2, "recently watched episodes to keep on disk")
 	interval := flag.Duration("interval", 5*time.Minute, "RSS poll interval")
 	dryRun := flag.Bool("dry-run", true, "poll and decide but do not hand off to Transmission")
+	ntfyURL := flag.String("ntfy", "http://100.64.0.1:8085/kishizu", "ntfy topic URL for notifications (empty disables)")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -58,7 +59,7 @@ func main() {
 		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
-		go runLoop(st, *rpc, *library, *keep, *interval, *dryRun)
+		go runLoop(st, *rpc, *library, *keep, *interval, *dryRun, *ntfyURL)
 		if err := srv.ListenAndServe(*serve); err != nil {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 			os.Exit(1)
