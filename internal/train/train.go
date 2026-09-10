@@ -278,6 +278,12 @@ func (s *Session) Reject(c Candidate, reason Reason) error {
 // Show exposes the working model so callers can match against it mid-session.
 func (s *Session) Show() *match.MemShow { return s.m }
 
+// confidenceFor is the model's confidence in a title, using everything learned
+// so far. Exposed so tests can assert that confidence rises with training.
+func (s *Session) confidenceFor(title string) float64 {
+	return match.Match(s.m, title).Confidence
+}
+
 // MarkAsked records a release as seen, so it is not proposed again.
 func (s *Session) MarkAsked(title string) {
 	if title != "" {
