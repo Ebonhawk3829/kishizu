@@ -43,21 +43,45 @@ func (m *Matcher) MaxEpisode() int { return m.sh.MaxEpisode }
 // evidence than one group on its own.
 func (m *Matcher) GroupOffsets() map[string]int { return m.off }
 
-// GroupOffset looks up a group case-insensitively and tolerates substring
-// differences, because "[SubsPlease]" in a title and "SubsPlease" in the store
-// should be the same group.
+// GroupOffset looks up a group's offset.
+//
+// Exact match first, then a punctuation-normalised comparison. Substring
+// matching is deliberately restricted to names of four characters or more: a
+// group named "A" would otherwise match almost anything, and an unrelated group
+// silently borrowing another's offset both mis-resolves the episode and
+// inflates confidence, since the offset would look known.
 func (m *Matcher) GroupOffset(group string) (int, bool) {
 	if group == "" {
 		group = "(none)"
 	}
-	want := strings.ToLower(strings.TrimSpace(group))
+	if v, ok := m.off[group]; ok {
+		return v, true
+	}
+	want := normaliseGroupName(group)
+	if want == "" {
+		return 0, false
+	}
 	for k, v := range m.off {
-		have := strings.ToLower(strings.TrimSpace(k))
-		if have == want || strings.Contains(want, have) || strings.Contains(have, want) {
+		if normaliseGroupName(k) == want {
 			return v, true
 		}
 	}
+	if len(want) >= 4 {
+		for k, v := range m.off {
+			have := normaliseGroupName(k)
+			if len(have) >= 4 && (strings.Contains(want, have) || strings.Contains(have, want)) {
+				return v, true
+			}
+		}
+	}
 	return 0, false
+}
+
+// normaliseGroupName lowercases and strips punctuation groups use
+// interchangeably, so "Erai-raws" and "Erai_raws" are the same group.
+func normaliseGroupName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(s)
 }
 
 // KnownOffsets returns the distinct offsets this show has exhibited, so an
