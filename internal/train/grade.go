@@ -211,6 +211,15 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 					reason: reasonFor("group", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("prefer group %q", a.Value))
+			case GradeAcceptable:
+				// Usable but not first choice. Ranked below a preferred group
+				// rather than excluded, since it still produces a watchable
+				// release when nothing better is available.
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "group", v: a.Value, rank: 50,
+					reason: reasonFor("group", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("accept group %q", a.Value))
 			case GradeWrong:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "filter", k: "group", op: "exclude", v: a.Value,
@@ -291,6 +300,12 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 					reason: reasonFor("source", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("prefer source %s", a.Value))
+			case GradeAcceptable:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "source", v: a.Value, rank: 50,
+					reason: reasonFor("source", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("accept source %s", a.Value))
 			case GradeWrong:
 				s.pending = append(s.pending, pendingWrite{
 					kind: "filter", k: "source", op: "exclude", v: a.Value,
