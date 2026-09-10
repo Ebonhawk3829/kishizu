@@ -174,14 +174,10 @@ async function loadShows() {
         <label class="meta" for="ep-${s.id}">ep</label>
         <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px">
         <button onclick="startTrain(${s.id})">Train</button>
-        <button class="ghost" onclick="markWatched(${s.id}, document.getElementById('ep-${s.id}').value)" title="mark this episode watched">Watched</button>
+        <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
+          title="mark episodes 1..N watched, so they are never grabbed">Watched up to</button>
         ${s.trained ? `<button class="ghost" onclick="showOffsets(${s.id})">Offsets</button>
         <button class="ghost" onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Reset</button>` : ''}
-      </div>
-      <div class="row">
-        <label class="meta" for="upto-${s.id}" title="mark episodes 1..N watched so old releases are never grabbed">already watched up to</label>
-        <input id="upto-${s.id}" type="number" min="0" value="${s.next - 1}" style="width:56px">
-        <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('upto-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Set</button>
       </div>
       <div class="offsets" id="off-${s.id}"></div>
     </div>
@@ -196,24 +192,15 @@ function dayName(n) {
   return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][n] || '?';
 }
 
-// Manual watch marking. The mpv signal is eof-based, so skipping the last
-// minute of credits leaves no signal; this is the escape hatch.
-async function markWatched(showId, ep) {
-  ep = parseInt(ep, 10);
-  if (!ep || ep < 1) { banner('Set an episode number first.', true); return; }
-  if (!confirm(`Mark ep ${ep} watched? The file will be deleted on the next sweep if it is beyond the keep window.`)) return;
-  try {
-    const r = await api('/api/watched', { show_id: showId, episode: ep });
-    banner(`Marked ep ${r.episode} watched (${r.source}).`);
-    loadShows();
-  } catch (e) { banner(e.message, true); }
-}
-
-// Latch episodes 1..n as watched, for first runs of a newly added show.
-// Without this the listener would grab everything from episode 1.
+// Mark episodes 1..n watched. This is the single way to record progress:
+// it covers both "I've seen up to ep 12" on a first run and "I just
+// finished ep 12" after watching, since both latch the same episodes.
+//
+// Only episodes with no state yet are touched, so an episode already
+// downloading or downloaded is left alone.
 async function watchedUpTo(showId, upto, name) {
   upto = parseInt(upto, 10);
-  if (isNaN(upto) || upto < 0) { banner('Enter how many episodes you have seen.', true); return; }
+  if (isNaN(upto) || upto < 1) { banner('Set an episode number first.', true); return; }
   if (!confirm(`Mark episodes 1..${upto} of ${name} as watched? They will never be auto-grabbed.`)) return;
   try {
     const r = await api('/api/watched-up-to', { show_id: showId, up_to: upto });

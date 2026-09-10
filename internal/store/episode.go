@@ -116,19 +116,24 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
 	if n < 1 {
 		return 0, nil
 	}
+	// Latch by STATE, not by row existence. Air-date projection creates a
+	// "wanted" row for every episode up to the schedule point, so nearly every
+	// episode already has a row — skipping those would make this a no-op for
+	// exactly the common case.
 	rows, err := s.db.Query(
-		`SELECT number FROM episode WHERE show_id = ? AND number <= ?`, showID, n)
+		`SELECT number, state FROM episode WHERE show_id = ? AND number <= ?`, showID, n)
 	if err != nil {
 		return 0, err
 	}
-	existing := map[int]bool{}
+	state := map[int]episode.State{}
 	for rows.Next() {
 		var num int
-		if err := rows.Scan(&num); err != nil {
+		var st string
+		if err := rows.Scan(&num, &st); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		existing[num] = true
+		state[num] = episode.ParseState(st)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -137,7 +142,10 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
 
 	marked := 0
 	for i := 1; i <= n; i++ {
-		if existing[i] {
+		// Leave anything already in flight or consumed alone: re-latching a
+		// downloading or downloaded episode would be surprising, and watched
+		// or deleted are terminal anyway.
+		if cur, ok := state[i]; ok && cur != episode.Wanted {
 			continue
 		}
 		if err := s.UpsertEpisode(showID, i, episode.Watched, "", ""); err != nil {
