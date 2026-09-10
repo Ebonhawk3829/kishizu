@@ -173,17 +173,35 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 // airDateOK reports whether a release's publication date is consistent with
 // the episode being current.
 //
-// With a known cadence weekday, a release for this week's episode cannot have
-// been published before the most recent occurrence of that weekday, minus a
-// 24h margin for timezone and early-upload slop. Shows without cadence are
-// always accepted: the guard is diagnostic-quality data and must never block a
-// good grab.
+// Two sources of truth, in order of preference:
+//
+//   - The schedule's exact next-episode air time (next_airs_at). Episodes
+//     before it are projected back a week at a time. Authoritative when the
+//     show is on the schedule.
+//   - The cadence weekday, as a fallback: the most recent occurrence of that
+//     weekday, minus a 24h margin for timezone and early-upload slop.
+//
+// Shows with neither are always accepted: the guard is diagnostic-quality data
+// and must never block a good grab. Lower bound only — v2 re-uploads land LATE
+// and are good candidates, so there is deliberately no upper bound.
 func (l *Listener) airDateOK(sh *store.Show, it nyaa.Item) bool {
-	if sh.CadenceWeekday == nil || it.PubDate.IsZero() {
+	if it.PubDate.IsZero() {
 		return true
 	}
-	// Most recent occurrence of the cadence weekday, strictly before now.
 	now := l.Now()
+
+	// Authoritative: the schedule's next-episode point. Episode n airs at *at;
+	// earlier episodes project back a week each. A release claiming to be any
+	// episode up to n cannot predate a week before the oldest such episode.
+	if n, at, _ := l.st.NextEpisode(sh.ID); at != nil && n > 0 {
+		oldest := at.AddDate(0, 0, -7*(n-1))
+		return !it.PubDate.Before(oldest.Add(-24 * time.Hour))
+	}
+
+	// Fallback: cadence weekday only.
+	if sh.CadenceWeekday == nil {
+		return true
+	}
 	daysSince := (int(now.Weekday()) - *sh.CadenceWeekday + 7) % 7
 	anchor := now.AddDate(0, 0, -daysSince)
 	anchor = time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, now.Location())
@@ -343,10 +361,15 @@ func (l *Listener) FilterPreferences(decisions []Decision) []Decision {
 	return out
 }
 
-// MarkGrabbed records that a release was handed off, so it is not re-grabbed.
+// MarkGrabbed records that a release was handed off, so it is not re-grabbed,
+// and advances the schedule pointer: the schedule's next-episode point is held
+// until a download confirms that episode is real.
 func (l *Listener) MarkGrabbed(d Decision) error {
 	if err := l.st.MarkSeen(d.Item.InfoHash, d.ShowID, d.Episode); err != nil {
 		return err
 	}
-	return l.st.UpsertEpisode(d.ShowID, d.Episode, episode.Downloading, d.Item.InfoHash, d.Item.Title)
+	if err := l.st.UpsertEpisode(d.ShowID, d.Episode, episode.Downloading, d.Item.InfoHash, d.Item.Title); err != nil {
+		return err
+	}
+	return l.st.AdvanceSchedule(d.ShowID, d.Episode)
 }

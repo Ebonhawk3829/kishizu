@@ -102,6 +102,10 @@ func (s *Store) addColumns() error {
 	cols := []col{
 		{"filter", "reason", "TEXT"},
 		{"preference", "reason", "TEXT"},
+		{"show", "next_ep", "INTEGER"},
+		{"show", "next_airs_at", "TEXT"},
+		{"show", "schedule_fetched_at", "TEXT"},
+		{"episode", "airs_at", "TEXT"},
 	}
 	for _, c := range cols {
 		rows, err := s.db.Query(
@@ -327,6 +331,98 @@ func (s *Store) GetShowByName(name string) (*Show, error) {
 func (s *Store) SetCadence(showID int64, weekday int, source string, fetched time.Time) error {
 	_, err := s.db.Exec(`UPDATE show SET cadence_weekday = ?, cadence_source = ?,
 		cadence_fetched_at = ? WHERE id = ?`, weekday, source, fetched.UTC().Format("2006-01-02 15:04:05"), showID)
+	return err
+}
+
+// SetNextEpisode records the schedule's authoritative next-episode point:
+// episode n airs at t. This is the one fact animeschedule.net gives us, and it
+// is held until a download confirms the episode is real.
+func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
+	_, err := s.db.Exec(`UPDATE show SET next_ep = ?, next_airs_at = ?,
+		schedule_fetched_at = datetime('now') WHERE id = ?`,
+		n, t.UTC().Format("2006-01-02 15:04:05"), showID)
+	return err
+}
+
+// NextEpisode returns the schedule's next-episode point, if known.
+func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
+	var n sql.NullInt64
+	var at sql.NullString
+	err := s.db.QueryRow(`SELECT next_ep, next_airs_at FROM show WHERE id = ?`, showID).
+		Scan(&n, &at)
+	if err == sql.ErrNoRows {
+		return 0, nil, nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	if !n.Valid || !at.Valid {
+		return 0, nil, nil
+	}
+	t := parseTime(at)
+	if t == nil {
+		return int(n.Int64), nil, nil
+	}
+	return int(n.Int64), t, nil
+}
+
+// ProjectAirDates fills in airs_at for episodes before the schedule's next
+// episode, by stepping back a week from the known air time.
+//
+// The schedule only exposes the NEXT episode's timestamp, but the cadence is
+// weekly, so ep n-1 aired seven days earlier, and so on. Episodes after next_ep
+// are left NULL: they have not been scheduled yet.
+func (s *Store) ProjectAirDates(showID int64) error {
+	n, at, err := s.NextEpisode(showID)
+	if err != nil || at == nil || n < 1 {
+		return err
+	}
+	// Upsert a wanted row for each unscheduled episode with its projected date.
+	for i := 1; i < n; i++ {
+		airs := at.AddDate(0, 0, -7*(n-i))
+		if err := s.setAirsAt(showID, i, airs); err != nil {
+			return err
+		}
+	}
+	return s.setAirsAt(showID, n, *at)
+}
+
+// setAirsAt records an episode's expected air time, creating the episode row as
+// wanted if it does not exist yet.
+func (s *Store) setAirsAt(showID int64, number int, t time.Time) error {
+	ep, err := s.GetEpisode(showID, number)
+	if err != nil {
+		return err
+	}
+	stamp := t.UTC().Format("2006-01-02 15:04:05")
+	if ep == nil {
+		_, err := s.db.Exec(`INSERT INTO episode (show_id, number, state, airs_at)
+			VALUES (?, ?, 'wanted', ?)`, showID, number, stamp)
+		return err
+	}
+	_, err = s.db.Exec(`UPDATE episode SET airs_at = ? WHERE show_id = ? AND number = ?`,
+		stamp, showID, number)
+	return err
+}
+
+// AdvanceSchedule moves the schedule's pointer forward when episode n is
+// grabbed: next_ep becomes n+1 and the air time projects forward a week.
+//
+// Called when a download is confirmed, per the contract: the schedule point is
+// held until a download confirms that episode is real.
+func (s *Store) AdvanceSchedule(showID int64, confirmedEp int) error {
+	n, at, err := s.NextEpisode(showID)
+	if err != nil || at == nil || n == 0 {
+		return err
+	}
+	if confirmedEp < n {
+		// An older episode was grabbed (backfill); the pointer stays.
+		return nil
+	}
+	next := confirmedEp + 1
+	nextAt := at.AddDate(0, 0, 7*(next-n))
+	_, err = s.db.Exec(`UPDATE show SET next_ep = ?, next_airs_at = ? WHERE id = ?`,
+		next, nextAt.UTC().Format("2006-01-02 15:04:05"), showID)
 	return err
 }
 

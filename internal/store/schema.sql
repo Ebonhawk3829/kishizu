@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS show (
     cadence_weekday INTEGER,                     -- 0-6, NULL when unknown
     cadence_source TEXT,                         -- where cadence came from
     cadence_fetched_at TEXT,                     -- when, for staleness
+    -- The schedule's authoritative next-episode point, from animeschedule.net.
+    -- Held until a download confirms that episode is real: when ep N is
+    -- grabbed, next_ep becomes N+1 and next_airs_at is projected forward a
+    -- week. NULL when the show is not on the schedule.
+    next_ep         INTEGER,
+    next_airs_at    TEXT,
+    schedule_fetched_at TEXT,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_show_anilist ON show(anilist_id) WHERE anilist_id IS NOT NULL;
@@ -77,6 +84,10 @@ CREATE TABLE IF NOT EXISTS episode (
     infohash      TEXT,
     release_title TEXT,
     file_path     TEXT,
+    -- When this episode is expected to air, projected from the schedule's
+    -- next-episode point and the cadence weekday. NULL when unknown. This is
+    -- what distinguishes "hasn't aired yet" from "should have aired".
+    airs_at       TEXT,
     downloaded_at TEXT,
     watched_at    TEXT,
     PRIMARY KEY (show_id, number)
