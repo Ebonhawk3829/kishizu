@@ -34,6 +34,8 @@ const (
 	AttrResolution Attribute = "resolution"
 	AttrCodec      Attribute = "codec"
 	AttrSource     Attribute = "source"
+	AttrService    Attribute = "service"
+	AttrAudio      Attribute = "audio"
 	AttrBatch      Attribute = "batch"
 	AttrUncensored Attribute = "uncensored"
 )
@@ -103,6 +105,8 @@ func InspectWithConfidence(title string, resolvedEp int, conf float64) GradedRel
 		{Key: AttrResolution, Label: "Resolution", Value: r.Resolution, Editable: true, Present: r.Resolution != ""},
 		{Key: AttrCodec, Label: "Codec", Value: r.Codec, Editable: true, Present: r.Codec != ""},
 		{Key: AttrSource, Label: "Source", Value: r.Source, Editable: true, Present: r.Source != ""},
+		{Key: AttrService, Label: "Service", Value: r.Service, Editable: true, Present: r.Service != ""},
+		{Key: AttrAudio, Label: "Audio", Value: r.Audio, Editable: true, Present: r.Audio != ""},
 		{Key: AttrBatch, Label: "Batch", Value: strconv.FormatBool(r.IsBatch), Editable: true, Present: r.IsBatch},
 		{Key: AttrUncensored, Label: "Uncensored", Value: strconv.FormatBool(r.IsUncensored), Editable: true, Present: r.IsUncensored},
 	}
@@ -312,6 +316,61 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 					reason: reasonFor("source", a.Value, grade),
 				})
 				notes = append(notes, fmt.Sprintf("exclude source %s", a.Value))
+			}
+		case AttrService:
+			if a.Value == "" {
+				continue
+			}
+			// Service is a preference, not a filter: the same episode from a
+			// different platform is still watchable, so rank rather than
+			// exclude. It matters because it is often the ONLY difference
+			// between two otherwise identical releases.
+			switch grade {
+			case GradeGood:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "service", v: a.Value, rank: 0,
+					reason: reasonFor("service", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("prefer service %s", a.Value))
+			case GradeAcceptable:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "service", v: a.Value, rank: 50,
+					reason: reasonFor("service", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("accept service %s", a.Value))
+			case GradeWrong:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "service", v: a.Value, rank: 99,
+					reason: reasonFor("service", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("demote service %s", a.Value))
+			}
+		case AttrAudio:
+			if a.Value == "" {
+				continue
+			}
+			// Audio is a preference too: DDP5.1 may not play on the user's
+			// setup, but that is a ranking concern, not a reason to refuse the
+			// release outright.
+			switch grade {
+			case GradeGood:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "audio", v: a.Value, rank: 0,
+					reason: reasonFor("audio", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("prefer audio %s", a.Value))
+			case GradeAcceptable:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "audio", v: a.Value, rank: 50,
+					reason: reasonFor("audio", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("accept audio %s", a.Value))
+			case GradeWrong:
+				s.pending = append(s.pending, pendingWrite{
+					kind: "preference", k: "audio", v: a.Value, rank: 99,
+					reason: reasonFor("audio", a.Value, grade),
+				})
+				notes = append(notes, fmt.Sprintf("demote audio %s", a.Value))
 			}
 		case AttrBatch:
 			if grade == GradeWrong {
