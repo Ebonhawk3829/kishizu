@@ -270,7 +270,7 @@ func applyFilters(filters []store.Filter, title string) string {
 				if r.Resolution == "" {
 					return "no resolution tag, floor is " + f.Value
 				}
-				if resRank(r.Resolution) < resRank(f.Value) {
+				if release.ResRank(r.Resolution) < release.ResRank(f.Value) {
 					return fmt.Sprintf("resolution %s below floor %s", r.Resolution, f.Value)
 				}
 			case "exclude":
@@ -293,21 +293,6 @@ func applyFilters(filters []store.Filter, title string) string {
 		}
 	}
 	return ""
-}
-
-// resRank orders resolutions so a floor can be compared numerically.
-func resRank(s string) int {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "480p":
-		return 1
-	case "720p":
-		return 2
-	case "1080p":
-		return 3
-	case "2160p", "4k":
-		return 4
-	}
-	return 0
 }
 
 // Best picks the highest-ranked candidate per episode from a set of grab

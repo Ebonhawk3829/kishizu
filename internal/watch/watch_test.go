@@ -19,15 +19,17 @@ func testStore(t *testing.T) *store.Store {
 	return s
 }
 
-// TestMarkWatchedIsTerminal: marking watched latches the episode. A duplicate
-// signal cannot rewind it, and no later event can make it grabbable again.
-func TestMarkWatchedIsTerminal(t *testing.T) {
+// TestWatchedLatchIsTerminal: the watched latch is terminal. A duplicate signal
+// cannot rewind it, and no later event can make it grabbable again.
+//
+// Marking happens through the store (via /api/watched), so this exercises the
+// latch the handler depends on rather than a wrapper around it.
+func TestWatchedLatchIsTerminal(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Show", nil, 12)
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Downloaded, "H", "rel")
 
-	h := New(st, "", 2)
-	if err := h.MarkWatched(sh.ID, 5); err != nil {
+	if err := st.UpsertEpisode(sh.ID, 5, episode.Watched, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ep, _ := st.GetEpisode(sh.ID, 5)
@@ -36,7 +38,7 @@ func TestMarkWatchedIsTerminal(t *testing.T) {
 	}
 
 	// A duplicate signal must not fail or rewind.
-	if err := h.MarkWatched(sh.ID, 5); err != nil {
+	if err := st.UpsertEpisode(sh.ID, 5, episode.Watched, "", ""); err != nil {
 		t.Errorf("duplicate watch signal errored: %v", err)
 	}
 	ep2, _ := st.GetEpisode(sh.ID, 5)
@@ -131,11 +133,13 @@ func TestSanitise(t *testing.T) {
 	}
 }
 
-// TestEpisodePath: the layout is <library>/<Show>/<Show> - E<NN>.mkv.
-func TestEpisodePath(t *testing.T) {
-	got := EpisodePath("/downloads", "Tomb Raider King", 9)
-	want := filepath.Join("/downloads", "Tomb Raider King", "Tomb Raider King - E09.mkv")
-	if got != want {
-		t.Errorf("path = %q, want %q", got, want)
+// TestSanitiseKeepsNamesUsable: sanitising must not mangle ordinary names, only
+// the characters that break on Windows (Syncthing crosses to the user's PC).
+func TestSanitiseKeepsNamesUsable(t *testing.T) {
+	if got := Sanitise("Tomb Raider King"); got != "Tomb Raider King" {
+		t.Errorf("Sanitise = %q, want it unchanged", got)
+	}
+	if got := Sanitise("BLEACH: Thousand-Year Blood War"); got != "BLEACH Thousand-Year Blood War" {
+		t.Errorf("Sanitise = %q, want the colon stripped only", got)
 	}
 }

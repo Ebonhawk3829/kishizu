@@ -42,14 +42,6 @@ func New(st *store.Store, library string, keep int) *Handler {
 	return &Handler{st: st, Library: library, Keep: keep}
 }
 
-// MarkWatched records that the user finished an episode.
-//
-// The state latch makes this safe to call repeatedly: watched is terminal, so a
-// duplicate signal cannot rewind anything.
-func (h *Handler) MarkWatched(showID int64, number int) error {
-	return h.st.UpsertEpisode(showID, number, episode.Watched, "", "")
-}
-
 // Sweep deletes files for watched episodes beyond the Keep window.
 //
 // Deletion is deliberately separate from marking: a watch signal that arrives
@@ -150,11 +142,4 @@ func Sanitise(name string) string {
 		s = "untitled"
 	}
 	return s
-}
-
-// EpisodePath is where an episode's file should land:
-// <library>/<Show Name>/<Show Name> - E<NN>.mkv
-func EpisodePath(library, show string, number int) string {
-	return filepath.Join(library, Sanitise(show),
-		fmt.Sprintf("%s - E%02d.mkv", Sanitise(show), number))
 }
