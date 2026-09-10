@@ -169,6 +169,7 @@ async function loadShows() {
         <label class="meta" for="ep-${s.id}">ep</label>
         <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px">
         <button onclick="startTrain(${s.id})">Train</button>
+        <button class="ghost" onclick="markWatched(${s.id}, document.getElementById('ep-${s.id}').value)" title="mark this episode watched">Watched</button>
         ${s.trained ? `<button class="ghost" onclick="showOffsets(${s.id})">Offsets</button>
         <button class="ghost" onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Reset</button>` : ''}
       </div>
@@ -179,6 +180,19 @@ async function loadShows() {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Manual watch marking. The mpv signal is eof-based, so skipping the last
+// minute of credits leaves no signal; this is the escape hatch.
+async function markWatched(showId, ep) {
+  ep = parseInt(ep, 10);
+  if (!ep || ep < 1) { banner('Set an episode number first.', true); return; }
+  if (!confirm(`Mark ep ${ep} watched? The file will be deleted on the next sweep if it is beyond the keep window.`)) return;
+  try {
+    const r = await api('/api/watched', { show_id: showId, episode: ep });
+    banner(`Marked ep ${r.episode} watched (${r.source}).`);
+    loadShows();
+  } catch (e) { banner(e.message, true); }
 }
 
 function showOffsets(id) {

@@ -18,6 +18,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
+	"github.com/Ebonhawk3829/kishizu/internal/watch"
 	"github.com/Ebonhawk3829/kishizu/internal/web"
 )
 
@@ -51,6 +52,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "web: %v\n", err)
 			os.Exit(1)
 		}
+		// The watch handler lets /api/watched sweep files after marking. The
+		// library root also bounds deletion: paths outside it are refused.
+		srv.SetWatch(watch.New(st, *library, *keep))
 		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
