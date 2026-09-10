@@ -16,6 +16,10 @@ type Episode struct {
 	InfoHash     string
 	ReleaseTitle string
 	FilePath     string
+	// AirsAt is when this episode is expected to air, projected from the
+	// schedule. Nil when unknown. Distinguishes "hasn't aired yet" from
+	// "should have aired but untouched".
+	AirsAt       *time.Time
 	DownloadedAt *time.Time
 	WatchedAt    *time.Time
 }
@@ -24,13 +28,13 @@ type Episode struct {
 // which is the normal case for an episode we have never seen.
 func (s *Store) GetEpisode(showID int64, number int) (*Episode, error) {
 	row := s.db.QueryRow(`SELECT show_id, number, state, infohash, release_title,
-		file_path, downloaded_at, watched_at FROM episode WHERE show_id = ? AND number = ?`,
+		file_path, airs_at, downloaded_at, watched_at FROM episode WHERE show_id = ? AND number = ?`,
 		showID, number)
 
 	var e Episode
 	var state, hash, title, path sql.NullString
-	var dl, watched sql.NullString
-	err := row.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &dl, &watched)
+	var airs, dl, watched sql.NullString
+	err := row.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -41,6 +45,7 @@ func (s *Store) GetEpisode(showID int64, number int) (*Episode, error) {
 	e.InfoHash = hash.String
 	e.ReleaseTitle = title.String
 	e.FilePath = path.String
+	e.AirsAt = parseTime(airs)
 	e.DownloadedAt = parseTime(dl)
 	e.WatchedAt = parseTime(watched)
 	return &e, nil

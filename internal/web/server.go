@@ -439,10 +439,21 @@ type showJSON struct {
 	// Cadence is the air weekday, 0 = Sunday. Nil when unknown. Shown in the
 	// UI so the user can see whether a show is on air or between episodes.
 	Cadence *int `json:"cadence"`
+	// NextSchedule is the schedule's authoritative next-episode point: ep N
+	// airs at this time. Held until a download confirms the episode.
+	NextSchedule *scheduleJSON `json:"next_schedule"`
 	// Counts for the stats display.
 	Downloaded int `json:"downloaded"`
 	Watched    int `json:"watched"`
 	Deleted    int `json:"deleted"`
+}
+
+type scheduleJSON struct {
+	Episode int    `json:"episode"`
+	AirsAt  string `json:"airs_at"`
+	// Status is the derived state: "aired" when the time has passed and no
+	// download has confirmed it, otherwise "upcoming".
+	Status string `json:"status"`
 }
 
 func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
@@ -465,6 +476,17 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Offsets: offsets,
 			Trained: len(offsets) > 0,
 			Cadence: sh.CadenceWeekday,
+		}
+		if n, at, _ := s.st.NextEpisode(sh.ID); at != nil && n > 0 {
+			status := "upcoming"
+			if at.Before(time.Now()) {
+				status = "aired"
+			}
+			j.NextSchedule = &scheduleJSON{
+				Episode: n,
+				AirsAt:  at.Format(time.RFC3339),
+				Status:  status,
+			}
 		}
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
 			for _, ep := range eps {

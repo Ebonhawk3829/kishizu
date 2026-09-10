@@ -166,6 +166,9 @@ async function loadShows() {
         ${s.cadence !== null && s.cadence !== undefined ? ` &middot; airs ${dayName(s.cadence)}` : ''}
         &middot; <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
         &middot; <span class="meta">${s.downloaded} dl &middot; ${s.watched} watched &middot; ${s.deleted} deleted</span>
+        ${s.next_schedule ? `<div>ep ${s.next_schedule.episode} ${s.next_schedule.status === 'aired'
+          ? '<span style="color:var(--warn)">aired, not grabbed</span>'
+          : 'airs ' + new Date(s.next_schedule.airs_at).toLocaleString(undefined, {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>` : ''}
       </div>
       <div class="row">
         <label class="meta" for="ep-${s.id}">ep</label>

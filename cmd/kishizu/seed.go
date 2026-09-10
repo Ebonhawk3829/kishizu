@@ -155,6 +155,13 @@ func seedOne(st *store.Store, sd seedShow, sched []schedule.Entry) error {
 		if err := st.SetCadence(sh.ID, int(e.AirsAt.Weekday()), "animeschedule", e.AirsAt); err != nil {
 			return err
 		}
+		// Hold the schedule's next-episode point until a download confirms it.
+		if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
+			return err
+		}
+		if err := st.ProjectAirDates(sh.ID); err != nil {
+			return err
+		}
 	} else if sd.Upcoming {
 		line += "  | not on schedule yet"
 	}
@@ -188,6 +195,12 @@ func listShowsWithSchedule(st *store.Store) error {
 		line := fmt.Sprintf("  %-52s next %d", truncate(sh.CanonicalName, 50), next)
 		if e := schedule.FindWithAliases(sched, sh.Aliases); e != nil && !e.AirsAt.IsZero() {
 			line += fmt.Sprintf("  | ep %d airs %s", e.NextEp, e.AirsAt.Format("Mon 2 Jan 15:04"))
+			if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
+				return err
+			}
+			if err := st.ProjectAirDates(sh.ID); err != nil {
+				return err
+			}
 		}
 		fmt.Println(line)
 	}
