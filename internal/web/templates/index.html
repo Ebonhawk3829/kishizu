@@ -163,8 +163,8 @@ async function loadShows() {
       <h2>${escapeHtml(s.name)}</h2>
       <div class="meta">
         next ep ${s.next}${s.max ? ' / ' + s.max : ''}
-        ${s.cadence !== null && s.cadence !== undefined ? ` &middot; airs ${dayName(s.cadence)}` : ''}
         &middot; <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
+        &middot; <span class="pill ${s.needs_attention ? 'no' : ''}">${escapeHtml(s.state || 'unknown')}</span>
         &middot; <span class="meta">${s.downloaded} dl &middot; ${s.watched} watched &middot; ${s.deleted} deleted</span>
         ${s.next_schedule ? `<div>ep ${s.next_schedule.episode} ${s.next_schedule.status === 'aired'
           ? '<span style="color:var(--warn)">aired, not grabbed</span>'
