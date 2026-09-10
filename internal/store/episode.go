@@ -188,7 +188,7 @@ func (s *Store) Unlatch(showID int64, number int) error {
 // EpisodesForShow returns every episode row for a show, ordered by number.
 func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 	rows, err := s.db.Query(`SELECT show_id, number, state, infohash, release_title,
-		file_path, downloaded_at, watched_at FROM episode WHERE show_id = ? ORDER BY number`, showID)
+		file_path, airs_at, downloaded_at, watched_at FROM episode WHERE show_id = ? ORDER BY number`, showID)
 	if err != nil {
 		return nil, err
 	}
@@ -198,14 +198,15 @@ func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 	for rows.Next() {
 		var e Episode
 		var state, hash, title, path sql.NullString
-		var dl, watched sql.NullString
-		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &dl, &watched); err != nil {
+		var airs, dl, watched sql.NullString
+		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched); err != nil {
 			return nil, err
 		}
 		e.State = episode.ParseState(state.String)
 		e.InfoHash = hash.String
 		e.ReleaseTitle = title.String
 		e.FilePath = path.String
+		e.AirsAt = parseTime(airs)
 		e.DownloadedAt = parseTime(dl)
 		e.WatchedAt = parseTime(watched)
 		out = append(out, &e)
@@ -216,7 +217,7 @@ func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 // EpisodesByState returns every episode in a given state across all shows.
 func (s *Store) EpisodesByState(st episode.State) ([]*Episode, error) {
 	rows, err := s.db.Query(`SELECT show_id, number, state, infohash, release_title,
-		file_path, downloaded_at, watched_at FROM episode WHERE state = ? ORDER BY show_id, number`,
+		file_path, airs_at, downloaded_at, watched_at FROM episode WHERE state = ? ORDER BY show_id, number`,
 		string(st))
 	if err != nil {
 		return nil, err
@@ -227,14 +228,15 @@ func (s *Store) EpisodesByState(st episode.State) ([]*Episode, error) {
 	for rows.Next() {
 		var e Episode
 		var state, hash, title, path sql.NullString
-		var dl, watched sql.NullString
-		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &dl, &watched); err != nil {
+		var airs, dl, watched sql.NullString
+		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched); err != nil {
 			return nil, err
 		}
 		e.State = episode.ParseState(state.String)
 		e.InfoHash = hash.String
 		e.ReleaseTitle = title.String
 		e.FilePath = path.String
+		e.AirsAt = parseTime(airs)
 		e.DownloadedAt = parseTime(dl)
 		e.WatchedAt = parseTime(watched)
 		out = append(out, &e)

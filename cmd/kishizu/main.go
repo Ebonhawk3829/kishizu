@@ -15,6 +15,7 @@ import (
 
 	"github.com/Ebonhawk3829/kishizu/internal/anilist"
 	"github.com/Ebonhawk3829/kishizu/internal/config"
+	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
@@ -40,7 +41,14 @@ func main() {
 	interval := flag.Duration("interval", 5*time.Minute, "RSS poll interval")
 	dryRun := flag.Bool("dry-run", true, "poll and decide but do not hand off to Transmission")
 	ntfyURL := flag.String("ntfy", "http://100.64.0.1:8085/kishizu", "ntfy topic URL for notifications (empty disables)")
+	debugOn := flag.Bool("debug", false, "verbose logging of every decision (toggleable at runtime via POST /api/debug)")
 	flag.Parse()
+
+	// Debug can also be set with KISHIZU_DEBUG=1, which the package reads at
+	// init; the flag wins when given.
+	if *debugOn {
+		debug.Set(true)
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {

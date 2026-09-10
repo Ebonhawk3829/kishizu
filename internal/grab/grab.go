@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/transmission"
@@ -71,8 +72,10 @@ func (r *Reconciler) Reconcile() error {
 				continue
 			}
 			if !t.IsFinished {
+				debug.Log("%s ep%d: torrent %s not finished yet", sh.CanonicalName, ep.Number, t.Hash[:8])
 				continue
 			}
+			debug.Log("%s ep%d: torrent finished, finalising", sh.CanonicalName, ep.Number)
 			if err := r.finalise(sh, ep, t); err != nil {
 				log.Printf("grab: %s ep%d: %v", sh.CanonicalName, ep.Number, err)
 			}

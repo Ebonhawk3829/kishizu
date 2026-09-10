@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
@@ -80,9 +81,11 @@ func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
 		})
 		for i, ep := range watched {
 			if i < h.Keep {
+				debug.Log("keep %s (within the %d most recent)", ep.FilePath, h.Keep)
 				kept = append(kept, ep.FilePath)
 				continue
 			}
+			debug.Log("deleting %s (beyond the keep window)", ep.FilePath)
 			if err := h.deleteFile(sh.ID, ep); err != nil {
 				log.Printf("watch: delete %s: %v", ep.FilePath, err)
 				continue

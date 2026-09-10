@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
+	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
@@ -133,9 +134,22 @@ func (l *Listener) pollShow(sh *store.Show) ([]Decision, error) {
 	var out []Decision
 	for _, it := range items {
 		d := l.evaluate(sh, m, filters, it)
+		// Every decision is logged in debug mode, including the rejections.
+		// "Why was this not grabbed" is the question a live run always asks,
+		// and the reason is already computed — it just needs surfacing.
+		debug.Trace(fmt.Sprintf("%s ep%d %s", sh.CanonicalName, d.Episode, truncate(it.Title, 60)),
+			map[bool]string{true: "GRAB", false: "skip"}[d.Grab]+": "+d.Reason)
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// truncate shortens a title for logging.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // evaluate applies the full pipeline to one release: dedupe, match, episode
