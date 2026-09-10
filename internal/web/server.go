@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
+	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
@@ -76,6 +77,9 @@ func (s *Server) Handler() http.Handler {
 	// Stats for a homepage widget, and debug for troubleshooting.
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/debug", s.handleDebug)
+	// Runtime debug toggle, so verbose logging can be switched on during a
+	// live run without a restart.
+	mux.HandleFunc("POST /api/debug", s.handleDebugToggle)
 
 	return mux
 }
@@ -158,30 +162,81 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// handleDebug dumps recent listener decisions and per-show poll state.
-func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{
-		"note":              "listener decisions are logged to the process log; this endpoint lists episode state",
-		"episodes_by_state": s.episodesByState(),
-	})
-}
-
-// episodesByState groups non-terminal episodes for the debug view.
-func (s *Server) episodesByState() map[string][]map[string]any {
-	out := map[string][]map[string]any{}
-	for _, state := range []string{"wanted", "downloading", "downloaded"} {
-		eps, err := s.st.EpisodesByState(episode.ParseState(state))
-		if err != nil {
-			continue
-		}
-		for _, ep := range eps {
-			out[state] = append(out[state], map[string]any{
-				"show_id": ep.ShowID, "episode": ep.Number,
-				"infohash": ep.InfoHash, "title": ep.ReleaseTitle,
-			})
-		}
+// handleDebugToggle switches verbose logging on or off at runtime.
+func (s *Server) handleDebugToggle(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		On bool `json:"on"`
 	}
-	return out
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	debug.Set(req.On)
+	log.Printf("debug mode: %v", req.On)
+	writeJSON(w, map[string]any{"debug": req.On})
+}
+func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
+	shows, err := s.st.ListShows()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	now := time.Now()
+
+	type epInfo struct {
+		Number int     `json:"number"`
+		State  string  `json:"state"`
+		AirsAt *string `json:"airs_at"`
+		Path   string  `json:"path"`
+	}
+	type showInfo struct {
+		Name       string   `json:"name"`
+		NextEp     int      `json:"next_ep"`
+		NextAirsAt *string  `json:"next_airs_at"`
+		Trained    bool     `json:"trained"`
+		Due        bool     `json:"due"`
+		Interval   string   `json:"poll_interval"`
+		Episodes   []epInfo `json:"episodes"`
+	}
+
+	out := make([]showInfo, 0, len(shows))
+	for _, sh := range shows {
+		si := showInfo{Name: sh.CanonicalName, NextEp: nextUnwatched(s.st, sh)}
+		if n, at, _ := s.st.NextEpisode(sh.ID); at != nil && n > 0 {
+			si.NextEp = n
+			formatted := at.Format(time.RFC3339)
+			si.NextAirsAt = &formatted
+		}
+		offsets, _ := s.st.GroupOffsets(sh.ID)
+		si.Trained = len(offsets) > 0
+
+		eps, err := s.st.EpisodesForShow(sh.ID)
+		if err == nil {
+			var states []cycle.State
+			for _, ep := range eps {
+				states = append(states, cycle.StateOf(ep, now))
+				ei := epInfo{Number: ep.Number, State: string(ep.State), Path: ep.FilePath}
+				if ep.AirsAt != nil {
+					f := ep.AirsAt.Format(time.RFC3339)
+					ei.AirsAt = &f
+				}
+				si.Episodes = append(si.Episodes, ei)
+			}
+			if d, ok := cycle.PollInterval(states); ok {
+				si.Due = true
+				si.Interval = d.String()
+			}
+		}
+		out = append(out, si)
+	}
+
+	writeJSON(w, map[string]any{
+		"debug":  debug.Enabled(),
+		"now":    now.Format(time.RFC3339),
+		"window": cycle.Window.String(),
+		"shows":  out,
+		"hint":   "POST /api/debug {\"on\":true} to switch verbose logging on",
+	})
 }
 
 // handleWatched records a watch signal from the mpv script or the UI.
