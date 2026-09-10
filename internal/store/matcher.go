@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/match"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 )
 
 // Matcher adapts a stored Show to the interface the matcher needs.
@@ -57,31 +58,24 @@ func (m *Matcher) GroupOffset(group string) (int, bool) {
 	if v, ok := m.off[group]; ok {
 		return v, true
 	}
-	want := normaliseGroupName(group)
+	want := release.NormaliseGroup(group)
 	if want == "" {
 		return 0, false
 	}
 	for k, v := range m.off {
-		if normaliseGroupName(k) == want {
+		if release.NormaliseGroup(k) == want {
 			return v, true
 		}
 	}
 	if len(want) >= 4 {
 		for k, v := range m.off {
-			have := normaliseGroupName(k)
+			have := release.NormaliseGroup(k)
 			if len(have) >= 4 && (strings.Contains(want, have) || strings.Contains(have, want)) {
 				return v, true
 			}
 		}
 	}
 	return 0, false
-}
-
-// normaliseGroupName lowercases and strips punctuation groups use
-// interchangeably, so "Erai-raws" and "Erai_raws" are the same group.
-func normaliseGroupName(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	return strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(s)
 }
 
 // KnownOffsets returns the distinct offsets this show has exhibited, so an

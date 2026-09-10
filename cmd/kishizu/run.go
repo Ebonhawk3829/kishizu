@@ -33,7 +33,7 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 	l := listen.New(st)
 	tc := transmission.New(rpcURL)
 	w := watch.New(st, library, keep)
-	rec := grab.New(st, tc, library)
+	rec := grab.New(st, tc)
 	n := ntfy.New(ntfyURL)
 
 	log.Printf("listener: polling every %s (dry-run=%v, transmission=%s)",

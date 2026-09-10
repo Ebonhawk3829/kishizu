@@ -206,7 +206,7 @@ func (m *MemShow) GroupOffset(group string) (int, bool) {
 	if m.Offsets == nil {
 		return 0, false
 	}
-	want := normaliseGroup(group)
+	want := release.NormaliseGroup(group)
 	if want == "" {
 		return 0, false
 	}
@@ -219,7 +219,7 @@ func (m *MemShow) GroupOffset(group string) (int, bool) {
 		return v, true
 	}
 	for k, v := range m.Offsets {
-		if normaliseGroup(k) == want {
+		if release.NormaliseGroup(k) == want {
 			return v, true
 		}
 	}
@@ -227,21 +227,13 @@ func (m *MemShow) GroupOffset(group string) (int, bool) {
 	// character group would match almost anything.
 	if len(want) >= 4 {
 		for k, v := range m.Offsets {
-			have := normaliseGroup(k)
+			have := release.NormaliseGroup(k)
 			if len(have) >= 4 && (strings.Contains(want, have) || strings.Contains(have, want)) {
 				return v, true
 			}
 		}
 	}
 	return 0, false
-}
-
-// normaliseGroup lowercases and strips the punctuation groups use
-// interchangeably, so "Erai-raws" and "Erai_raws" are the same group.
-func normaliseGroup(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(s)
-	return s
 }
 
 func (m *MemShow) GroupOffsets() map[string]int { return m.Offsets }

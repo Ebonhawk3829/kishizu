@@ -24,15 +24,16 @@ import (
 
 // Reconciler matches finished torrents to episodes and finalises them.
 type Reconciler struct {
-	st  *store.Store
-	tc  *transmission.Client
-	lib string // library root, as Transmission sees it
+	st *store.Store
+	tc *transmission.Client
 }
 
-// New builds a Reconciler. library is the library root as Transmission sees
-// it, e.g. /downloads.
-func New(st *store.Store, tc *transmission.Client, library string) *Reconciler {
-	return &Reconciler{st: st, tc: tc, lib: library}
+// New builds a Reconciler.
+//
+// The library root is not needed: each torrent reports its own downloadDir, so
+// the final path comes from Transmission rather than from configuration.
+func New(st *store.Store, tc *transmission.Client) *Reconciler {
+	return &Reconciler{st: st, tc: tc}
 }
 
 // Reconcile finalises every finished torrent that corresponds to a downloading
