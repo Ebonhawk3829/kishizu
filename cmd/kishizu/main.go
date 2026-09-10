@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/anilist"
+	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
@@ -25,7 +26,8 @@ import (
 func main() {
 	dbPath := flag.String("db", "kishizu.db", "path to the SQLite database")
 	show := flag.String("show", "", "only run this show (substring match on canonical name)")
-	seed := flag.Bool("seed", false, "insert the season lists with watch progress")
+	seed := flag.Bool("seed", false, "insert the shows from the seed file")
+	configPath := flag.String("config", "shows.yaml", "show seed file used by -seed")
 	list := flag.Bool("list", false, "list tracked shows with next episode and air dates")
 	importUser := flag.String("import-anilist", "", "bootstrap from an AniList username (one-time)")
 	statuses := flag.String("statuses", "CURRENT,PLANNING", "comma-separated AniList statuses to import")
@@ -68,7 +70,12 @@ func main() {
 	}
 
 	if *seed {
-		if err := seedShows(st); err != nil {
+		shows, err := config.Load(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "config: %v\n", err)
+			os.Exit(1)
+		}
+		if err := seedFromConfig(st, shows); err != nil {
 			fmt.Fprintf(os.Stderr, "seed: %v\n", err)
 			os.Exit(1)
 		}
