@@ -1,0 +1,64 @@
+# kishizu show configuration.
+#
+# This file is the user's seed: what to track, what has already been seen, and
+# what to call each show. It replaces the hardcoded season lists so that adding
+# a show is an edit here, not a code change.
+#
+# Fields:
+#   name     - the user's own name for the show. Becomes the canonical name.
+#   aliases  - every other title it is known by. Include the romaji title used
+#              by animeschedule.net and by release groups, and any native title
+#              (Korean webtoon adaptations are listed under their Korean name,
+#              e.g. Tomb Raider King airs as "Dogul Wang").
+#   watched  - how many episodes you have already seen. Episodes 1..watched are
+#              latched as watched, so they are never grabbed.
+#   max      - total episodes in the season. 0 = unknown, no upper bound.
+#
+# Apply with: kishizu -db kishizu.db -config shows.yaml -seed
+
+shows:
+  - name: BLEACH: Thousand-Year Blood War - The Calamity
+    aliases:
+      - Bleach: Sennen Kessen Hen - Kashin Tan
+      - BLEACH Thousand Year Blood War
+    watched: 7
+    max: 13
+
+  - name: Clevatess Season 2
+    aliases:
+      - Clevatess
+    watched: 9
+    max: 13
+
+  - name: Mushoku Tensei: Jobless Reincarnation Season 3
+    aliases:
+      - Mushoku Tensei III
+      - Mushoku Tensei 3rd Season
+    watched: 10
+    max: 12
+
+  - name: Re:ZERO -Starting Life in Another World- Season 4
+    aliases:
+      - Re:Zero kara Hajimeru Isekai Seikatsu 4
+    watched: 15
+    max: 16
+
+  - name: Smoking Behind the Supermarket with You
+    aliases:
+      - Super no Ura de Yani Suu Futari
+    watched: 9
+    max: 12
+
+  - name: Tomb Raider King
+    aliases:
+      - Dogul Wang
+      - Dogulwang
+    watched: 9
+    max: 12
+
+  - name: You and I Are Polar Opposites Season 2
+    aliases:
+      - Seihantai na Kimi to Boku 2nd Season
+      - Kimikoi to Seiyaku
+    watched: 10
+    max: 13
