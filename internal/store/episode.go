@@ -156,6 +156,40 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
 	return marked, nil
 }
 
+// SetEpisodeState forces an episode into a state, bypassing the latch.
+//
+// Used for manual correction: an episode the user obtained outside kishizu
+// should read as "downloaded" even though the tool never fetched it. The latch
+// cannot express that, because it only moves forward through the lifecycle.
+//
+// Callers are responsible for refusing terminal rewinds; this writes what it
+// is told.
+func (s *Store) SetEpisodeState(showID int64, number int, next episode.State) error {
+	existing, err := s.GetEpisode(showID, number)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		_, err := s.db.Exec(`INSERT INTO episode (show_id, number, state)
+			VALUES (?, ?, ?)`, showID, number, string(next))
+		return err
+	}
+	q := `UPDATE episode SET state = ?`
+	args := []any{string(next)}
+	switch next {
+	case episode.Downloaded:
+		q += `, downloaded_at = datetime('now')`
+	case episode.Watched:
+		q += `, watched_at = datetime('now')`
+	case episode.Deleted:
+		q += `, file_path = NULL`
+	}
+	q += ` WHERE show_id = ? AND number = ?`
+	args = append(args, showID, number)
+	_, err = s.db.Exec(q, args...)
+	return err
+}
+
 // SetFilePath records where an episode landed on disk.
 func (s *Store) SetFilePath(showID int64, number int, path string) error {
 	_, err := s.db.Exec(`UPDATE episode SET file_path = ? WHERE show_id = ? AND number = ?`,
