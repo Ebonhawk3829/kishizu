@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/episode"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -366,25 +368,47 @@ func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
 	return int(n.Int64), t, nil
 }
 
-// ProjectAirDates fills in airs_at for episodes before the schedule's next
-// episode, by stepping back a week from the known air time.
+// ProjectAirDates fills in airs_at for episodes around the schedule's next
+// episode, by stepping a week at a time from the known air time.
 //
 // The schedule only exposes the NEXT episode's timestamp, but the cadence is
-// weekly, so ep n-1 aired seven days earlier, and so on. Episodes after next_ep
-// are left NULL: they have not been scheduled yet.
+// weekly, so ep n-1 aired seven days earlier, and so on.
+//
+// It also projects FORWARD when watch progress has passed the schedule point.
+// If the user has watched ep 11 but the schedule still says "ep 11 airs Sep 6",
+// then ep 12 is the one actually due — and without a forward projection it has
+// no row and no air date, so it is invisible to the cycle and never hunted.
 func (s *Store) ProjectAirDates(showID int64) error {
 	n, at, err := s.NextEpisode(showID)
 	if err != nil || at == nil || n < 1 {
 		return err
 	}
-	// Upsert a wanted row for each unscheduled episode with its projected date.
-	for i := 1; i < n; i++ {
-		airs := at.AddDate(0, 0, -7*(n-i))
+
+	// How far ahead of the schedule point has the user watched?
+	watched := 0
+	if eps, err := s.EpisodesForShow(showID); err == nil {
+		for _, ep := range eps {
+			if ep.State == episode.Watched || ep.State == episode.Deleted {
+				if ep.Number > watched {
+					watched = ep.Number
+				}
+			}
+		}
+	}
+	// Project at least one episode beyond what has been watched, so the next
+	// due episode always has an air date.
+	target := n
+	if watched+1 > target {
+		target = watched + 1
+	}
+
+	for i := 1; i <= target; i++ {
+		airs := at.AddDate(0, 0, 7*(i-n))
 		if err := s.setAirsAt(showID, i, airs); err != nil {
 			return err
 		}
 	}
-	return s.setAirsAt(showID, n, *at)
+	return nil
 }
 
 // setAirsAt records an episode's expected air time, creating the episode row as
