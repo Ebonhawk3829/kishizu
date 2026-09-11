@@ -713,19 +713,9 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Trained: len(offsets) > 0,
 			Cadence: sh.CadenceWeekday,
 		}
-		if n, at, _ := s.st.NextEpisode(sh.ID); at != nil && n > 0 {
-			status := "upcoming"
-			if at.Before(time.Now()) {
-				status = "aired"
-			}
-			j.NextSchedule = &scheduleJSON{
-				Episode: n,
-				AirsAt:  at.Format(time.RFC3339),
-				Status:  status,
-			}
-		}
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
 			var states []cycle.State
+			var nextAirs *time.Time
 			for _, ep := range eps {
 				states = append(states, cycle.StateOf(ep, time.Now()))
 				switch episode.ParseState(string(ep.State)) {
@@ -736,8 +726,27 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 				case episode.Deleted:
 					j.Deleted++
 				}
+				// The air line follows the user's actual position, not the
+				// schedule's raw pointer. The pointer only moves on a watch or
+				// download event, so it lags behind whenever progress happens
+				// outside kishizu; the projected episode rows do not.
+				if ep.Number == next && ep.AirsAt != nil {
+					t := *ep.AirsAt
+					nextAirs = &t
+				}
 			}
 			j.State, j.NeedsAttention = showState(states)
+			if nextAirs != nil {
+				status := "upcoming"
+				if nextAirs.Before(time.Now()) {
+					status = "aired"
+				}
+				j.NextSchedule = &scheduleJSON{
+					Episode: next,
+					AirsAt:  nextAirs.Format(time.RFC3339),
+					Status:  status,
+				}
+			}
 		}
 		out = append(out, j)
 	}
