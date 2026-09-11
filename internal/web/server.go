@@ -72,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 	// Watch signal from the mpv script, and manual marking from the UI.
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
 	mux.HandleFunc("POST /api/watched-up-to", s.handleWatchedUpTo)
+	// Manual state override, for episodes obtained outside kishizu.
+	mux.HandleFunc("POST /api/set-state", s.handleSetState)
 
 	// Stats for a homepage widget, and debug for troubleshooting.
 	mux.HandleFunc("GET /api/stats", s.handleStats)
@@ -81,6 +83,66 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/debug", s.handleDebugToggle)
 
 	return mux
+}
+
+// handleSetState forces an episode into a state, bypassing the latch.
+//
+// For episodes obtained outside kishizu: the user already has files on their
+// PC that the tool never downloaded, so those episodes sit in "wanted" and
+// would be hunted again. Marking them "downloaded" tells the truth — they are
+// on disk, waiting to be watched — and stops the pointless hunting.
+//
+// The latch is bypassed deliberately: this is a correction, not a lifecycle
+// event. But it still refuses to move a terminal episode (watched/deleted)
+// backwards, since that would resurrect something already consumed.
+func (s *Server) handleSetState(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ShowID  int64  `json:"show_id"`
+		Episode int    `json:"episode"`
+		State   string `json:"state"`
+		Path    string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	want := episode.ParseState(req.State)
+	switch want {
+	case episode.Wanted, episode.Downloading, episode.Downloaded, episode.Blocked:
+	default:
+		writeErr(w, http.StatusBadRequest,
+			fmt.Errorf("state %q cannot be set manually; use /api/watched for watched", req.State))
+		return
+	}
+	if req.ShowID == 0 || req.Episode == 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("show_id and episode are required"))
+		return
+	}
+
+	// Refuse to rewind a terminal episode: that would resurrect something the
+	// user already finished.
+	if cur, err := s.st.GetEpisode(req.ShowID, req.Episode); err == nil && cur != nil {
+		if episode.ParseState(string(cur.State)).Terminal() {
+			writeErr(w, http.StatusConflict,
+				fmt.Errorf("episode %d is %s (terminal); not overriding", req.Episode, cur.State))
+			return
+		}
+	}
+
+	if err := s.st.SetEpisodeState(req.ShowID, req.Episode, want); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if req.Path != "" {
+		if err := s.st.SetFilePath(req.ShowID, req.Episode, req.Path); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	log.Printf("set-state: show %d ep %d -> %s", req.ShowID, req.Episode, want)
+	writeJSON(w, map[string]any{
+		"show_id": req.ShowID, "episode": req.Episode, "state": string(want),
+	})
 }
 
 // handleWatchedUpTo latches episodes 1..n as watched, for first runs of a
