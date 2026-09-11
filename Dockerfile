@@ -25,10 +25,14 @@ COPY --from=build /out/kishizu /usr/local/bin/kishizu
 
 # Data lives here: the SQLite database and the show seed file. Mount a
 # volume at /data to persist them.
-RUN mkdir -p /data && chmod 0755 /data
+RUN mkdir -p /data && chown 1001:1001 /data
 WORKDIR /data
 
-# 8098 is the web UI and API. Bound to the tailnet address by compose.
+# Run unprivileged. Override with `user:` in compose to match your media
+# user's uid/gid, so files land with ownership your other containers accept.
+USER 1001:1001
+
+# 8098 is the web UI and API.
 EXPOSE 8098
 
 # Dry-run by default: the container polls and logs decisions but hands
