@@ -143,6 +143,9 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 				if err := st.ProjectAirDates(sh.ID); err != nil {
 					continue
 				}
+				if e.ImageURL != sh.ImageURL {
+					_ = st.SetImageURL(sh.ID, e.ImageURL)
+				}
 				updated++
 			}
 		}

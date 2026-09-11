@@ -24,12 +24,18 @@ type Entry struct {
 	NextEp    int
 	AirsAt    time.Time
 	SourceURL string
+	// ImageURL is the season's cover art, served from animeschedule's image
+	// CDN. Empty when the tile has none.
+	ImageURL string
 }
 
 var (
 	reTitle = regexp.MustCompile(`(?s)<h2 class="show-title-bar[^"]*">([^<]+)</h2>`)
 	reEp    = regexp.MustCompile(`(?s)<span class="show-episode">Ep\s*(\d+)</span>`)
 	reTime  = regexp.MustCompile(`(?s)<time datetime="([^"]+)"`)
+	// Cover art lives in the /anime/ path of their image CDN; restricting the
+	// pattern to that path keeps site logos and icons out.
+	reImage = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
 )
 
 // Fetch retrieves the current schedule.
@@ -60,12 +66,24 @@ func Parse(r io.Reader) ([]Entry, error) {
 	s := string(raw)
 
 	// Walk each title and look ahead a bounded distance for its episode/time.
+	// The tile's cover image sits just BEFORE the title, so also look back a
+	// bounded distance and take the nearest /anime/ image — that is this
+	// tile's art, not the previous tile's.
 	var out []Entry
 	for _, m := range reTitle.FindAllStringSubmatchIndex(s, -1) {
 		title := html.UnescapeString(strings.TrimSpace(s[m[2]:m[3]]))
 		if title == "" {
 			continue
 		}
+		back := s[:m[0]]
+		if len(back) > 4000 {
+			back = back[len(back)-4000:]
+		}
+		image := ""
+		for _, im := range reImage.FindAllString(back, -1) {
+			image = im // keep the nearest
+		}
+		image = strings.ReplaceAll(html.UnescapeString(image), "&amp;", "&")
 		rest := s[m[1]:]
 		if len(rest) > 2000 {
 			rest = rest[:2000]
@@ -78,7 +96,7 @@ func Parse(r io.Reader) ([]Entry, error) {
 		if tm := reTime.FindStringSubmatch(rest); tm != nil {
 			at = parseAirsAt(html.UnescapeString(tm[1]))
 		}
-		out = append(out, Entry{Title: title, NextEp: ep, AirsAt: at, SourceURL: URL})
+		out = append(out, Entry{Title: title, NextEp: ep, AirsAt: at, SourceURL: URL, ImageURL: image})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no entries parsed from %s (markup may have changed)", URL)

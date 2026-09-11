@@ -107,6 +107,7 @@ func (s *Store) addColumns() error {
 		{"show", "next_ep", "INTEGER"},
 		{"show", "next_airs_at", "TEXT"},
 		{"show", "schedule_fetched_at", "TEXT"},
+		{"show", "image_url", "TEXT"},
 		{"episode", "airs_at", "TEXT"},
 	}
 	for _, c := range cols {
@@ -163,8 +164,10 @@ type Show struct {
 	CadenceWeekday *int
 	CadenceSource  string
 	CadenceFetched *time.Time
-	CreatedAt      time.Time
-	Aliases        []string
+	// ImageURL is the season's cover art from the schedule, for the UI.
+	ImageURL  string
+	CreatedAt time.Time
+	Aliases   []string
 }
 
 // CreateShow inserts a show with its aliases. The canonical name is always
@@ -206,13 +209,13 @@ func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
 	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, anilist_id, source,
-		cadence_weekday, cadence_source, cadence_fetched_at, created_at FROM show WHERE id = ?`, id)
+		cadence_weekday, cadence_source, cadence_fetched_at, image_url, created_at FROM show WHERE id = ?`, id)
 
 	var sh Show
 	var weekday, anilistID sql.NullInt64
-	var src, source, fetched, created sql.NullString
+	var src, source, fetched, created, image sql.NullString
 	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &anilistID, &source,
-		&weekday, &src, &fetched, &created); err != nil {
+		&weekday, &src, &fetched, &image, &created); err != nil {
 		return nil, err
 	}
 	if weekday.Valid {
@@ -226,6 +229,7 @@ func (s *Store) GetShow(id int64) (*Show, error) {
 	sh.Source = source.String
 	sh.CadenceSource = src.String
 	sh.CadenceFetched = parseTime(fetched)
+	sh.ImageURL = image.String
 	sh.CreatedAt = derefTime(parseTime(created))
 
 	rows, err := s.db.Query(`SELECT name FROM alias WHERE show_id = ? ORDER BY id`, id)
@@ -344,6 +348,22 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 		schedule_fetched_at = datetime('now') WHERE id = ?`,
 		n, t.UTC().Format("2006-01-02 15:04:05"), showID)
 	return err
+}
+
+// SetImageURL records the season's cover art, scraped from the schedule.
+// Empty string clears it, so a show that loses its art falls back cleanly.
+func (s *Store) SetImageURL(showID int64, url string) error {
+	_, err := s.db.Exec(`UPDATE show SET image_url = ? WHERE id = ?`, nullIfEmpty(url), showID)
+	return err
+}
+
+// ImageURL returns the show's cover art URL, or "" when unknown.
+func (s *Store) ImageURL(showID int64) string {
+	var ns sql.NullString
+	if err := s.db.QueryRow(`SELECT image_url FROM show WHERE id = ?`, showID).Scan(&ns); err != nil {
+		return ""
+	}
+	return ns.String
 }
 
 // NextEpisode returns the schedule's next-episode point, if known.
