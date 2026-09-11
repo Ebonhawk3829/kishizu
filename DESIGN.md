@@ -1,7 +1,16 @@
-# Anime season downloader — design sketch
+# kishizu — design notes
 
-Status: **brainstorm / pre-implementation.** No code written. Nothing in this document
-is committed. Written 2026-09-07.
+> **Status: historical.** This document was written *before* kishizu existed, as
+> a design sketch and research log. It is kept because the reasoning is still
+> interesting — the measurements, the rejected alternatives, and the two
+> findings that shaped the implementation (per-group offsets, and hard filters
+> vs soft preferences).
+>
+> **It is not documentation.** Where it disagrees with the code, the code wins.
+> Several sections describe things that were never built, or were built
+> differently. For what kishizu actually does, see [README.md](README.md).
+
+Written 2026-09-07. Implementation followed over the following days.
 
 ## Layers, in the order they act
 
@@ -19,7 +28,7 @@ testable and depends only on the ones above it.
 | **7** | **Filter** | Accept or reject a candidate | Hard predicates only: group ∈ set, resolution ≥ 1080p (**floor, not ladder**), 500MB–2GB, not batch, not dub |
 | **8** | **Ranker** | Orders accepted candidates | Soft preferences: uncensored first, then group order, then codec (x264 > x265 > AV1). Applied after the delay window |
 | **9** | **Delay window** | Waits for a better release | Hold pending set ~10–15 min, then rank and pick. Backlog binging is out of scope so latency is free |
-| **10** | **Downloader** | Gets the bytes, stops seeding | Transmission RPC (`transmission-remote -a <magnet>`). `done-remove.sh` already removes the torrent on completion, leaving files on disk |
+| **10** | **Downloader** | Gets the bytes, stops seeding | Transmission RPC (`transmission-remote -a <magnet>`). A done-script removes the torrent on completion, leaving files on disk |
 | **11** | **Library placement** | Puts the file where Syncthing sees it | `<library>/<Show>/<Show> - E<NN>.mkv`, Windows-safe sanitisation at creation |
 | **12** | **Watch signal** | Learns you finished an episode | Bespoke mpv script → tool. Removes AniList from the loop entirely |
 | **13** | **Deletion** | Frees space | On `watched`, delete file, mark `deleted`, keep N most recent watched |
@@ -45,11 +54,11 @@ uploads). Layers 1–2 and 6–14 are designed but not built.
 ## Why this exists
 
 AniList's API returned `403 "The AniList API has been temporarily disabled due to severe
-stability issues"` for 5+ days continuously (as of 2026-09-07). AutoAnimeDownloader (AAD)
-depends on AniList for its watch list, episode schedule, and watch progress — so the entire
-pipeline stalled: no new downloads **and** no deletion of watched episodes.
+stability issues"` for 5+ days continuously (as of 2026-09-07). The tool it replaced
+depended on AniList for its watch list, episode schedule, and watch progress — so the
+entire pipeline stalled: no new downloads **and** no deletion of watched episodes.
 
-The conclusion is not "harden AAD against outages." It's that a personal, single-user,
+The conclusion is not "harden it against outages." It's that a personal, single-user,
 single-season tool should not have a runtime dependency on a third-party tracker at all.
 
 ## Scope
@@ -253,11 +262,11 @@ earlier version of this document which claimed backfill needed HTML.)
 
 ## Step 6 — Download
 
-**Mechanism:** Transmission RPC. Already running on `media-net` at `100.64.0.1:9091`,
-mounts `/media`, runs as `1001:1001`.
+**Mechanism:** Transmission RPC, on the local network. Runs as a non-root user
+and mounts the media tree.
 
 - Add: `transmission-remote -a <magnet>`
-- On completion, `configs/transmission/done-remove.sh` already fires:
+- On completion, a Transmission done-script removes the torrent:
   `sleep 5; transmission-remote -t "$TR_TORRENT_HASH" -r`
 - Result: file on disk, torrent removed, not seeding → Syncthing picks it up
 
@@ -270,13 +279,13 @@ sanitisation applied at creation (see below).
 
 **Mechanism:** bespoke mpv script POSTs to the tool when an episode finishes.
 
-- Removes AniList from the loop entirely — currently mpv → AniList → AAD, a round trip
+- Removes AniList from the loop entirely — previously mpv → AniList → downloader, a round trip
   between two machines the user owns, via a third party.
 - Routing: tailnet HTTP POST (immediate) or a file drop Syncthing already syncs (zero new
   network surface). Not yet decided.
 
 **Deletion:** on `watched`, delete the file and mark `episode.state = deleted`. Keep N most
-recent watched episodes (configurable, currently 2 in AAD) so a mis-mark isn't fatal.
+recent watched episodes (configurable, currently 2) so a mis-mark isn't fatal.
 
 ## Cross-cutting: duplicate guards
 
@@ -376,7 +385,7 @@ The `1_2` (English-translated) category is ~100+ pages deep at 75/page — rough
 
 **RSS does NOT paginate.** `?page=rss&p=2` returns a set 75/75 identical to a freshly
 fetched `p=1` — the `p` parameter is ignored on RSS (same limitation as Nyaa's RSS
-ignoring `s=seeders&o=desc`, already documented in AAD's `sources.md`).
+ignoring `s=seeders&o=desc`).
 
 **But this does not matter, because RSS accepts filters.** Verified 2026-09-08:
 
@@ -460,7 +469,7 @@ Backlog binging is out of scope, so the latency cost doesn't apply.
 > codecs that implies); 500mb - 2gb, rank uncensored first if available, then only by
 > release group"
 
-That is five predicates and one ordering — a fraction of AAD's `Priorities` struct
+That is five predicates and one ordering — a fraction of the previous tool's `Priorities` struct
 (`criteria_order`, `fansubs`, `resolutions`, `sources`, `codecs`, `audio`, `ignore_list`,
 plus `min_seeders`, two size ceilings, adaptive pagination).
 
@@ -489,7 +498,7 @@ Implication for the model: **hard filters** (accept/reject) and **soft preferenc
 | 5 | Match: upload → show | **The hard part.** Title variants + offset |
 | 6 | Episode number | Parsed from release name |
 | 7 | Filter / rank | Per-show, trained |
-| 8 | Downloader | **Transmission** (already running; `done-remove.sh` already stops seeding) |
+| 8 | Downloader | **Transmission** (already running; a done-script stops seeding) |
 | 9 | Library placement | Where the file lands |
 | 10 | Watch signal | Bespoke mpv script → tool |
 | 11 | Deletion policy | Delete watched, keep N recent |
@@ -512,7 +521,7 @@ Steps 2 and 4 are the duplicate/wrong-episode guards. Step 3 needs one integer p
 **Transmission — already running, already does exactly what's needed.**
 
 The audiobooks pipeline already implements "download then stop seeding so files can be
-copied," via `configs/transmission/done-remove.sh`:
+copied," via a Transmission done-script:
 
 ```sh
 #!/bin/sh
@@ -522,8 +531,8 @@ sleep 5   # let the daemon finish final bookkeeping before the RPC call
 /usr/bin/transmission-remote -t "$TR_TORRENT_HASH" -r
 ```
 
-Transmission is on `media-net`, mounts `/media`, exposes RPC on `100.64.0.1:9091`, and runs
-as `1001:1001`. Adding a torrent is one RPC call with a magnet or URL.
+Transmission exposes an RPC endpoint; adding a torrent is one call with a magnet
+or URL. It runs as a non-root user and mounts the media tree.
 
 **Decision: reuse Transmission.** No BitTorrent client to write or maintain. The tool
 becomes a coordinator: poll RSS → match → rank → hand magnet to Transmission → completion
@@ -565,7 +574,7 @@ numbering. BLEACH TYBW episode 7:
 A single show-level offset cannot work: 40 is right for three groups and wrong for the
 fourth (7 − 40 = −33). **Offset must be keyed by release group, with a show-level default.**
 
-This matches AAD's `packAxis` finding (decisions.md #79) — three numbering hypotheses —
+This matches a `packAxis` finding from the tool kishizu replaced — three numbering hypotheses —
 but applies it to *episode* releases, not just packs.
 
 ### Finding 2: title matching is easier than feared
@@ -701,7 +710,10 @@ Seanime's `validateBatchResults`.)
 
 **Explicitly rejected: resolution ladder.** Resolution stays a hard floor (`>= 1080p`).
 
-## Not yet decided
+## Not yet decided (at the time of writing)
+
+These were open questions when this was written. Most have since been settled by
+just building it; they're left as a record of what was uncertain.
 
 - ~~Whether to integrate an existing RSS listener tool or own the feed polling~~
   → **Own it.** autobrr can't express episode arithmetic; polling is trivial at our volume.
@@ -712,7 +724,10 @@ Seanime's `validateBatchResults`.)
 - Store: SQLite (like `dig`) vs plain JSON files
 - Whether `max_episode` is entered by the user or inferred from cadence
 
-## Build order (proposed)
+**Resolved since:** SQLite; the mpv signal is an HTTP POST; `max_episode` is
+entered by the user; the schedule scrape is used and refreshed daily.
+
+## Build order (as proposed)
 
 Start from the top, one layer at a time, each independently testable:
 
@@ -724,9 +739,10 @@ Start from the top, one layer at a time, each independently testable:
 6. **Watch signal + deletion** — mpv script and the delete path
 7. **UI** — single page + pop-outs, once the above is proven
 
-Layers 2–3 are already prototyped in Python and can be ported directly.
+Layers 2–3 were prototyped in Python and ported. This is roughly the order the
+implementation followed.
 
 ## Name
 
-Not yet chosen. Candidates considered: something short, Go-idiomatic, and not already taken
-by a well-known tool. `dig` set the precedent (one syllable, a verb, related to the domain).
+Settled as **kishizu** (季雫) — short, and following the precedent set by `dig`:
+one word, tied to the domain. The candidates above were discarded.
