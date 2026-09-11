@@ -80,6 +80,15 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			}
 			states = append(states, cycle.StateOf(ep, now))
 		}
+		// A show whose next episode is past its season length has finished.
+		// Without this it would poll weekly forever, hunting an episode that
+		// will never exist.
+		if sh.MaxEpisode > 0 && l.nextEpisode(sh) > sh.MaxEpisode {
+			debug.Log("%s: season complete (next %d > max %d), not due",
+				sh.CanonicalName, l.nextEpisode(sh), sh.MaxEpisode)
+			continue
+		}
+
 		if d, ok := cycle.PollInterval(states); ok {
 			out[sh] = d
 			continue
@@ -89,6 +98,23 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 		}
 	}
 	return out
+}
+
+// nextEpisode is the first episode not yet watched or deleted — the one the
+// listener would hunt for next.
+func (l *Listener) nextEpisode(sh *store.Show) int {
+	eps, err := l.st.EpisodesForShow(sh.ID)
+	if err != nil {
+		return 1
+	}
+	next := 1
+	for _, ep := range eps {
+		if ep.Number >= next &&
+			(ep.State == episode.Watched || ep.State == episode.Deleted) {
+			next = ep.Number + 1
+		}
+	}
+	return next
 }
 
 // Poll fetches every tracked show's feed and decides what to grab.

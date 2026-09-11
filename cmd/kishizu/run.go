@@ -43,6 +43,9 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 	// are honoured: a hunting show polls every 3 minutes while an up-to-date
 	// one is never touched.
 	lastPolled := map[int64]time.Time{}
+	// transmissionDown latches the failure alert so a sustained outage pings
+	// once rather than on every poll.
+	transmissionDown := false
 
 	poll := func() {
 		// Poll only the shows that are due: hunting episodes get the aggressive
@@ -77,8 +80,20 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 				}
 				if err := tc.AddWithDir(magnetFor(d.Item.InfoHash, d.Item.Title), library); err != nil {
 					log.Printf("transmission add: %v", err)
-					n.Send("kishizu: download failed", d.Show+" ep"+itoa(d.Episode)+": "+err.Error(), ntfy.PriorityHigh)
+					// Alert once, then stay quiet until it recovers. At a
+					// 3-minute poll, pinging every failure is ~480 a day.
+					if !transmissionDown {
+						transmissionDown = true
+						n.Send("kishizu: Transmission unreachable",
+							"grabs will be retried; "+err.Error(), ntfy.PriorityHigh)
+					}
 					continue
+				}
+				if transmissionDown {
+					transmissionDown = false
+					log.Printf("transmission: reachable again")
+					n.Send("kishizu: Transmission reachable",
+						"grabs resumed", ntfy.PriorityDefault)
 				}
 				if err := l.MarkGrabbed(d); err != nil {
 					log.Printf("mark grabbed: %v", err)

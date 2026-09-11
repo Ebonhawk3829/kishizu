@@ -14,9 +14,13 @@ const (
 	Wanted      State = "wanted"      // known, not yet grabbed
 	Downloading State = "downloading" // handed to Transmission
 	Downloaded  State = "downloaded"  // on disk, not yet watched
-	Watched     State = "watched"     // user finished it
-	Deleted     State = "deleted"     // file removed after watching
-	Blocked     State = "blocked"     // user said never grab this
+	// Missing: kishizu put a file here and it is gone before the watch signal
+	// arrived. Only possible when file_path is set, so episodes marked
+	// "downloaded" by hand (files on the user's PC) never reach this state.
+	Missing State = "missing"
+	Watched State = "watched" // user finished it
+	Deleted State = "deleted" // file removed after watching
+	Blocked State = "blocked" // user said never grab this
 )
 
 // ParseState maps a stored string to a State, defaulting to Wanted for anything
@@ -29,6 +33,8 @@ func ParseState(s string) State {
 		return Downloading
 	case "downloaded":
 		return Downloaded
+	case "missing":
+		return Missing
 	case "watched":
 		return Watched
 	case "deleted":
@@ -86,6 +92,10 @@ func rank(s State) int {
 	case Downloading:
 		return 1
 	case Downloaded:
+		return 2
+	case Missing:
+		// Missing sits alongside Downloaded: the file was here and is not now.
+		// It is not terminal — the user may re-grab or mark it watched.
 		return 2
 	case Watched:
 		return 3

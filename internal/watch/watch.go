@@ -96,6 +96,56 @@ func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
 	return deleted, kept, nil
 }
 
+// CheckMissing finds episodes kishizu downloaded whose file has vanished
+// before the watch signal arrived, and marks them missing.
+//
+// Scoped deliberately to episodes with a file_path. An episode marked
+// "downloaded" by hand — the user has it on their PC, the server never had a
+// copy — has no path and is not missing. Warning about files kishizu never
+// created would be noise, and would need a "trust me" button to dismiss.
+//
+// Returns the episodes newly marked, so the caller can notify.
+func (h *Handler) CheckMissing() ([]*store.Episode, error) {
+	if h.Library == "" {
+		return nil, nil
+	}
+	shows, err := h.st.ListShows()
+	if err != nil {
+		return nil, err
+	}
+	var out []*store.Episode
+	for _, sh := range shows {
+		eps, err := h.st.EpisodesForShow(sh.ID)
+		if err != nil {
+			continue
+		}
+		for _, ep := range eps {
+			if ep.State != episode.Downloaded || ep.FilePath == "" {
+				continue
+			}
+			if fileExists(ep.FilePath) {
+				continue
+			}
+			if err := h.st.SetEpisodeState(sh.ID, ep.Number, episode.Missing); err != nil {
+				log.Printf("watch: mark missing %s ep%d: %v", sh.CanonicalName, ep.Number, err)
+				continue
+			}
+			log.Printf("watch: %s ep%d missing (expected %s)", sh.CanonicalName, ep.Number, ep.FilePath)
+			out = append(out, ep)
+		}
+	}
+	return out, nil
+}
+
+// fileExists reports whether a path is present on disk.
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // deleteFile removes one episode's file and marks the episode deleted.
 //
 // The path is checked against the library root before deleting: a corrupted

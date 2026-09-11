@@ -166,9 +166,11 @@ async function loadShows() {
         &middot; <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
         &middot; <span class="pill ${s.needs_attention ? 'no' : ''}">${escapeHtml(s.state || 'unknown')}</span>
         &middot; <span class="meta">${s.downloaded} dl &middot; ${s.watched} watched &middot; ${s.deleted} deleted</span>
-        ${s.next_schedule ? `<div>ep ${s.next_schedule.episode} ${s.next_schedule.status === 'aired'
-          ? '<span style="color:var(--warn)">aired, not grabbed</span>'
-          : 'airs ' + new Date(s.next_schedule.airs_at).toLocaleString(undefined, {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>` : ''}
+        ${s.state === 'missing' ? `<div class="row" style="margin-top:6px">
+          <span class="meta" style="color:var(--warn)">file gone before the watch signal</span>
+          <button onclick="unlatch(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Re-download</button>
+          <button class="ghost" onclick="watchedUpTo(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Mark watched</button>
+        </div>` : ''}
       </div>
       <div class="row">
         <label class="meta" for="ep-${s.id}">ep</label>
@@ -192,6 +194,19 @@ function escapeHtml(s) {
 
 function dayName(n) {
   return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][n] || '?';
+}
+
+// Re-download an episode: the only way out of a terminal state, and the
+// "that deletion was an accident" path for a missing file.
+async function unlatch(showId, ep, name) {
+  ep = parseInt(ep, 10);
+  if (!ep || ep < 1) { banner('Set an episode number first.', true); return; }
+  if (!confirm(`Re-download ep ${ep} of ${name}? It will be hunted again.`)) return;
+  try {
+    const r = await api('/api/unlatch', { show_id: showId, episode: ep });
+    banner(`${name} ep ${r.episode}: ${r.state}, will be hunted again.`);
+    loadShows();
+  } catch (e) { banner(e.message, true); }
 }
 
 // Mark an episode as already on disk. For files obtained outside kishizu —
