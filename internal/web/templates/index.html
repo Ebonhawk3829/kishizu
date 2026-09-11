@@ -30,7 +30,8 @@
   }
   .card h2 { font-size: 15px; margin: 0 0 6px; }
   .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
-  /* Section headers split airing shows from ones with no air dates yet. */
+  /* Section headers split airing shows from ones with no air dates yet.
+     Each section owns its own grid; the outer container is plain flow. */
   .sect {
     margin: 26px 0 10px; font-size: 12px; font-weight: 600;
     letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
@@ -111,6 +112,9 @@
   .grades button.g-good.sel { background: #1f4d33; }
   .grades button.g-acceptable.sel { background: #4a4326; }
   .grades button.g-wrong.sel { background: #4d1f1f; }
+  /* Add-show form: inline row, only as tall as it needs to be. */
+  .addshow { margin-top: 8px; }
+  .addshow .ok-note { color: var(--ok); font-size: 12px; margin-left: 8px; }
 </style>
 </head>
 <body>
@@ -120,20 +124,6 @@
 <div class="sub">seasonal anime downloader</div>
 
 <div id="banner" class="banner hidden"></div>
-
-<div class="card" id="panel-grade-any">
-  <h2>Grade a release</h2>
-  <div class="meta">Paste a Nyaa link or release title. Pick the show and episode, then mark each part good / acceptable / wrong.</div>
-  <div class="row">
-    <select id="any-show" style="flex:1"></select>
-    <input id="any-ep" type="number" min="1" style="width:64px" title="episode">
-  </div>
-  <div class="row">
-    <input id="any-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]" style="flex:1">
-    <button onclick="inspectAny()">Inspect</button>
-  </div>
-  <div id="any-grade-panel"></div>
-</div>
 
 <div id="panel-train" class="card hidden" style="margin-bottom:20px">
   <h2 id="train-title">Training</h2>
@@ -156,7 +146,33 @@
   <div id="resolved"></div>
 </div>
 
-<div class="grid" id="shows"></div>
+<div class="card addshow">
+  <h2>Add a show</h2>
+  <div class="meta">Name it exactly as animeschedule.net lists it (or paste a Nyaa-friendly alias). Max episodes is the season length, 0 if unknown.</div>
+  <div class="row">
+    <input id="add-name" type="text" placeholder="Show name" style="flex:1; min-width:220px">
+    <input id="add-aliases" type="text" placeholder="aliases, comma-separated (optional)" style="flex:1; min-width:220px">
+    <input id="add-max" type="number" min="0" value="0" style="width:70px" title="max episodes">
+    <button onclick="addShow()">Add</button>
+  </div>
+  <span class="ok-note hidden" id="add-note"></span>
+</div>
+
+<div id="shows"></div>
+
+<div class="card" id="panel-grade-any" style="margin-top:26px">
+  <h2>Grade a release</h2>
+  <div class="meta">Paste a Nyaa link or release title. Pick the show and episode, then mark each part good / acceptable / wrong.</div>
+  <div class="row">
+    <select id="any-show" style="flex:1"></select>
+    <input id="any-ep" type="number" min="1" style="width:64px" title="episode">
+  </div>
+  <div class="row">
+    <input id="any-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]" style="flex:1">
+    <button onclick="inspectAny()">Inspect</button>
+  </div>
+  <div id="any-grade-panel"></div>
+</div>
 
 </div>
 
@@ -196,6 +212,24 @@ async function loadShows() {
     ? `<div class="sect">${label} <span class="sect-n">${list.length}</span></div>
        <div class="grid">${list.map(card).join('')}</div>` : '';
   el('shows').innerHTML = sect('Airing', airing) + sect('Upcoming', upcoming);
+}
+
+// Add a show by name. Aliases are optional; the canonical name is always an
+// alias of itself, so matching never special-cases it.
+async function addShow() {
+  const name = el('add-name').value.trim();
+  if (!name) { banner('Give the show a name first.', true); return; }
+  const aliases = el('add-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
+  const max = parseInt(el('add-max').value, 10) || 0;
+  try {
+    const r = await api('/api/shows', { name, aliases, max_episode: max });
+    el('add-name').value = ''; el('add-aliases').value = ''; el('add-max').value = '0';
+    const note = el('add-note');
+    note.textContent = `Added ${r.name}. It will pick up an air date at the next schedule refresh.`;
+    note.classList.remove('hidden');
+    setTimeout(() => note.classList.add('hidden'), 8000);
+    loadShows();
+  } catch (e) { banner(e.message, true); }
 }
 
 // One show card. Status is the hero; everything else is quieter than it.
