@@ -23,12 +23,25 @@
   .attr-edit { width: 130px; padding: 3px 6px; font-size: 13px; }
   h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .5px; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  /* Header: logo drop beside the wordmark. */
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .head img { width: 44px; height: 44px; }
+  .head h1 { margin: 0; }
+  .head .sub { margin: 0; }
   .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
   .card {
     background: var(--card); border: 1px solid var(--line);
     border-radius: 8px; padding: 14px 16px;
   }
   .card h2 { font-size: 15px; margin: 0 0 6px; }
+  /* Card with cover art: image left, content right. Without art the content
+     simply takes the full width — no placeholder box, no layout jump. */
+  .card .body { display: flex; gap: 12px; }
+  .card .art {
+    width: 64px; height: 92px; border-radius: 6px; object-fit: cover;
+    flex: none; background: #12121a; border: 1px solid var(--line);
+  }
+  .card .grow { flex: 1; min-width: 0; }
   .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
   /* Section headers split airing shows from ones with no air dates yet.
      Each section owns its own grid; the outer container is plain flow. */
@@ -120,8 +133,13 @@
 <body>
 <div class="wrap">
 
-<h1>kishizu</h1>
-<div class="sub">seasonal anime downloader</div>
+<div class="head">
+  <img src="/static/logo.png" alt="kishizu">
+  <div>
+    <h1>kishizu</h1>
+    <div class="sub">seasonal anime downloader</div>
+  </div>
+</div>
 
 <div id="banner" class="banner hidden"></div>
 
@@ -267,34 +285,40 @@ function card(s) {
 
   return `
   <div class="card">
-    <h2>${escapeHtml(s.name)}</h2>
-    <div class="row" style="margin:2px 0 0">
-      <span class="status ${cls}">${escapeHtml(st)}</span>
-      ${s.needs_attention ? '<span class="status st-missing">needs attention</span>' : ''}
+    <div class="body">
+      ${s.image_url ? `<img class="art" src="${escapeHtml(s.image_url)}" loading="lazy" alt=""
+        onerror="this.remove()">` : ''}
+      <div class="grow">
+        <h2>${escapeHtml(s.name)}</h2>
+        <div class="row" style="margin:2px 0 0">
+          <span class="status ${cls}">${escapeHtml(st)}</span>
+          ${s.needs_attention ? '<span class="status st-missing">needs attention</span>' : ''}
+        </div>
+        <div class="air ${s.next_schedule && s.next_schedule.status === 'upcoming' ? 'soon' : ''}">${air}</div>
+        ${s.state === 'missing' ? `<div class="row" style="margin-bottom:8px">
+          <span class="meta" style="color:var(--warn)">file gone before the watch signal</span>
+          <button onclick="unlatch(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Re-download</button>
+          <button class="ghost" onclick="watchedUpTo(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Mark watched</button>
+        </div>` : ''}
+        <div class="row">
+          <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px"
+            title="episode number for the actions below">
+          <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
+            title="mark episodes 1..N watched, so they are never grabbed">Watched up to</button>
+          <button class="ghost" onclick="setDownloaded(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
+            title="mark this episode as already on disk, ready to watch">Have it</button>
+          <button class="ghost" onclick="startTrain(${s.id})"
+            title="teach kishizu which releases match this show">Train</button>
+        </div>
+        <div class="foot">
+          ${counts || 'no episodes yet'}
+          ${s.trained ? ` &middot; <button onclick="toggleOffsets(${s.id})">${nGroups} group offsets</button>
+            <button onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">reset</button>`
+          : ' &middot; untrained'}
+        </div>
+        <div class="chips" id="off-${s.id}"></div>
+      </div>
     </div>
-    <div class="air ${s.next_schedule && s.next_schedule.status === 'upcoming' ? 'soon' : ''}">${air}</div>
-    ${s.state === 'missing' ? `<div class="row" style="margin-bottom:8px">
-      <span class="meta" style="color:var(--warn)">file gone before the watch signal</span>
-      <button onclick="unlatch(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Re-download</button>
-      <button class="ghost" onclick="watchedUpTo(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Mark watched</button>
-    </div>` : ''}
-    <div class="row">
-      <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px"
-        title="episode number for the actions below">
-      <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
-        title="mark episodes 1..N watched, so they are never grabbed">Watched up to</button>
-      <button class="ghost" onclick="setDownloaded(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
-        title="mark this episode as already on disk, ready to watch">Have it</button>
-      <button class="ghost" onclick="startTrain(${s.id})"
-        title="teach kishizu which releases match this show">Train</button>
-    </div>
-    <div class="foot">
-      ${counts || 'no episodes yet'}
-      ${s.trained ? ` &middot; <button onclick="toggleOffsets(${s.id})">${nGroups} group offsets</button>
-        <button onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">reset</button>`
-      : ' &middot; untrained'}
-    </div>
-    <div class="chips" id="off-${s.id}"></div>
   </div>`;
 }
 

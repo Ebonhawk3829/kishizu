@@ -29,6 +29,18 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
+//go:embed img/kishizu_logo_512.png
+var logoFS embed.FS
+
+// logoData is the raw PNG, read once at init.
+var logoData = func() []byte {
+	b, err := logoFS.ReadFile("img/kishizu_logo_512.png")
+	if err != nil {
+		return nil
+	}
+	return b
+}()
+
 // Server holds the dependencies the handlers need.
 type Server struct {
 	st    *store.Store
@@ -59,6 +71,16 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /", s.handleIndex)
+	// The logo, embedded so the binary stays self-contained.
+	mux.HandleFunc("GET /static/logo.png", func(w http.ResponseWriter, r *http.Request) {
+		if len(logoData) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(logoData)
+	})
 	mux.HandleFunc("GET /shows", s.handleListShows)
 	// Adding a show from the UI. Seeding from shows.yaml still works and
 	// updates aliases for existing shows, so the two paths coexist.
@@ -667,6 +689,8 @@ type showJSON struct {
 	Aliases []string       `json:"aliases"`
 	Offsets map[string]int `json:"offsets"`
 	Trained bool           `json:"trained"`
+	// ImageURL is the season's cover art from the schedule, empty when unknown.
+	ImageURL string `json:"image_url"`
 	// Cadence is the air weekday, 0 = Sunday. Nil when unknown. Shown in the
 	// UI so the user can see whether a show is on air or between episodes.
 	Cadence *int `json:"cadence"`
@@ -704,14 +728,15 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 		next := nextUnwatched(s.st, sh)
 		offsets, _ := s.st.GroupOffsets(sh.ID)
 		j := showJSON{
-			ID:      sh.ID,
-			Name:    sh.CanonicalName,
-			Next:    next,
-			Max:     sh.MaxEpisode,
-			Aliases: sh.Aliases,
-			Offsets: offsets,
-			Trained: len(offsets) > 0,
-			Cadence: sh.CadenceWeekday,
+			ID:       sh.ID,
+			Name:     sh.CanonicalName,
+			Next:     next,
+			Max:      sh.MaxEpisode,
+			Aliases:  sh.Aliases,
+			Offsets:  offsets,
+			Trained:  len(offsets) > 0,
+			Cadence:  sh.CadenceWeekday,
+			ImageURL: sh.ImageURL,
 		}
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
 			var states []cycle.State
