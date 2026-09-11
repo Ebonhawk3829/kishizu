@@ -123,9 +123,6 @@ docker compose up -d
 
 Open **http://localhost:8098**.
 
-> **The image may require authentication.** GitHub Packages are private by
-> default, so if the pull fails with `denied` or `unauthorized`, either
-> authenticate first (`docker login ghcr.io`) or build from source below.
 > Pinning a version rather than using `:latest` is recommended — this tool
 > is not on a compatibility promise.
 
