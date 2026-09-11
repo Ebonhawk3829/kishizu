@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/art"
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
@@ -48,9 +49,12 @@ type Server struct {
 	watch *watch.Handler
 	// notifier is optional; nil disables notifications.
 	notifier *ntfy.Client
+	// art caches cover art on disk so the UI does not depend on the
+	// schedule's CDN at page-load time. Optional; nil means no art.
+	art *art.Cache
 }
 
-// New builds a Server and parses templates.
+// New builds the server and parses the embedded templates.
 func New(st *store.Store) (*Server, error) {
 	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
 	if err != nil {
@@ -65,6 +69,10 @@ func (s *Server) SetWatch(h *watch.Handler) { s.watch = h }
 
 // SetNotifier attaches the ntfy client for user-visible alerts.
 func (s *Server) SetNotifier(c *ntfy.Client) { s.notifier = c }
+
+// SetArt attaches the cover-art cache. Without it the UI falls back to the
+// remote URLs, which works but keeps the CDN dependency.
+func (s *Server) SetArt(c *art.Cache) { s.art = c }
 
 // Handler returns the routed mux.
 func (s *Server) Handler() http.Handler {
@@ -81,6 +89,12 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Type", "image/png")
 		w.Write(logoData)
 	})
+	// Cached cover art, served from disk so the browser never reaches the
+	// schedule's CDN.
+	if s.art != nil {
+		mux.Handle("GET /art/", http.StripPrefix("/art/",
+			http.FileServer(http.Dir(s.art.Dir()))))
+	}
 	mux.HandleFunc("GET /shows", s.handleListShows)
 	// Adding a show from the UI. Seeding from shows.yaml still works and
 	// updates aliases for existing shows, so the two paths coexist.
@@ -736,7 +750,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Offsets:  offsets,
 			Trained:  len(offsets) > 0,
 			Cadence:  sh.CadenceWeekday,
-			ImageURL: sh.ImageURL,
+			ImageURL: s.imageFor(sh),
 		}
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
 			var states []cycle.State
@@ -778,8 +792,20 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// showState condenses per-episode cycle states into one show state.
-//
+// imageFor resolves a show's cover art to a locally cached file when the
+// cache has it, so the browser never reaches the schedule's CDN. Falls back
+// to the remote URL when the art is not cached yet.
+func (s *Server) imageFor(sh *store.Show) string {
+	if sh.ImageURL == "" || s.art == nil {
+		return sh.ImageURL
+	}
+	name, err := s.art.Ensure(sh.ImageURL)
+	if err != nil || name == "" {
+		return sh.ImageURL
+	}
+	return "/art/" + name
+}
+
 // The most demanding episode wins: hunting beats ready-to-watch beats
 // up-to-date. Any no-release-found episode sets NeedsAttention, since that is
 // the state asking the user to look at it.

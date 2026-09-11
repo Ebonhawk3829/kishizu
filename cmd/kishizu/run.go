@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/art"
 	"github.com/Ebonhawk3829/kishizu/internal/grab"
 	"github.com/Ebonhawk3829/kishizu/internal/listen"
 	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
@@ -29,7 +30,7 @@ func itoa(n int) string { return fmt.Sprint(n) }
 // it is switched on, and the user decides when. In dry-run the loop logs every
 // decision with its reason, so the behaviour can be reviewed before anything
 // downloads.
-func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
+func runLoop(st *store.Store, artCache *art.Cache, rpcURL, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
 	l := listen.New(st)
 	tc := transmission.New(rpcURL)
 	w := watch.New(st, library, keep)
@@ -146,7 +147,37 @@ func runLoop(st *store.Store, rpcURL, library string, keep int, interval time.Du
 				if e.ImageURL != sh.ImageURL {
 					_ = st.SetImageURL(sh.ID, e.ImageURL)
 				}
+				// Cache the art now, so the first page load after a refresh is
+				// served from disk rather than reaching out to the CDN.
+				if artCache != nil {
+					if _, err := artCache.Ensure(e.ImageURL); err != nil {
+						log.Printf("art: cache %s: %v", sh.CanonicalName, err)
+					}
+				}
 				updated++
+			}
+		}
+		// Release art for finished seasons. The schedule drops a show once
+		// it stops airing, so anything with art that is no longer on the
+		// schedule is done — its cover is not coming back.
+		if artCache != nil {
+			onAir := map[string]bool{}
+			for _, sh := range shows {
+				aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
+				if e := schedule.FindWithAliases(sched, aliases); e != nil {
+					onAir[sh.CanonicalName] = true
+				}
+			}
+			for _, sh := range shows {
+				if sh.ImageURL == "" || onAir[sh.CanonicalName] {
+					continue
+				}
+				if err := artCache.Release(sh.ImageURL); err != nil {
+					log.Printf("art: release %s: %v", sh.CanonicalName, err)
+				} else {
+					log.Printf("art: released %s (season over)", sh.CanonicalName)
+					_ = st.SetImageURL(sh.ID, "")
+				}
 			}
 		}
 		log.Printf("schedule: refreshed, %d/%d shows have air dates", updated, len(shows))
