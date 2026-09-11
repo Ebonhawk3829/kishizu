@@ -38,9 +38,13 @@ type Release struct {
 }
 
 var (
-	reGroup      = regexp.MustCompile(`^\s*\[([^\]]+)\]`)
-	reSxE        = regexp.MustCompile(`(?i)\bs(\d{1,2})[ ._-]?e(\d{1,4})\b`)
-	reBare       = regexp.MustCompile(`[-–]\s*(\d{1,4})(?:\s|$|[\[(.])`)
+	reGroup = regexp.MustCompile(`^\s*\[([^\]]+)\]`)
+	reSxE   = regexp.MustCompile(`(?i)\bs(\d{1,2})[ ._-]?e(\d{1,4})\b`)
+	reBare  = regexp.MustCompile(`[-–]\s*(\d{1,4})(?:\s|$|[\[(.])`)
+	// The form kishizu itself writes on completion: "<Show> - E09.mkv".
+	// Without this the tool cannot read the episode number from its own
+	// renamed files, which is exactly what the mpv watch signal sends back.
+	reLibrary    = regexp.MustCompile(`(?i)\s-\sE(\d{1,4})(?:\s|\.|$)`)
 	reSeasonWord = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)\s+season\b|\bseason\s+(\d{1,2})\b`)
 	reResolution = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k)\b`)
 	// Codec. The optional separator between the letter and the digits matters:
@@ -66,6 +70,9 @@ var (
 var (
 	ReSxE  = reSxE
 	ReBare = reBare
+	// ReLibrary matches the form kishizu writes on completion, exported so
+	// callers can recognise their own output without duplicating the pattern.
+	ReLibrary = reLibrary
 )
 
 // Parse extracts structured fields from a release title.
@@ -86,6 +93,15 @@ func Parse(title string) Release {
 	if m := reSxE.FindStringSubmatch(title); m != nil {
 		r.Season, _ = strconv.Atoi(m[1])
 		r.Episode, _ = strconv.Atoi(m[2])
+	}
+
+	// Library form, e.g. "Clevatess Season 2 - E09.mkv". Checked after SxE so
+	// a real release title keeps its own reading, and only fills in when
+	// nothing else found a number.
+	if r.Episode == 0 {
+		if m := reLibrary.FindStringSubmatch(title); m != nil {
+			r.Episode, _ = strconv.Atoi(m[1])
+		}
 	}
 
 	if m := reBare.FindStringSubmatch(title); m != nil {
