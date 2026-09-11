@@ -22,7 +22,7 @@ shows:
       - Bleach: Sennen Kessen Hen - Kashin Tan
       - BLEACH Thousand Year Blood War
     watched: 7
-    max: 13
+    max: 10
 
   - name: Clevatess Season 2
     aliases:
@@ -34,14 +34,14 @@ shows:
     aliases:
       - Mushoku Tensei III
       - Mushoku Tensei 3rd Season
-    watched: 10
-    max: 12
+    watched: 11
+    max: 14
 
   - name: Re:ZERO -Starting Life in Another World- Season 4
     aliases:
       - Re:Zero kara Hajimeru Isekai Seikatsu 4
     watched: 15
-    max: 16
+    max: 19
 
   - name: Smoking Behind the Supermarket with You
     aliases:
@@ -62,3 +62,68 @@ shows:
       - Kimikoi to Seiyaku
     watched: 10
     max: 13
+
+  # ── Upcoming ──────────────────────────────────────────────────────────────
+  # Tracked but not yet airing. No watch progress, and no air date until
+  # animeschedule lists them — the daily refresh picks them up automatically
+  # once they appear, and they start hunting from then.
+
+  - name: Black Clover Season 2
+    watched: 0
+    max: 0
+
+  - name: Chainsaw Man: Shikaku-hen
+    watched: 0
+    max: 0
+
+  - name: Demon Slayer: Kimetsu no Yaiba Infinity Castle Part 2
+    watched: 0
+    max: 0
+
+  - name: Diamond no Ace act II: Second Season Part 2
+    watched: 0
+    max: 0
+
+  - name: Dragon Ball Super: Beerus
+    watched: 0
+    max: 0
+
+  - name: Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka VI
+    watched: 0
+    max: 0
+
+  - name: Firefly Wedding
+    watched: 0
+    max: 0
+
+  - name: Gachiakuta Season 2
+    watched: 0
+    max: 0
+
+  - name: One Punch Man Season 3 Part 2
+    watched: 0
+    max: 0
+
+  - name: Overgeared
+    watched: 0
+    max: 0
+
+  - name: PSYREN
+    watched: 0
+    max: 0
+
+  - name: Shangri-La Frontier Season 3
+    watched: 0
+    max: 0
+
+  - name: The Ramparts of Ice Season 2
+    watched: 0
+    max: 0
+
+  - name: The Vermilion Mask
+    watched: 0
+    max: 0
+
+  - name: Witch on the Holy Night
+    watched: 0
+    max: 0
