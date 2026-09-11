@@ -9,8 +9,10 @@
 A seasonal anime downloader: you name the shows you're watching this cour, and
 episodes appear on disk as they air — then disappear once you've watched them.
 
+[![Release](https://img.shields.io/github/v/release/Ebonhawk3829/kishizu?style=flat-square)](https://github.com/Ebonhawk3829/kishizu/releases)
+[![Docker Image](https://img.shields.io/badge/ghcr.io-ebonhawk3829%2Fkishizu-blue?style=flat-square&logo=docker)](https://github.com/Ebonhawk3829/kishizu/pkgs/container/kishizu)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![Go](https://img.shields.io/badge/go-1.27-blue?style=flat-square)](go.mod)
+[![CI](https://img.shields.io/github/actions/workflow/status/Ebonhawk3829/kishizu/ci.yml?label=CI&style=flat-square)](https://github.com/Ebonhawk3829/kishizu/actions)
 
 </div>
 
@@ -93,7 +95,7 @@ If that's what you need today, you'd be better served by
 ```yaml
 services:
   kishizu:
-    image: ghcr.io/ebonhawk3829/kishizu:latest
+    image: ghcr.io/ebonhawk3829/kishizu:0.1.0
     user: "1000:1000"             # match your media user
     environment:
       - TZ=Pacific/Auckland
@@ -120,6 +122,12 @@ docker compose up -d
 ```
 
 Open **http://localhost:8098**.
+
+> **The image may require authentication.** GitHub Packages are private by
+> default, so if the pull fails with `denied` or `unauthorized`, either
+> authenticate first (`docker login ghcr.io`) or build from source below.
+> Pinning a version rather than using `:latest` is recommended — this tool
+> is not on a compatibility promise.
 
 > **Dry-run by default.** kishizu polls, matches and logs what it *would*
 > download, but hands nothing to Transmission until you remove `-dry-run`.
