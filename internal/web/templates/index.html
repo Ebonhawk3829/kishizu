@@ -30,12 +30,39 @@
   }
   .card h2 { font-size: 15px; margin: 0 0 6px; }
   .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
-  .pill {
-    display: inline-block; padding: 1px 7px; border-radius: 10px;
-    font-size: 11px; border: 1px solid var(--line); color: var(--muted);
+  /* Section headers split airing shows from ones with no air dates yet. */
+  .sect {
+    margin: 26px 0 10px; font-size: 12px; font-weight: 600;
+    letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
   }
-  .pill.ok { color: var(--ok); border-color: var(--ok); }
-  .pill.no { color: var(--warn); border-color: var(--warn); }
+  .sect:first-child { margin-top: 0; }
+  .sect-n { color: var(--dim); margin-left: 6px; letter-spacing: 0; }
+  /* Status is the hero element of a card: one badge, colour-coded, no competition. */
+  .status {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    font-size: 12px; font-weight: 600; letter-spacing: .3px;
+  }
+  .st-ok      { color: var(--ok);   background: rgba(74,157,110,.12); }
+  .st-ready   { color: #7fd0a2;     background: rgba(74,157,110,.28); }
+  .st-hunting { color: var(--warn); background: rgba(201,162,39,.15); }
+  .st-missing { color: #e08a85;     background: rgba(181,84,79,.22); }
+  .st-idle    { color: var(--muted); background: rgba(148,144,160,.10); }
+  .air { font-size: 13px; margin: 6px 0 10px; }
+  .air .rel { color: var(--muted); }
+  .air.soon .rel { color: var(--warn); }
+  /* Quiet footer: counts only matter when non-zero. */
+  .foot { margin-top: 10px; font-size: 11px; color: var(--dim); }
+  .foot button {
+    background: none; border: none; padding: 0; color: var(--muted);
+    font-size: 11px; text-decoration: underline dotted; cursor: pointer;
+  }
+  .chips { margin-top: 6px; display: none; flex-wrap: wrap; gap: 4px; }
+  .chips.open { display: flex; }
+  .chip {
+    font-size: 11px; padding: 1px 7px; border-radius: 9px;
+    background: #12121a; border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip b { color: var(--text); font-weight: 600; }
   button {
     background: var(--accent); color: #fff; border: 0; border-radius: 6px;
     padding: 6px 12px; font-size: 13px; cursor: pointer;
@@ -90,7 +117,7 @@
 <div class="wrap">
 
 <h1>kishizu</h1>
-<div class="sub">seasonal anime downloader &middot; training</div>
+<div class="sub">seasonal anime downloader</div>
 
 <div id="banner" class="banner hidden"></div>
 
@@ -158,34 +185,115 @@ async function loadShows() {
   const shows = await api('/shows');
   el('any-show').innerHTML = shows.map(s =>
     `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-  el('shows').innerHTML = shows.map(s => `
-    <div class="card">
-      <h2>${escapeHtml(s.name)}</h2>
-      <div class="meta">
-        next ep ${s.next}${s.max ? ' / ' + s.max : ''}
-        &middot; <span class="pill ${s.trained ? 'ok' : 'no'}">${s.trained ? 'trained' : 'untrained'}</span>
-        &middot; <span class="pill ${s.needs_attention ? 'no' : ''}">${escapeHtml(s.state || 'unknown')}</span>
-        &middot; <span class="meta">${s.downloaded} dl &middot; ${s.watched} watched &middot; ${s.deleted} deleted</span>
-        ${s.state === 'missing' ? `<div class="row" style="margin-top:6px">
-          <span class="meta" style="color:var(--warn)">file gone before the watch signal</span>
-          <button onclick="unlatch(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Re-download</button>
-          <button class="ghost" onclick="watchedUpTo(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Mark watched</button>
-        </div>` : ''}
-      </div>
-      <div class="row">
-        <label class="meta" for="ep-${s.id}">ep</label>
-        <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px">
-        <button onclick="startTrain(${s.id})">Train</button>
-        <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
-          title="mark episodes 1..N watched, so they are never grabbed">Watched up to</button>
-        <button class="ghost" onclick="setDownloaded(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
-          title="mark this episode as already on disk, ready to watch">Have it</button>
-        ${s.trained ? `<button class="ghost" onclick="showOffsets(${s.id})">Offsets</button>
-        <button class="ghost" onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Reset</button>` : ''}
-      </div>
-      <div class="offsets" id="off-${s.id}"></div>
+
+  // Airing = the schedule knows the next air time. Everything else is
+  // upcoming: seeded but not yet on an air date.
+  const byAir = (a, b) => new Date(a.next_schedule.airs_at) - new Date(b.next_schedule.airs_at);
+  const airing = shows.filter(s => s.next_schedule).sort(byAir);
+  const upcoming = shows.filter(s => !s.next_schedule);
+
+  const sect = (label, list) => list.length
+    ? `<div class="sect">${label} <span class="sect-n">${list.length}</span></div>
+       <div class="grid">${list.map(card).join('')}</div>` : '';
+  el('shows').innerHTML = sect('Airing', airing) + sect('Upcoming', upcoming);
+}
+
+// One show card. Status is the hero; everything else is quieter than it.
+function card(s) {
+  const st = s.state || 'unknown';
+  const cls = {
+    'ready to watch': 'st-ready',
+    'hunting':        'st-hunting',
+    'missing':        'st-missing',
+    'no release found': 'st-missing',
+    'up-to-date':     s.trained ? 'st-ok' : 'st-idle',
+  }[st] || 'st-idle';
+
+  // Air line: the schedule's next point when we have one, otherwise progress.
+  // Tense matters — "airs" for a future point, "aired" for one already past.
+  let air;
+  if (s.next_schedule) {
+    const sc = s.next_schedule;
+    const past = new Date(sc.airs_at) < Date.now();
+    air = `Ep ${sc.episode} ${past ? 'aired' : 'airs'} <b>${when(sc.airs_at)}</b>`
+        + ` <span class="rel">${rel(sc.airs_at)}</span>`;
+  } else {
+    air = `Ep ${s.next}${s.max ? ' of ' + s.max : ''}`;
+  }
+
+  const nGroups = Object.keys(s.offsets || {}).length;
+  const counts = [
+    s.watched ? `${s.watched} watched` : '',
+    s.downloaded ? `${s.downloaded} on disk` : '',
+    s.deleted ? `${s.deleted} deleted` : '',
+  ].filter(Boolean).join(' &middot; ');
+
+  return `
+  <div class="card">
+    <h2>${escapeHtml(s.name)}</h2>
+    <div class="row" style="margin:2px 0 0">
+      <span class="status ${cls}">${escapeHtml(st)}</span>
+      ${s.needs_attention ? '<span class="status st-missing">needs attention</span>' : ''}
     </div>
-  `).join('');
+    <div class="air ${s.next_schedule && s.next_schedule.status === 'upcoming' ? 'soon' : ''}">${air}</div>
+    ${s.state === 'missing' ? `<div class="row" style="margin-bottom:8px">
+      <span class="meta" style="color:var(--warn)">file gone before the watch signal</span>
+      <button onclick="unlatch(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Re-download</button>
+      <button class="ghost" onclick="watchedUpTo(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Mark watched</button>
+    </div>` : ''}
+    <div class="row">
+      <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px"
+        title="episode number for the actions below">
+      <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
+        title="mark episodes 1..N watched, so they are never grabbed">Watched up to</button>
+      <button class="ghost" onclick="setDownloaded(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
+        title="mark this episode as already on disk, ready to watch">Have it</button>
+      <button class="ghost" onclick="startTrain(${s.id})"
+        title="teach kishizu which releases match this show">Train</button>
+    </div>
+    <div class="foot">
+      ${counts || 'no episodes yet'}
+      ${s.trained ? ` &middot; <button onclick="toggleOffsets(${s.id})">${nGroups} group offsets</button>
+        <button onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">reset</button>`
+      : ' &middot; untrained'}
+    </div>
+    <div class="chips" id="off-${s.id}"></div>
+  </div>`;
+}
+
+// Local time in the browser, with a coarse relative hint next to it.
+function when(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+function rel(iso) {
+  const ms = new Date(iso) - Date.now();
+  if (ms < 0) {
+    const h = -ms / 36e5;
+    if (h < 1) return Math.round(-ms / 6e4) + ' min ago';
+    if (h < 48) return h.toFixed(h < 10 ? 1 : 0) + ' h ago';
+    return Math.round(h / 24) + ' d ago';
+  }
+  const h = ms / 36e5;
+  if (h < 1) return 'in ' + Math.round(ms / 6e4) + ' min';
+  if (h < 48) return 'in ' + h.toFixed(h < 10 ? 1 : 0) + ' h';
+  return 'in ' + Math.round(h / 24) + ' d';
+}
+
+function toggleOffsets(id) {
+  const box = el('off-' + id);
+  if (box.classList.contains('open')) { box.classList.remove('open'); return; }
+  fetch('/shows').then(r => r.json()).then(shows => {
+    const s = shows.find(x => x.id === id);
+    box.innerHTML = Object.entries(s.offsets || {})
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([g, o]) => `<span class="chip">${escapeHtml(g)} <b>${o > 0 ? '+' + o : o}</b></span>`)
+      .join('') || '<span class="chip">no offsets</span>';
+    box.classList.add('open');
+  });
 }
 
 function escapeHtml(s) {
@@ -240,14 +348,7 @@ async function watchedUpTo(showId, upto, name) {
   } catch (e) { banner(e.message, true); }
 }
 
-function showOffsets(id) {
-  fetch('/shows').then(r => r.json()).then(shows => {
-    const s = shows.find(x => x.id === id);
-    el('off-' + id).innerHTML = Object.keys(s.offsets).length
-      ? 'offsets: ' + Object.entries(s.offsets).map(([g,o]) => `<code>${escapeHtml(g)}=${o}</code>`).join(', ')
-      : 'no offsets';
-  });
-}
+
 
 // The episode is chosen by the user at training time, not fixed to "next":
 // which episode you train on is a judgement call (you may want one that has
