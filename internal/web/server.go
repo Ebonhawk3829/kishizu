@@ -60,8 +60,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /shows", s.handleListShows)
-
-	// Training API.
+	// Adding a show from the UI. Seeding from shows.yaml still works and
+	// updates aliases for existing shows, so the two paths coexist.
+	mux.HandleFunc("POST /api/shows", s.handleAddShow)
 	mux.HandleFunc("POST /api/train/start", s.handleTrainStart)
 	mux.HandleFunc("GET /api/train/state", s.handleTrainState)
 	mux.HandleFunc("POST /api/train/answer", s.handleTrainAnswer)
@@ -206,6 +207,15 @@ func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	// Same contract as the single-episode path: watching is progress, so
+	// the schedule pointer must move with it. Best-effort for the same
+	// reason - the daily refresh is the backstop.
+	if err := s.st.AdvanceSchedule(sh.ID, req.UpTo); err != nil {
+		log.Printf("watched-up-to: advance schedule: %v", err)
+	}
+	if err := s.st.ProjectAirDates(sh.ID); err != nil {
+		log.Printf("watched-up-to: project air dates: %v", err)
 	}
 	log.Printf("watched-up-to: %s episodes 1..%d (%d newly latched)", sh.CanonicalName, req.UpTo, marked)
 	writeJSON(w, map[string]any{
@@ -405,10 +415,17 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	log.Printf("watched: show %d ep %d (%s)", showID, epNum, source)
-
-	// Sweep is best-effort: a failed sweep leaves files on disk, which is the
-	// safe direction.
+	// Watching is progress just as a download is: if the watch point has
+	// reached the schedule's pointer, the pointer must move, or the UI
+	// keeps announcing an air date that is already in the past. Best-effort:
+	// a failed advance leaves the pointer where it was, and the daily
+	// schedule refresh corrects it anyway.
+	if err := s.st.AdvanceSchedule(showID, epNum); err != nil {
+		log.Printf("watched: advance schedule: %v", err)
+	}
+	if err := s.st.ProjectAirDates(showID); err != nil {
+		log.Printf("watched: project air dates: %v", err)
+	}
 	if s.watch != nil {
 		if deleted, kept, err := s.watch.Sweep(); err != nil {
 			log.Printf("watch sweep: %v", err)
@@ -610,6 +627,37 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- shows ----------
+
+// handleAddShow creates a show from the UI. The canonical name is stored as
+// an alias of itself, so matching needs no special case. Max episode 0 means
+// the season length is unknown; the cycle then uses a generous window.
+func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name       string   `json:"name"`
+		Aliases    []string `json:"aliases"`
+		MaxEpisode int      `json:"max_episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("name is required"))
+		return
+	}
+	if req.MaxEpisode < 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("max_episode must be >= 0"))
+		return
+	}
+	sh, err := s.st.CreateShow(req.Name, req.Aliases, req.MaxEpisode)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("add-show: %s (max %d, %d aliases)", sh.CanonicalName, req.MaxEpisode, len(req.Aliases))
+	writeJSON(w, map[string]any{"id": sh.ID, "name": sh.CanonicalName})
+}
 
 type showJSON struct {
 	ID      int64          `json:"id"`
