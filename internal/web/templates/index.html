@@ -243,10 +243,13 @@ function card(s) {
     'up-to-date':     s.trained ? 'st-ok' : 'st-idle',
   }[st] || 'st-idle';
 
-  // Air line: the schedule's next point when we have one, otherwise progress.
-  // Tense matters — "airs" for a future point, "aired" for one already past.
+  // Air line: the next episode the user actually owes, with its air time when
+  // the projection knows it. Tense matters — "airs" for a future point,
+  // "aired" for one already past. Past the season length, say so.
   let air;
-  if (s.next_schedule) {
+  if (s.max && s.next > s.max) {
+    air = `Season complete — ${s.max} episodes`;
+  } else if (s.next_schedule) {
     const sc = s.next_schedule;
     const past = new Date(sc.airs_at) < Date.now();
     air = `Ep ${sc.episode} ${past ? 'aired' : 'airs'} <b>${when(sc.airs_at)}</b>`

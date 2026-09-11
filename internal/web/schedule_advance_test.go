@@ -62,11 +62,14 @@ func TestWatchedAdvancesSchedule(t *testing.T) {
 		t.Errorf("next_airs_at = %v, want about a week out", at)
 	}
 
-	// The list endpoint must now report the future episode, not the past one.
+	// The list endpoint must report the future episode even though the
+	// schedule pointer was not touched by this request: the air line derives
+	// from the projected episode rows, which follow watch progress.
 	req2 := httptest.NewRequest("GET", "/shows", nil)
 	rec2 := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec2, req2)
 	var shows []struct {
+		Next         int `json:"next"`
 		NextSchedule *struct {
 			Episode int    `json:"episode"`
 			AirsAt  string `json:"airs_at"`
@@ -74,6 +77,9 @@ func TestWatchedAdvancesSchedule(t *testing.T) {
 	}
 	if err := json.Unmarshal(rec2.Body.Bytes(), &shows); err != nil {
 		t.Fatal(err)
+	}
+	if shows[0].Next != 12 {
+		t.Errorf("next = %d, want 12", shows[0].Next)
 	}
 	if shows[0].NextSchedule == nil || shows[0].NextSchedule.Episode != 12 {
 		t.Errorf("next_schedule = %+v, want episode 12", shows[0].NextSchedule)
