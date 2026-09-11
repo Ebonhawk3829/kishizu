@@ -18,6 +18,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
+	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -33,6 +34,8 @@ type Server struct {
 	st    *store.Store
 	tmpl  *template.Template
 	watch *watch.Handler
+	// notifier is optional; nil disables notifications.
+	notifier *ntfy.Client
 }
 
 // New builds a Server and parses templates.
@@ -47,6 +50,9 @@ func New(st *store.Store) (*Server, error) {
 // SetWatch attaches the watch handler. Optional: without it, /api/watched
 // still records state but cannot sweep files.
 func (s *Server) SetWatch(h *watch.Handler) { s.watch = h }
+
+// SetNotifier attaches the ntfy client for user-visible alerts.
+func (s *Server) SetNotifier(c *ntfy.Client) { s.notifier = c }
 
 // Handler returns the routed mux.
 func (s *Server) Handler() http.Handler {
@@ -74,6 +80,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/watched-up-to", s.handleWatchedUpTo)
 	// Manual state override, for episodes obtained outside kishizu.
 	mux.HandleFunc("POST /api/set-state", s.handleSetState)
+	// Deliberate re-download: the only way out of a terminal state.
+	mux.HandleFunc("POST /api/unlatch", s.handleUnlatch)
 
 	// Stats for a homepage widget, and debug for troubleshooting.
 	mux.HandleFunc("GET /api/stats", s.handleStats)
@@ -142,6 +150,34 @@ func (s *Server) handleSetState(w http.ResponseWriter, r *http.Request) {
 	log.Printf("set-state: show %d ep %d -> %s", req.ShowID, req.Episode, want)
 	writeJSON(w, map[string]any{
 		"show_id": req.ShowID, "episode": req.Episode, "state": string(want),
+	})
+}
+
+// handleUnlatch resets an episode to wanted so it can be grabbed again.
+//
+// The "accident, redownload" path: the user deleted a file early, or wants
+// something back they already watched. Deliberately user-initiated — no
+// automatic path may call this, or the resurrection guard is void.
+func (s *Server) handleUnlatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ShowID  int64 `json:"show_id"`
+		Episode int   `json:"episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.ShowID == 0 || req.Episode == 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("show_id and episode are required"))
+		return
+	}
+	if err := s.st.Unlatch(req.ShowID, req.Episode); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("unlatch: show %d ep %d -> wanted", req.ShowID, req.Episode)
+	writeJSON(w, map[string]any{
+		"show_id": req.ShowID, "episode": req.Episode, "state": "wanted",
 	})
 }
 
@@ -347,6 +383,22 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 		}
 		showID, epNum = matched, ep
 		source = "mpv"
+	}
+
+	// A file that vanished before the watch signal is worth knowing about:
+	// either the deletion was an accident, or the signal is late. Checked
+	// before marking, so the episode is still in "downloaded" and detectable.
+	if s.watch != nil {
+		if missing, err := s.watch.CheckMissing(); err != nil {
+			log.Printf("watch: check missing: %v", err)
+		} else if len(missing) > 0 {
+			log.Printf("watch: %d episode(s) missing from disk", len(missing))
+			if s.notifier != nil {
+				s.notifier.Send("kishizu: file missing",
+					fmt.Sprintf("%d episode(s) vanished before the watch signal", len(missing)),
+					ntfy.PriorityHigh)
+			}
+		}
 	}
 
 	if err := s.st.UpsertEpisode(showID, epNum, episode.Watched, "", ""); err != nil {
@@ -654,6 +706,13 @@ func showState(states []cycle.State) (string, bool) {
 	for _, s := range states {
 		if s == cycle.NoReleaseFound {
 			attention = true
+		}
+	}
+	// A missing file is the most urgent thing on the card: it needs a decision
+	// (re-grab or mark watched) before anything else makes sense.
+	for _, s := range states {
+		if s == cycle.Missing {
+			return string(cycle.Missing), true
 		}
 	}
 	for _, s := range states {

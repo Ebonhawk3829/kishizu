@@ -33,6 +33,9 @@ const (
 	Hunting State = "hunting"
 	// ReadyToWatch: on disk, waiting for the user.
 	ReadyToWatch State = "ready to watch"
+	// Missing: kishizu downloaded this and the file is gone. Needs a decision:
+	// re-grab it, or accept the watch signal and mark it watched.
+	Missing State = "missing"
 	// NoReleaseFound: the window closed with nothing grabbed. Troubleshoot.
 	NoReleaseFound State = "no release found"
 )
@@ -48,6 +51,8 @@ func StateOf(ep *store.Episode, now time.Time) State {
 	switch episode.ParseState(string(ep.State)) {
 	case episode.Downloaded:
 		return ReadyToWatch
+	case episode.Missing:
+		return Missing
 	case episode.Watched, episode.Deleted:
 		return UpToDate
 	}

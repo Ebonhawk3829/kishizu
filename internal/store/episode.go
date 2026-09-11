@@ -197,11 +197,14 @@ func (s *Store) SetFilePath(showID int64, number int, path string) error {
 	return err
 }
 
-// Unlatch resets a terminal episode to wanted, so the user can deliberately
-// re-download something they already watched or deleted.
+// Unlatch resets an episode to wanted, so the user can deliberately
+// re-download something they already watched, deleted, or lost.
 //
 // This is the ONLY way an episode leaves a terminal state, and it is always
 // user-initiated. Automatic paths must never call it.
+//
+// Missing episodes can also be unlatched: they are not terminal, but the user
+// asking for a re-grab is exactly the "accident, redownload" case.
 func (s *Store) Unlatch(showID int64, number int) error {
 	e, err := s.GetEpisode(showID, number)
 	if err != nil {
@@ -210,7 +213,7 @@ func (s *Store) Unlatch(showID int64, number int) error {
 	if e == nil {
 		return fmt.Errorf("episode %d not found for show %d", number, showID)
 	}
-	if !e.State.Terminal() {
+	if !e.State.Terminal() && e.State != episode.Missing {
 		return nil // already grabbable; nothing to do
 	}
 	_, err = s.db.Exec(`UPDATE episode SET state = ?, file_path = NULL, infohash = NULL,

@@ -17,6 +17,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
+	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -66,6 +67,9 @@ func main() {
 		// The watch handler lets /api/watched sweep files after marking. The
 		// library root also bounds deletion: paths outside it are refused.
 		srv.SetWatch(watch.New(st, *library, *keep))
+		if *ntfyURL != "" {
+			srv.SetNotifier(ntfy.New(*ntfyURL))
+		}
 		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
