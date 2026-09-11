@@ -9,11 +9,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/anilist"
+	"github.com/Ebonhawk3829/kishizu/internal/art"
 	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
@@ -72,10 +74,18 @@ func main() {
 		if *ntfyURL != "" {
 			srv.SetNotifier(ntfy.New(*ntfyURL))
 		}
+		// Cover art is cached next to the database, so the UI does not depend
+		// on the schedule's CDN at page-load time.
+		artCache, err := art.New(filepath.Join(filepath.Dir(*dbPath), "art"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "art cache: %v\n", err)
+			os.Exit(1)
+		}
+		srv.SetArt(artCache)
 		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
-		go runLoop(st, *rpc, *library, *keep, *interval, *dryRun, *ntfyURL)
+		go runLoop(st, artCache, *rpc, *library, *keep, *interval, *dryRun, *ntfyURL)
 		if err := srv.ListenAndServe(*serve); err != nil {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 			os.Exit(1)
