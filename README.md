@@ -93,9 +93,8 @@ If that's what you need today, you'd be better served by
 ```yaml
 services:
   kishizu:
-    image: kishizu:local          # build locally; no published image
-    build: .
-    user: "1001:1001"             # match your media user
+    image: ghcr.io/ebonhawk3829/kishizu:latest
+    user: "1000:1000"             # match your media user
     environment:
       - TZ=Pacific/Auckland
     volumes:
