@@ -19,6 +19,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/train"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
@@ -337,14 +338,28 @@ func (s *Server) matchFile(base string) (int64, int, error) {
 		if !res.Matched || res.Episode <= 0 {
 			continue
 		}
-		// Only act on confident matches. A wrong guess here deletes a file the
-		// user may still want, so uncertainty means do nothing.
+		// A filename in kishizu's own library form ("<Show> - E09.mkv") is
+		// inherently certain: it was written by this tool on completion, so it
+		// needs no confidence gate. Requiring one here blocked every watch
+		// signal, since a library name has no group and therefore scores only
+		// 0.5 — below the threshold.
+		if isLibraryForm(base) {
+			return sh.ID, res.Episode, nil
+		}
+		// Otherwise only act on confident matches. A wrong guess here deletes
+		// a file the user may still want, so uncertainty means do nothing.
 		if !res.Confident() {
 			continue
 		}
 		return sh.ID, res.Episode, nil
 	}
 	return 0, 0, fmt.Errorf("no confident match for %q", base)
+}
+
+// isLibraryForm reports whether a filename looks like one kishizu wrote:
+// "<Show> - E<NN>.<ext>".
+func isLibraryForm(name string) bool {
+	return release.ReLibrary.MatchString(name)
 }
 
 // resolveTitle turns a pasted link or title into a release title.
