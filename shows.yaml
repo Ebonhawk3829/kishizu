@@ -21,6 +21,14 @@ shows:
     aliases:
       - Bleach: Sennen Kessen Hen - Kashin Tan
       - BLEACH Thousand Year Blood War
+      - Bleach
+      - BLEACH Sennen Kessen-hen
+      # Two numbering conventions are in play for this arc: some groups
+      # continue the season (S17E47) while others restarted at E01 for this
+      # cour. The per-group offset handles the difference; these aliases just
+      # let both forms match the show.
+      - Bleach S17
+      - BLEACH S17
     watched: 7
     max: 10
 

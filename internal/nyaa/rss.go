@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,61 @@ type Item struct {
 // a single show, so backfill after downtime is free.
 func FeedURL(alias string) string {
 	return "https://nyaa.si/?page=rss&c=1_2&q=" + url.QueryEscape(alias)
+}
+
+// FeedURLsFor returns candidate feed URLs for a show, broadest first.
+//
+// A single query is not enough: searching the full canonical name
+// ("BLEACH: Thousand-Year Blood War - The Calamity") returned 28 items and
+// missed VARYG entirely, while "BLEACH Sennen Kessen" returned 75 including 14
+// VARYG releases. Nyaa's search is a plain substring match, so a long specific
+// name excludes groups that write the title differently.
+//
+// Callers should merge the results, deduplicating on infohash.
+func FeedURLsFor(canonical string, aliases []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" || seen[q] {
+			return
+		}
+		seen[q] = true
+		out = append(out, FeedURL(q))
+	}
+	// Shortest alias first: broader queries match more groups.
+	cands := append([]string{}, aliases...)
+	cands = append(cands, canonical)
+	sort.Slice(cands, func(i, j int) bool { return len(cands[i]) < len(cands[j]) })
+	for _, c := range cands {
+		add(c)
+	}
+	return out
+}
+
+// FetchAll retrieves several feeds and merges them, deduplicating on infohash.
+func FetchAll(client *http.Client, urls []string) ([]Item, error) {
+	seen := map[string]bool{}
+	var out []Item
+	for _, u := range urls {
+		items, err := Fetch(client, u)
+		if err != nil {
+			// One bad query should not lose the rest.
+			continue
+		}
+		for _, it := range items {
+			key := it.InfoHash
+			if key == "" {
+				key = it.Title
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, it)
+		}
+	}
+	return out, nil
 }
 
 // Fetch retrieves and parses a feed.

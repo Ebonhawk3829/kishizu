@@ -35,11 +35,24 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 	for _, cs := range shows {
 		sh, err := st.CreateShow(cs.Name, cs.Aliases, cs.Max)
 		if err != nil {
-			if existing, _ := st.GetShowByName(cs.Name); existing != nil {
-				fmt.Printf("  %-52s already present\n", truncate(cs.Name, 50))
-				continue
+			// Already present: update its aliases rather than skipping, so
+			// editing shows.yaml actually takes effect on an existing
+			// database. Skipping silently meant alias fixes never landed.
+			existing, _ := st.GetShowByName(cs.Name)
+			if existing == nil {
+				return err
 			}
-			return err
+			sh = existing
+			for _, a := range cs.Aliases {
+				if err := st.AddAlias(sh.ID, a); err != nil {
+					return err
+				}
+			}
+			if cs.Max > 0 {
+				if err := st.SetMaxEpisode(sh.ID, cs.Max); err != nil {
+					return err
+				}
+			}
 		}
 		// Mark everything up to the watched count as watched. Terminal state,
 		// so those episodes are never re-grabbed.

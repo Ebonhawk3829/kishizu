@@ -143,7 +143,10 @@ func (l *Listener) Poll() ([]Decision, error) {
 func (l *Listener) pollShow(sh *store.Show) ([]Decision, error) {
 	// Use the canonical name for the feed query. Aliases are matched by the
 	// matcher, not the feed: one query per show keeps the request count low.
-	items, err := nyaa.Fetch(nil, nyaa.FeedURL(sh.CanonicalName))
+	// Query on every alias, not just the canonical name: Nyaa's search is a
+	// plain substring match, so a long specific name misses groups that write
+	// the title differently. Results are merged and deduplicated on infohash.
+	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
 	if err != nil {
 		return nil, err
 	}
