@@ -43,6 +43,8 @@ func main() {
 	dryRun := flag.Bool("dry-run", true, "poll and decide but do not hand off to Transmission")
 	ntfyURL := flag.String("ntfy", "http://100.64.0.1:8085/kishizu", "ntfy topic URL for notifications (empty disables)")
 	debugOn := flag.Bool("debug", false, "verbose logging of every decision (toggleable at runtime via POST /api/debug)")
+	infer := flag.Bool("infer", false, "derive group offsets from air dates instead of training by hand")
+	preferred := flag.String("prefer", "VARYG,Erai-Raws,SubsPlease,ToonsHub", "preferred release groups, best first")
 	flag.Parse()
 
 	// Debug can also be set with KISHIZU_DEBUG=1, which the package reads at
@@ -76,6 +78,14 @@ func main() {
 		go runLoop(st, *rpc, *library, *keep, *interval, *dryRun, *ntfyURL)
 		if err := srv.ListenAndServe(*serve); err != nil {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *infer {
+		if err := inferOffsets(st, *preferred); err != nil {
+			fmt.Fprintf(os.Stderr, "infer: %v\n", err)
 			os.Exit(1)
 		}
 		return
