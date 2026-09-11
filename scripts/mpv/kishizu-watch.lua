@@ -23,6 +23,11 @@ local options = require 'mp.options'
 local o = {
     -- kishizu endpoint on the tailnet.
     endpoint = 'http://100.64.0.1:8098/api/watched',
+    -- Only files under this directory are reported. mpv is used for all media
+    -- on this machine, so without the gate every film and TV episode would be
+    -- posted to kishizu and come back as a 422. Subdirectories count.
+    -- Empty disables the filter and reports everything.
+    root = 'C:\\Anime',
     -- Seconds from the end within which playback counts as watched. The user
     -- skips the ED, so "reached the end" alone would miss most episodes.
     mark_window = 120,
@@ -32,6 +37,27 @@ local o = {
     spool = mp.command_native({'expand-path', '~~state/kishizu-spool.txt'}),
 }
 options.read_options(o)
+
+-- norm folds a path for comparison: backslashes to forward slashes, and
+-- lowercased, because Windows is case-insensitive and mpv may hand back
+-- either separator.
+local function norm(p)
+    if not p then return nil end
+    return (p:gsub('\\', '/'):lower())
+end
+
+-- under_root reports whether a path sits inside o.root or a subdirectory of
+-- it. A path with no directory component is not under anything, so it is
+-- skipped: better to miss a signal than to post every loose file.
+local function under_root(p)
+    if o.root == '' then return true end
+    local path, root = norm(p), norm(o.root)
+    if not path or not root then return false end
+    root = root:gsub('/+$', '') -- tolerate a trailing separator
+    if root == '' then return true end
+    return path:sub(1, #root) == root
+        and (path:sub(#root + 1, #root + 1) == '/' or #path == #root)
+end
 
 -- watched is set once playback gets close enough to the end.
 local watched = false
@@ -108,6 +134,14 @@ end
 local function on_file_load()
     watched = false
     path = mp.get_property('path')
+    -- Outside the anime root this session is none of kishizu's business: no
+    -- signal, no spool entry. The spool is still flushed, so a failed anime
+    -- signal gets retried even if the next thing played is a film.
+    if not under_root(path) then
+        mp.msg.verbose('kishizu: ignoring ' .. tostring(path) ..
+                       ' (outside ' .. o.root .. ')')
+        path = nil
+    end
     flush_spool()
 end
 
