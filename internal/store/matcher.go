@@ -28,33 +28,18 @@ func (s *Store) NewMatcher(sh *Show) (*Matcher, error) {
 
 func (m *Matcher) CanonicalName() string { return m.sh.CanonicalName }
 
-// Aliases returns every stored alias, plus a sanitised variant of each.
+// Aliases returns every stored alias. The canonical name is stored as an alias
+// too, so this is the complete set.
 //
-// The sanitised variants exist because kishizu writes files with
-// Windows-forbidden characters stripped — "Re:ZERO" lands on disk as
-// "ReZERO". Normalise turns punctuation into spaces, so the two forms
-// tokenise differently ("re zero" vs "rezero") and score zero against each
-// other. A long canonical name survives that on its other tokens; a short
-// alias does not. Comparing against both forms makes the round trip work
-// regardless of which one the filename carries.
+// These are used to match Nyaa release titles, where fuzzy matching is the
+// whole point: release names are written by strangers and never match a
+// canonical name exactly. They are NOT used to resolve the watch signal —
+// that resolves by exact filename, because kishizu wrote the file itself.
 func (m *Matcher) Aliases() []string {
-	raw := m.sh.Aliases
-	if len(raw) == 0 {
-		raw = []string{m.sh.CanonicalName}
+	if len(m.sh.Aliases) > 0 {
+		return m.sh.Aliases
 	}
-	out := make([]string, 0, len(raw)*2)
-	seen := map[string]bool{}
-	for _, a := range raw {
-		if !seen[a] {
-			seen[a] = true
-			out = append(out, a)
-		}
-		if s := release.Sanitise(a); !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	return out
+	return []string{m.sh.CanonicalName}
 }
 
 func (m *Matcher) MaxEpisode() int { return m.sh.MaxEpisode }
