@@ -150,8 +150,11 @@
   .acts .yes { color: var(--bad); }
 
   /* ── chips (group offsets) ──────────────────────────────────────────── */
-  .chips { grid-column: 2 / -1; display: none; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chips { display: none; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .chips.open { display: flex; }
+  /* An untrained show will never match a release, so it is worth saying.
+     Secondary colour, not warning: it is setup state, not an incident. */
+  .untrained { color: var(--t2); }
   .chip {
     font-size: 11.5px; padding: 3px 9px; border-radius: 7px;
     background: oklch(0.20 0.010 285); color: var(--t2);
@@ -312,11 +315,12 @@
     <div id="train-pick">
       <p class="hint">Pick a show and the episode you want to teach it. kishizu searches Nyaa and asks you to confirm which release is that episode.</p>
       <div class="fields">
-        <div><label for="train-show">Show</label><select id="train-show"></select></div>
+        <div><label for="train-show">Show</label><select id="train-show" onchange="renderTrainOffsets()"></select></div>
         <div><label for="train-ep">Episode</label><input id="train-ep" type="number" min="1" value="1"></div>
         <div><button class="btn" onclick="startTrain()">Start</button></div>
       </div>
       <div class="field-error" id="train-error"></div>
+      <div id="train-offsets"></div>
     </div>
     <div id="train-run" class="hidden">
       <h2 id="train-title" style="font-size:15px;font-weight:500;margin:0 0 4px"></h2>
@@ -404,6 +408,7 @@ async function loadShows() {
   const opts = shows.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
   el('any-show').innerHTML = opts;
   el('train-show').innerHTML = opts;
+  renderTrainOffsets();
 
   // Airing = the schedule knows the next air time. Everything else is
   // upcoming: declared but not yet on an air date.
@@ -471,19 +476,19 @@ function card(s, noart) {
   }
 
   const n = escapeHtml(s.name).replace(/'/g, "\\'");
-  const nGroups = Object.keys(s.offsets || {}).length;
 
-  // One primary action, context-dependent. The rest are secondary or tucked
-  // behind the offsets disclosure.
+  // One primary action, context-dependent. Offsets are diagnostic detail and
+  // live in the training panel, not on the landing page.
   let acts = `<button onclick="watchedUpTo(${s.id}, ${s.next}, '${n}')">Watched</button>`;
   if (st === 'missing') {
     acts = `<button onclick="unlatch(${s.id}, ${s.next}, '${n}')">Re-grab</button>` + acts;
   }
   acts += `<button onclick="openTrain(${s.id}, ${s.next})">Train</button>`;
-  if (s.trained) {
-    acts += `<button onclick="toggleOffsets(${s.id})">${nGroups} offsets</button>`;
-  }
   acts += `<button class="danger" onclick="removeShow(${s.id}, '${n}')">Remove</button>`;
+
+  // "up to date" on an untrained show is misleading: nothing will ever match.
+  const untrained = s.trained ? ''
+    : ' &middot; <span class="untrained">untrained</span>';
 
   const art = (s.image_url && !noart)
     ? `<img class="art" src="${escapeHtml(s.image_url)}" loading="lazy" alt="">`
@@ -494,11 +499,10 @@ function card(s, noart) {
     ${art}
     <div>
       <div class="name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</div>
-      <div class="sub">${air}</div>
+      <div class="sub">${air}${untrained}</div>
     </div>
     <span class="st ${cls}"><span class="dot"></span>${escapeHtml(st)}</span>
     <span class="acts">${acts}</span>
-    <div class="chips" id="off-${s.id}"></div>
   </div>`;
 }
 
@@ -524,16 +528,40 @@ function rel(iso) {
   return 'in ' + Math.round(h / 24) + ' d';
 }
 
-function toggleOffsets(id) {
-  const box = el('off-' + id);
-  if (box.classList.contains('open')) { box.classList.remove('open'); return; }
+// "(none)" is the store's sentinel for a release with no [Group] tag. It is
+// real data — untagged releases do carry their own numbering — but the
+// sentinel reads as programmer-speak, so it gets a human label.
+function groupLabel(g) { return g === '(none)' ? 'no group' : g; }
+
+// Offsets belong here, in the training panel, not on the landing page.
+//
+// A zero offset is still learned — it means the group numbers episodes the way
+// the user does — but it needs no adjustment, so zero-offset groups are
+// counted rather than listed. Only the offsets that actually shift an episode
+// number are worth a chip.
+function renderTrainOffsets() {
+  const id = parseInt(el('train-show').value, 10);
   const s = shows.find(x => x.id === id);
-  if (!s) return;
-  box.innerHTML = Object.entries(s.offsets || {})
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([g, o]) => `<span class="chip">${escapeHtml(g)} <b>${o > 0 ? '+' + o : o}</b></span>`)
-    .join('') || '<span class="chip">no offsets</span>';
-  box.classList.add('open');
+  const box = el('train-offsets');
+  if (!s) { box.innerHTML = ''; return; }
+
+  const offs = Object.entries(s.offsets || {})
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  if (!offs.length) {
+    box.innerHTML = '<p class="hint" style="margin-top:18px">Not trained yet — no offsets learned.</p>';
+    return;
+  }
+
+  const shifted = offs.filter(([, v]) => v !== 0);
+  const standard = offs.length - shifted.length;
+  box.innerHTML = '<p class="hint" style="margin-top:18px">Learned offsets</p>' +
+    '<div class="chips open">' +
+    shifted.map(([g, v]) =>
+      `<span class="chip">${escapeHtml(groupLabel(g))} <b>${v > 0 ? '+' + v : v}</b></span>`).join('') +
+    (standard
+      ? `<span class="chip">${standard} group${standard === 1 ? '' : 's'} &middot; standard numbering</span>`
+      : '') +
+    '</div>';
 }
 
 function escapeHtml(s) {
@@ -626,6 +654,7 @@ function openTrain(showId, ep) {
   el('disc-train').open = true;
   el('train-show').value = showId;
   el('train-ep').value = ep || 1;
+  renderTrainOffsets();
   startTrain();
 }
 
@@ -757,6 +786,7 @@ async function commit() {
     state = { active: false };
     renderTrain();
     loadShows();
+    renderTrainOffsets();
   } catch (e) { fieldError('train-error', e.message); }
 }
 
