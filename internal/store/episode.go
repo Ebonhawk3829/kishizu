@@ -88,6 +88,18 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 		// should not fail the caller.
 		return nil
 	}
+	// Already downloading under a different torrent: keep the first one.
+	//
+	// Advance() allows Downloading -> Downloading, which would overwrite the
+	// infohash with a second release for the same episode. The episode then
+	// points at the newer torrent while the older one is still going, and
+	// neither reconciles cleanly — the first is orphaned and the episode
+	// never leaves "downloading". The first grab wins; a better release is
+	// only an upgrade once the episode is live, not mid-download.
+	if existing.State == episode.Downloading && next == episode.Downloading &&
+		existing.InfoHash != "" && infohash != "" && existing.InfoHash != infohash {
+		return nil
+	}
 
 	q := `UPDATE episode SET state = ?`
 	args := []any{string(advanced)}
@@ -126,7 +138,15 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 // Only episodes with no state yet are touched: an episode already downloading
 // or downloaded is left alone, since deleting or re-latching it would be
 // surprising.
-func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
+// MarkWatchedUpTo marks episodes 1..n watched.
+//
+// By default it skips episodes that are downloading: re-latching something
+// genuinely in flight would be surprising. But a download can get stuck —
+// no seeders, or a torrent that never completes — and then the user cannot
+// record that they watched the episode some other way. force overrides the
+// in-flight guard for exactly that case. Terminal states are never
+// overridden, with or without force.
+func (s *Store) MarkWatchedUpTo(showID int64, n int, force bool) (int, error) {
 	if n < 1 {
 		return 0, nil
 	}
@@ -160,7 +180,7 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
 		// ("downloaded") is exactly what "watched up to" is meant to clear —
 		// leaving it alone meant a ready-to-watch episode stayed ready to
 		// watch after the user said they had watched it.
-		if cur, ok := state[i]; ok && (cur == episode.Downloading || cur.Terminal()) {
+		if cur, ok := state[i]; ok && (cur.Terminal() || (cur == episode.Downloading && !force)) {
 			continue
 		}
 		if err := s.UpsertEpisode(showID, i, episode.Watched, "", ""); err != nil {

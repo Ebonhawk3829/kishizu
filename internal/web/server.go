@@ -227,6 +227,10 @@ func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ShowID int64 `json:"show_id"`
 		UpTo   int   `json:"up_to"`
+		// Force overrides the in-flight guard, for a download that got stuck
+		// and will never complete. The UI sets this when the user confirms
+		// they want to mark a downloading episode watched anyway.
+		Force bool `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -241,7 +245,7 @@ func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("up_to must be >= 0"))
 		return
 	}
-	marked, err := s.st.MarkWatchedUpTo(sh.ID, req.UpTo)
+	marked, err := s.st.MarkWatchedUpTo(sh.ID, req.UpTo, req.Force)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
