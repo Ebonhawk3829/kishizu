@@ -13,3 +13,6 @@ __pycache__/
 
 # Cached scrape attempts (large, regenerable)
 testdata/search_cache/
+
+# Design mockups — scratch, not part of the shipped app
+concepts/
