@@ -491,7 +491,20 @@ func baseName(path string) string {
 //
 // The episode latch makes this idempotent: a duplicate signal cannot rewind a
 // watched episode.
+// matchFile resolves a filename to a show and episode.
+//
+// The primary path is exact: kishizu named this file itself when the download
+// completed and stored the path, so if the name matches a stored episode, that
+// is the answer. No scoring, no inference — the question is already answered.
+//
+// Only if that fails do we fall back to parsing the name, for files that came
+// from outside kishizu. That path stays gated on confidence, because a wrong
+// guess here deletes a file the user may still want.
 func (s *Server) matchFile(base string) (int64, int, error) {
+	if ep, err := s.st.FindByFileName(base); err == nil && ep != nil {
+		return ep.ShowID, ep.Number, nil
+	}
+
 	shows, err := s.st.ListShows()
 	if err != nil {
 		return 0, 0, err

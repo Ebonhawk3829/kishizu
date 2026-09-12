@@ -3,10 +3,24 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 )
+
+// baseName extracts the filename from a path that may come from any OS.
+//
+// filepath.Base is not enough: the server runs on Linux and the watch signal
+// arrives from the user's PC, which may send Windows paths whose separator is
+// a backslash. Splitting on both keeps matching independent of where the file
+// is mounted.
+func baseName(path string) string {
+	if i := strings.LastIndexAny(path, `/\`); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
 
 // Episode is one (show, local episode number) pair and its lifecycle position.
 type Episode struct {
@@ -249,6 +263,52 @@ func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 		out = append(out, &e)
 	}
 	return out, rows.Err()
+}
+
+// FindByFileName resolves a filename to the episode that owns it, by exact
+// match on the base name of the stored path.
+//
+// This is the watch signal's primary path, and it is deliberately exact.
+// kishizu named the file itself when the download completed, so the name is
+// known — there is nothing to infer. Fuzzy matching here would be guessing
+// at a question already answered, and a wrong guess deletes a file the user
+// may still want.
+//
+// Comparison is on base name only, because the path mpv sees on the user's
+// PC differs from the path the server stored: Syncthing moves the file, and
+// the two machines mount it differently.
+func (s *Store) FindByFileName(name string) (*Episode, error) {
+	if name == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT show_id, number, state, infohash, release_title,
+		file_path, airs_at, downloaded_at, watched_at FROM episode
+		WHERE file_path IS NOT NULL AND file_path != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var e Episode
+		var state, hash, title, path sql.NullString
+		var airs, dl, watched sql.NullString
+		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched); err != nil {
+			return nil, err
+		}
+		if baseName(path.String) != name {
+			continue
+		}
+		e.State = episode.ParseState(state.String)
+		e.InfoHash = hash.String
+		e.ReleaseTitle = title.String
+		e.FilePath = path.String
+		e.AirsAt = parseTime(airs)
+		e.DownloadedAt = parseTime(dl)
+		e.WatchedAt = parseTime(watched)
+		return &e, nil
+	}
+	return nil, rows.Err()
 }
 
 // EpisodesByState returns every episode in a given state across all shows.
