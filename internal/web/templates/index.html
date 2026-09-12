@@ -164,6 +164,9 @@
 
   /* ── disclosure panels ──────────────────────────────────────────────── */
   .disc { margin-top: 48px; border-top: 1px solid var(--line-soft); padding-top: 4px; }
+  /* The first disclosure follows the summary strip, which already has its own
+     bottom margin — a second 48px would open a hole in the page. */
+  .disc:first-of-type { margin-top: 8px; }
   .disc summary {
     list-style: none; cursor: pointer; padding: 18px 0; font-size: 14.5px; color: var(--t2);
     display: flex; align-items: center; gap: 11px; transition: color .12s ease;
@@ -293,8 +296,8 @@
 
 <div class="summary" id="summary"></div>
 
-<div id="shows"></div>
-
+<!-- The disclosures sit ABOVE the list, not below it. Below a 20-row list they
+     were always off-screen when opened from a row, so "Train" looked inert. -->
 <details class="disc" id="disc-add">
   <summary><span class="chev">&rsaquo;</span> Add a show</summary>
   <div class="body">
@@ -352,6 +355,8 @@
     <div id="any-grade-panel"></div>
   </div>
 </details>
+
+<div id="shows"></div>
 
 </div>
 
@@ -650,11 +655,18 @@ function removeShow(showId, name) {
 }
 
 // Open the training panel with a show preselected, then start.
+//
+// The panel sits below a list that can run to 20+ rows, so opening it from a
+// row near the top leaves it far below the fold — the click looks like it did
+// nothing. Scroll it into view, and focus it so the keyboard follows too.
 function openTrain(showId, ep) {
-  el('disc-train').open = true;
+  const d = el('disc-train');
+  d.open = true;
   el('train-show').value = showId;
   el('train-ep').value = ep || 1;
   renderTrainOffsets();
+  d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  d.querySelector('summary').focus({ preventScroll: true });
   startTrain();
 }
 
