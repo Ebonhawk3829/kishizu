@@ -471,9 +471,24 @@ func (s *Store) AdvanceSchedule(showID int64, confirmedEp int) error {
 }
 
 // DeleteShow removes a show and everything hanging off it (cascade).
+//
+// Child tables declare ON DELETE CASCADE, so aliases, offsets, filters,
+// preferences, episodes and rejections go with it. `seen` has no foreign key,
+// so it is cleared explicitly — leaving rows behind would keep dedupe entries
+// for a show that no longer exists.
 func (s *Store) DeleteShow(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM show WHERE id = ?`, id)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM seen WHERE show_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM show WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---------- group offsets ----------

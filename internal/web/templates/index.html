@@ -70,6 +70,7 @@
     background: none; border: none; padding: 0; color: var(--muted);
     font-size: 11px; text-decoration: underline dotted; cursor: pointer;
   }
+  .foot button.danger { color: var(--bad); }
   .chips { margin-top: 6px; display: none; flex-wrap: wrap; gap: 4px; }
   .chips.open { display: flex; }
   .chip {
@@ -207,8 +208,10 @@ function banner(msg, isErr) {
   show('banner', !!msg);
 }
 
-async function api(path, body) {
-  const opts = body ? { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) } : {};
+async function api(path, body, method) {
+  const opts = body
+    ? { method: method || 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }
+    : {};
   const r = await fetch(path, opts);
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || r.statusText);
@@ -315,6 +318,7 @@ function card(s) {
           ${s.trained ? ` &middot; <button onclick="toggleOffsets(${s.id})">${nGroups} group offsets</button>
             <button onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">reset</button>`
           : ' &middot; untrained'}
+          &middot; <button class="danger" onclick="removeShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">remove</button>
         </div>
         <div class="chips" id="off-${s.id}"></div>
       </div>
@@ -431,6 +435,18 @@ async function resetShow(showId, name) {
   try {
     await api('/api/train/reset', { show_id: showId });
     banner(`Cleared offsets for ${name}.`);
+    loadShows();
+  } catch (e) { banner(e.message, true); }
+}
+
+// Remove a show entirely: the way to drop a finished season, or undo one
+// added by mistake. Files on disk are left alone — this stops kishizu
+// tracking the show, it does not delete episodes.
+async function removeShow(showId, name) {
+  if (!confirm(`Remove ${name} from kishizu?\n\nThis forgets the show and everything learned about it. Files on disk are not deleted.`)) return;
+  try {
+    await api('/api/shows', { id: showId }, 'DELETE');
+    banner(`Removed ${name}.`);
     loadShows();
   } catch (e) { banner(e.message, true); }
 }

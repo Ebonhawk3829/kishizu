@@ -99,6 +99,8 @@ func (s *Server) Handler() http.Handler {
 	// Adding a show from the UI. Seeding from shows.yaml still works and
 	// updates aliases for existing shows, so the two paths coexist.
 	mux.HandleFunc("POST /api/shows", s.handleAddShow)
+	// Removing a show, for when a season ends or was added by mistake.
+	mux.HandleFunc("DELETE /api/shows", s.handleDeleteShow)
 	mux.HandleFunc("POST /api/train/start", s.handleTrainStart)
 	mux.HandleFunc("GET /api/train/state", s.handleTrainState)
 	mux.HandleFunc("POST /api/train/answer", s.handleTrainAnswer)
@@ -706,6 +708,32 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("add-show: %s (max %d, %d aliases)", sh.CanonicalName, req.MaxEpisode, len(req.Aliases))
 	writeJSON(w, map[string]any{"id": sh.ID, "name": sh.CanonicalName})
+}
+
+// handleDeleteShow removes a show and everything learned about it.
+//
+// Deleting is the only way to drop a season once it has finished, and the
+// only undo for one added by mistake. It does not touch files on disk —
+// removing a show stops kishizu tracking it, it does not delete episodes.
+func (s *Server) handleDeleteShow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	sh, err := s.st.GetShow(req.ID)
+	if err != nil || sh == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ID))
+		return
+	}
+	if err := s.st.DeleteShow(sh.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("delete-show: %s", sh.CanonicalName)
+	writeJSON(w, map[string]any{"deleted": sh.CanonicalName})
 }
 
 type showJSON struct {
