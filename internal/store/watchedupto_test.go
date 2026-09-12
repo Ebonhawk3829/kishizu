@@ -68,16 +68,20 @@ func TestMarkWatchedUpToLeavesInFlightAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if marked != 0 {
-		t.Errorf("marked %d, want 0 (all already in flight or consumed)", marked)
+	// Only ep 3 is markable: ep 1 is terminal, ep 2 is in flight. An episode
+	// sitting on disk ("downloaded") is exactly what "watched up to" is for —
+	// it used to be skipped, which left a ready-to-watch episode stuck there
+	// after the user said they had watched it.
+	if marked != 1 {
+		t.Errorf("marked %d, want 1 (only the downloaded episode)", marked)
 	}
 	ep2, _ := s.GetEpisode(sh.ID, 2)
 	if ep2.State != episode.Downloading {
 		t.Errorf("ep 2 state = %s, want downloading (untouched)", ep2.State)
 	}
 	ep3, _ := s.GetEpisode(sh.ID, 3)
-	if ep3.State != episode.Downloaded {
-		t.Errorf("ep 3 state = %s, want downloaded (untouched)", ep3.State)
+	if ep3.State != episode.Watched {
+		t.Errorf("ep 3 state = %s, want watched", ep3.State)
 	}
 }
 

@@ -156,10 +156,11 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int) (int, error) {
 
 	marked := 0
 	for i := 1; i <= n; i++ {
-		// Leave anything already in flight or consumed alone: re-latching a
-		// downloading or downloaded episode would be surprising, and watched
-		// or deleted are terminal anyway.
-		if cur, ok := state[i]; ok && cur != episode.Wanted {
+		// Skip only what is in flight or already consumed. An episode on disk
+		// ("downloaded") is exactly what "watched up to" is meant to clear —
+		// leaving it alone meant a ready-to-watch episode stayed ready to
+		// watch after the user said they had watched it.
+		if cur, ok := state[i]; ok && (cur == episode.Downloading || cur.Terminal()) {
 			continue
 		}
 		if err := s.UpsertEpisode(showID, i, episode.Watched, "", ""); err != nil {
