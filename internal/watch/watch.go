@@ -15,12 +15,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -174,25 +174,9 @@ func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 
 // Sanitise makes a show name safe as a directory name on both Linux and
 // Windows, since Syncthing moves files between them.
+//
+// Delegates to release.Sanitise so the writer and the matcher share one
+// rule; see the note there.
 func Sanitise(name string) string {
-	// Windows-forbidden characters and control characters.
-	re := regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
-	s := re.ReplaceAllString(name, "")
-	// Reserved device names would silently break on Windows.
-	reserved := map[string]bool{
-		"con": true, "prn": true, "aux": true, "nul": true,
-	}
-	for i := 1; i <= 9; i++ {
-		reserved[fmt.Sprintf("com%d", i)] = true
-		reserved[fmt.Sprintf("lpt%d", i)] = true
-	}
-	s = strings.TrimSpace(s)
-	s = strings.TrimRight(s, ". ")
-	if reserved[strings.ToLower(s)] {
-		s = "_" + s
-	}
-	if s == "" {
-		s = "untitled"
-	}
-	return s
+	return release.Sanitise(name)
 }
