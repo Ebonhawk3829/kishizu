@@ -124,6 +124,9 @@ func (s *Server) Handler() http.Handler {
 
 	// Stats for a homepage widget, and debug for troubleshooting.
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	// Dashboard summary: status plus the next air time. Smaller than /stats
+	// and shaped for a widget.
+	mux.HandleFunc("GET /api/summary", s.handleSummary)
 	mux.HandleFunc("GET /api/debug", s.handleDebug)
 	// Runtime debug toggle, so verbose logging can be switched on during a
 	// live run without a restart.
@@ -263,6 +266,83 @@ func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"show": sh.CanonicalName, "up_to": req.UpTo, "newly_marked": marked,
 	})
+}
+
+// handleSummary answers the two questions worth putting on a dashboard:
+// is there anything to watch, and when is the next episode due?
+//
+// The per-state counts are still available at /api/stats, but they are not
+// useful at a glance — "64 watched" says nothing about whether there is
+// anything to do. This reduces the show list to a status and a next air
+// time, which is what a widget has room for.
+func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
+	shows, err := s.st.ListShows()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	now := time.Now()
+	ready, hunting, missing := 0, 0, 0
+	var next struct {
+		Name   string
+		Ep     int
+		AirsAt time.Time
+	}
+
+	for _, sh := range shows {
+		eps, err := s.st.EpisodesForShow(sh.ID)
+		if err != nil {
+			continue
+		}
+		for _, ep := range eps {
+			switch cycle.StateOf(ep, now) {
+			case cycle.ReadyToWatch:
+				ready++
+			case cycle.Hunting:
+				hunting++
+			case cycle.Missing, cycle.NoReleaseFound:
+				missing++
+			}
+		}
+
+		// The soonest future air time across all shows wins.
+		n, at, err := s.st.NextEpisode(sh.ID)
+		if err != nil || at == nil || n <= 0 {
+			continue
+		}
+		if !at.After(now) {
+			continue
+		}
+		if next.Name == "" || at.Before(next.AirsAt) {
+			next.Name, next.Ep, next.AirsAt = sh.CanonicalName, n, *at
+		}
+	}
+
+	status := "All up to date"
+	if missing > 0 {
+		status = fmt.Sprintf("%d need attention", missing)
+	} else if ready > 0 {
+		status = fmt.Sprintf("%d to watch", ready)
+	} else if hunting > 0 {
+		status = "Hunting for releases"
+	}
+
+	out := map[string]any{
+		"status":   status,
+		"ready":    ready,
+		"hunting":  hunting,
+		"missing":  missing,
+		"upToDate": ready == 0 && hunting == 0 && missing == 0,
+	}
+	if next.Name != "" {
+		out["next"] = map[string]any{
+			"show":    next.Name,
+			"episode": next.Ep,
+			"airs_at": next.AirsAt.Format(time.RFC3339),
+		}
+	}
+	writeJSON(w, out)
 }
 
 // handleStats summarises episode state for a homepage widget.
