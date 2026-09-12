@@ -29,7 +29,7 @@ func TestMarkWatchedUpToLatchesWantedEpisodes(t *testing.T) {
 		}
 	}
 
-	marked, err := s.MarkWatchedUpTo(sh.ID, 5)
+	marked, err := s.MarkWatchedUpTo(sh.ID, 5, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestMarkWatchedUpToLeavesInFlightAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	marked, err := s.MarkWatchedUpTo(sh.ID, 3)
+	marked, err := s.MarkWatchedUpTo(sh.ID, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,14 +95,14 @@ func TestMarkWatchedUpToIsIdempotent(t *testing.T) {
 	defer s.Close()
 
 	sh, _ := s.CreateShow("Show", nil, 12)
-	first, err := s.MarkWatchedUpTo(sh.ID, 4)
+	first, err := s.MarkWatchedUpTo(sh.ID, 4, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first != 4 {
 		t.Errorf("first marked %d, want 4", first)
 	}
-	second, err := s.MarkWatchedUpTo(sh.ID, 4)
+	second, err := s.MarkWatchedUpTo(sh.ID, 4, false)
 	if err != nil {
 		t.Fatal(err)
 	}

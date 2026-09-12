@@ -407,7 +407,17 @@ async function watchedUpTo(showId, upto, name) {
   if (isNaN(upto) || upto < 1) { banner('Set an episode number first.', true); return; }
   if (!confirm(`Mark episodes 1..${upto} of ${name} as watched? They will never be auto-grabbed.`)) return;
   try {
-    const r = await api('/api/watched-up-to', { show_id: showId, up_to: upto });
+    let r = await api('/api/watched-up-to', { show_id: showId, up_to: upto });
+    // Nothing latched usually means an episode is still downloading. Offer to
+    // override, since a torrent with no seeders never completes and would
+    // otherwise leave the user unable to record that they watched it.
+    if (r.newly_marked === 0) {
+      const force = confirm(
+        `Nothing was marked — episode ${upto} may still be downloading.\n\n` +
+        `Mark it watched anyway? Only do this if the download is stuck or you watched it another way.`);
+      if (!force) { banner('Left as-is.'); return; }
+      r = await api('/api/watched-up-to', { show_id: showId, up_to: upto, force: true });
+    }
     banner(`${name}: ${r.newly_marked} episode(s) latched as watched.`);
     loadShows();
   } catch (e) { banner(e.message, true); }
