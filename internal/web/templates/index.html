@@ -7,130 +7,275 @@
 <link rel="icon" href="/static/logo.png" type="image/png">
 <link rel="apple-touch-icon" href="/static/logo.png">
 <style>
+  /* ── tokens ─────────────────────────────────────────────────────────────
+     Noir. Near-black surfaces, hairline rules, no boxes: separation comes
+     from tone and thin lines rather than borders and cards. */
   :root {
-    --bg: #16161a; --card: #1e1e24; --line: #2e2e38;
-    --text: #e8e6e3; --muted: #9490a0; --accent: #7c6bb0;
-    --ok: #4a9d6e; --warn: #c9a227; --bad: #b5544f;
+    color-scheme: dark;
+
+    --bg:        oklch(0.155 0.010 285);
+    --raise:     oklch(0.185 0.010 285);
+    --line:      oklch(0.250 0.010 285);
+    --line-soft: oklch(0.205 0.010 285);
+
+    /* Text ramp. t3 is the quietest tier and the one that has to clear AA:
+       0.60 measures 4.92:1 on the page and 4.70:1 on a hovered row, so it
+       stays legible everywhere it is used. Lower values failed. */
+    --t1: oklch(0.94 0.005 285);
+    --t2: oklch(0.68 0.010 285);
+    --t3: oklch(0.60 0.012 285);
+
+    --accent: oklch(0.72 0.11 295);
+    --ok:     oklch(0.76 0.12 160);
+    --warn:   oklch(0.82 0.12 85);
+    --bad:    oklch(0.72 0.14 25);
   }
+
   * { box-sizing: border-box; }
+  html { background: var(--bg); }
   body {
-    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    margin: 0; background: var(--bg); color: var(--t1);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  /* Cap the width and centre it. On a wide monitor a full-bleed layout pushes
-     controls to opposite edges, which means travelling the whole screen to go
-     from the show list to the grading panel. */
-  .wrap { max-width: 1180px; margin: 0 auto; }
-  .attr-hint { color: var(--muted); font-size: 11px; margin-left: 8px; }
-  .attr-edit { width: 130px; padding: 3px 6px; font-size: 13px; }
-  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .5px; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
-  /* Header: logo drop beside the wordmark. */
-  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-  .head img { width: 44px; height: 44px; }
-  .head h1 { margin: 0; }
-  .head .sub { margin: 0; }
-  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-  .card {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 8px; padding: 14px 16px;
+
+  ::selection { background: oklch(0.72 0.11 295 / .3); }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.26 0.010 285); border-radius: 6px; border: 3px solid var(--bg);
   }
-  .card h2 { font-size: 15px; margin: 0 0 6px; }
-  /* Card with cover art: image left, content right. Without art the content
-     simply takes the full width — no placeholder box, no layout jump. */
-  .card .body { display: flex; gap: 12px; }
-  .card .art {
-    width: 64px; height: 92px; border-radius: 6px; object-fit: cover;
-    flex: none; background: #12121a; border: 1px solid var(--line);
+  ::-webkit-scrollbar-thumb:hover { background: oklch(0.32 0.010 285); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 5px; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 64px 40px 120px; }
+
+  /* ── header ─────────────────────────────────────────────────────────── */
+  .head { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+  .head img { width: 44px; height: 44px; border-radius: 8px; }
+  .head h1 { font-size: 24px; font-weight: 500; margin: 0; letter-spacing: -.015em; }
+  .head .season {
+    font-size: 13px; color: var(--t3); letter-spacing: .06em; text-transform: uppercase;
   }
-  .card .grow { flex: 1; min-width: 0; }
-  .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
-  /* Section headers split airing shows from ones with no air dates yet.
-     Each section owns its own grid; the outer container is plain flow. */
+  .tagline { color: var(--t3); font-size: 14.5px; margin: 0 0 52px; }
+
+  /* ── summary ────────────────────────────────────────────────────────── */
+  .summary {
+    display: flex; align-items: stretch; margin-bottom: 56px;
+    border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
+  }
+  .stat { padding: 24px 40px 24px 0; margin-right: 40px; border-right: 1px solid var(--line-soft); }
+  .stat:last-child { border-right: 0; margin-right: 0; }
+  .stat .v {
+    font-size: 34px; font-weight: 300; letter-spacing: -.03em;
+    font-variant-numeric: tabular-nums; line-height: 1.05;
+  }
+  .stat .k {
+    font-size: 11.5px; color: var(--t3); text-transform: uppercase;
+    letter-spacing: .1em; margin-top: 6px;
+  }
+  .stat.next { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .stat.next .v { font-size: 16px; font-weight: 400; letter-spacing: -.01em; }
+  .stat.next .v b { font-weight: 500; }
+  .stat.next .v span { color: var(--t3); }
+
+  /* ── section label ──────────────────────────────────────────────────── */
   .sect {
-    margin: 26px 0 10px; font-size: 12px; font-weight: 600;
-    letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; gap: 14px; margin: 56px 0 8px;
+    font-size: 11.5px; font-weight: 500; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--t3);
   }
-  .sect:first-child { margin-top: 0; }
-  .sect-n { color: var(--dim); margin-left: 6px; letter-spacing: 0; }
-  /* Status is the hero element of a card: one badge, colour-coded, no competition. */
-  .status {
-    display: inline-block; padding: 2px 10px; border-radius: 10px;
-    font-size: 12px; font-weight: 600; letter-spacing: .3px;
+  .sect::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  .sect .n { color: oklch(0.42 0.012 285); }
+
+  /* ── show row ───────────────────────────────────────────────────────── */
+  /* The actions column is a fixed width, not auto: with auto it sizes to
+     each row's own buttons, so the flexible name column varies and the
+     status column drifts out of alignment down the page. */
+  .row {
+    display: grid; grid-template-columns: 72px minmax(0, 1fr) 168px 300px;
+    gap: 24px; align-items: center;
+    padding: 20px 12px 20px 0; border-bottom: 1px solid var(--line-soft);
+    transition: background .12s ease;
   }
-  .st-ok      { color: var(--ok);   background: rgba(74,157,110,.12); }
-  .st-ready   { color: #7fd0a2;     background: rgba(74,157,110,.28); }
-  .st-hunting { color: var(--warn); background: rgba(201,162,39,.15); }
-  .st-missing { color: #e08a85;     background: rgba(181,84,79,.22); }
-  .st-idle    { color: var(--muted); background: rgba(148,144,160,.10); }
-  .air { font-size: 13px; margin: 6px 0 10px; }
-  .air .rel { color: var(--muted); }
-  .air.soon .rel { color: var(--warn); }
-  /* Quiet footer: counts only matter when non-zero. */
-  .foot { margin-top: 10px; font-size: 11px; color: var(--dim); }
-  .foot button {
-    background: none; border: none; padding: 0; color: var(--muted);
-    font-size: 11px; text-decoration: underline dotted; cursor: pointer;
+  .row:hover { background: var(--raise); }
+  .row .art {
+    width: 72px; height: 108px; border-radius: 6px; object-fit: cover;
+    background: oklch(0.20 0.010 285);
   }
-  .foot button.danger { color: var(--bad); }
-  .chips { margin-top: 6px; display: none; flex-wrap: wrap; gap: 4px; }
+  .row .name {
+    font-size: 16px; font-weight: 450; letter-spacing: -.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row .sub {
+    font-size: 13.5px; color: var(--t3); margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .row .sub b { color: var(--t2); font-weight: 450; }
+
+  /* Upcoming shows have no cover art and need nothing from the user, so the
+     section drops the art column and tightens up. The page's visual weight
+     stays on Airing, which is where the attention belongs. */
+  .row.noart {
+    grid-template-columns: minmax(0, 1fr) 168px 300px; padding: 15px 12px 15px 0;
+  }
+  .row.noart .name { font-size: 15px; }
+  .row.noart .sub { font-size: 13px; }
+
+  /* ── status: dot + word, own column so they align down the page ─────── */
+  .st { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; white-space: nowrap; }
+  .st .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .st-ok   .dot { background: var(--ok); }             .st-ok   { color: var(--ok); }
+  .st-hunt .dot { background: var(--warn); }           .st-hunt { color: var(--warn); }
+  .st-miss .dot { background: var(--bad); }            .st-miss { color: var(--bad); }
+  .st-idle .dot { background: oklch(0.42 0.012 285); } .st-idle { color: var(--t3); }
+  .st .att { color: var(--warn); font-size: 12px; }
+
+  /* ── actions: hidden until hover or keyboard focus ──────────────────── */
+  .acts {
+    display: flex; gap: 4px; justify-content: flex-end;
+    opacity: 0; transition: opacity .12s ease;
+  }
+  .row:hover .acts, .row:focus-within .acts { opacity: 1; }
+  .acts button {
+    background: none; border: 0; color: var(--t2); font: inherit; font-size: 13.5px;
+    padding: 8px 13px; border-radius: 7px; cursor: pointer;
+    transition: background .1s ease, color .1s ease;
+  }
+  .acts button:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
+  .acts button.danger:hover { color: var(--bad); }
+  .acts.confirming { opacity: 1; }
+  .acts .ask { color: var(--t2); font-size: 13.5px; padding: 8px 4px 8px 13px; }
+  .acts .yes { color: var(--bad); }
+
+  /* ── chips (group offsets) ──────────────────────────────────────────── */
+  .chips { grid-column: 2 / -1; display: none; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .chips.open { display: flex; }
   .chip {
-    font-size: 11px; padding: 1px 7px; border-radius: 9px;
-    background: #12121a; border: 1px solid var(--line); color: var(--muted);
+    font-size: 11.5px; padding: 3px 9px; border-radius: 7px;
+    background: oklch(0.20 0.010 285); color: var(--t2);
+    font-variant-numeric: tabular-nums;
   }
-  .chip b { color: var(--text); font-weight: 600; }
-  button {
-    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
-    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  .chip b { color: var(--t1); font-weight: 500; }
+
+  /* ── disclosure panels ──────────────────────────────────────────────── */
+  .disc { margin-top: 48px; border-top: 1px solid var(--line-soft); padding-top: 4px; }
+  .disc summary {
+    list-style: none; cursor: pointer; padding: 18px 0; font-size: 14.5px; color: var(--t2);
+    display: flex; align-items: center; gap: 11px; transition: color .12s ease;
   }
-  button:disabled { opacity: .45; cursor: default; }
-  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
-  button.bad { background: var(--bad); }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .cand {
-    border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
-    margin-bottom: 8px; background: #191920;
+  .disc summary::-webkit-details-marker { display: none; }
+  .disc summary:hover { color: var(--t1); }
+  .disc summary .chev { transition: transform .15s ease; color: var(--t3); font-size: 15px; }
+  .disc[open] summary .chev { transform: rotate(90deg); }
+  .disc .body { padding: 6px 0 28px; max-width: 64ch; }
+  .hint { font-size: 13.5px; color: var(--t3); margin: 0 0 18px; }
+
+  /* ── form controls ──────────────────────────────────────────────────── */
+  label {
+    display: block; font-size: 11.5px; color: var(--t3); text-transform: uppercase;
+    letter-spacing: .09em; margin-bottom: 8px;
   }
-  .cand .title { font-size: 13px; margin-bottom: 6px; word-break: break-word; }
-  .cand .why { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
-  .ep { font-weight: 600; }
-  .ep.unknown { color: var(--warn); }
-  .hidden { display: none; }
-  .offsets { font-size: 12px; color: var(--muted); margin-top: 8px; }
-  .offsets code { color: var(--text); }
-  select, input {
-    background: #12121a; color: var(--text); border: 1px solid var(--line);
-    border-radius: 6px; padding: 5px 8px; font-size: 13px;
+  input, select {
+    background: oklch(0.185 0.010 285); color: var(--t1); border: 1px solid var(--line);
+    border-radius: 8px; padding: 11px 13px; font: inherit; font-size: 14px; width: 100%;
   }
-  .banner {
-    padding: 10px 14px; border-radius: 6px; margin-bottom: 16px;
-    background: #1f2a24; border: 1px solid var(--ok); font-size: 13px;
+  input::placeholder { color: oklch(0.45 0.012 285); }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .fields { display: grid; grid-template-columns: 2fr 2fr 100px auto; gap: 14px; align-items: end; }
+  .field-error { color: var(--bad); font-size: 13px; margin-top: 12px; min-height: 1px; }
+
+  .btn {
+    background: var(--accent); color: oklch(0.16 0.02 295); border: 0; border-radius: 8px;
+    padding: 11px 20px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+    transition: filter .1s ease;
   }
-  .banner.err { background: #2a1f1f; border-color: var(--bad); }
-  .teach {
-    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost {
+    background: none; border: 1px solid var(--line); color: var(--t2); font-weight: 450;
   }
-  .cand.resolved { opacity: 0.65; font-size: 12px; padding: 4px 0; border: none; }
+  .btn.ghost:hover { color: var(--t1); border-color: oklch(0.34 0.012 285); filter: none; }
+  .btn.quiet { background: none; color: var(--t3); font-weight: 450; padding: 11px 12px; }
+  .btn.quiet:hover { color: var(--t1); filter: none; }
+  .btn.danger { background: none; color: var(--bad); font-weight: 450; padding: 11px 12px; }
+  .btn.danger:hover { background: oklch(0.72 0.14 25 / .14); filter: none; }
+  .btn:disabled { opacity: .45; cursor: default; filter: none; }
+
+  /* ── candidates (training) ──────────────────────────────────────────── */
+  .cand { padding: 16px 0; border-bottom: 1px solid var(--line-soft); }
+  .cand .t { font-size: 14px; margin-bottom: 4px; word-break: break-word; }
+  .cand .w { font-size: 13px; color: var(--t3); margin-bottom: 12px; }
+  .cand .ep { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .cand .ep.unknown { color: var(--warn); }
+  .cand.resolved { opacity: .6; font-size: 13px; padding: 6px 0; border: 0; }
+  .reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .reasons .lbl { font-size: 12.5px; color: var(--t3); width: 100%; margin-bottom: 2px; }
+  .reasons button {
+    background: none; border: 1px solid var(--line); color: var(--t2);
+    font: inherit; font-size: 12.5px; padding: 6px 11px; border-radius: 7px; cursor: pointer;
+  }
+  .reasons button:hover { color: var(--t1); border-color: oklch(0.34 0.012 285); }
+
+  /* ── grading ────────────────────────────────────────────────────────── */
   .attr {
-    display: flex; align-items: center; gap: 10px;
-    padding: 6px 0; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 0; border-bottom: 1px solid var(--line-soft);
   }
-  .attr-name { width: 90px; font-size: 12px; color: var(--dim); }
-  .attr-val { flex: 1; font-size: 13px; }
-  .attr-val.absent { color: var(--dim); font-style: italic; }
-  .grades { display: flex; gap: 4px; }
+  .attr-name { width: 96px; font-size: 12.5px; color: var(--t3); flex: none; }
+  .attr-val { flex: 1; font-size: 14px; min-width: 0; }
+  .attr-val.absent { color: var(--t3); font-style: italic; }
+  .attr-edit { width: 150px; padding: 6px 9px; font-size: 13px; }
+  .attr-hint { color: var(--t3); font-size: 12px; margin-left: 10px; }
+  .grades { display: flex; gap: 4px; flex: none; }
   .grades button {
-    padding: 3px 9px; font-size: 11px; border-radius: 4px;
-    border: 1px solid var(--line); background: transparent; color: var(--dim);
+    padding: 6px 11px; font-size: 12.5px; border-radius: 6px;
+    border: 1px solid var(--line); background: none; color: var(--t3); cursor: pointer;
+    transition: background .1s ease, color .1s ease;
   }
-  .grades button.sel { color: #fff; border-color: currentColor; }
-  .grades button.g-good.sel { background: #1f4d33; }
-  .grades button.g-acceptable.sel { background: #4a4326; }
-  .grades button.g-wrong.sel { background: #4d1f1f; }
-  /* Add-show form: inline row, only as tall as it needs to be. */
-  .addshow { margin-top: 8px; }
-  .addshow .ok-note { color: var(--ok); font-size: 12px; margin-left: 8px; }
+  .grades button:hover { color: var(--t1); }
+  .grades button.sel { color: var(--t1); border-color: currentColor; }
+  .grades button.g-good.sel {
+    background: oklch(0.76 0.12 160 / .16); border-color: var(--ok); color: var(--ok);
+  }
+  .grades button.g-acceptable.sel {
+    background: oklch(0.82 0.12 85 / .16); border-color: var(--warn); color: var(--warn);
+  }
+  .grades button.g-wrong.sel {
+    background: oklch(0.72 0.14 25 / .16); border-color: var(--bad); color: var(--bad);
+  }
+
+  .offsets { font-size: 13px; color: var(--t3); margin-top: 16px; }
+  .offsets code { color: var(--t1); font-size: 13px; }
+
+  /* ── empty / loading ────────────────────────────────────────────────── */
+  .empty { padding: 48px 0; text-align: center; color: var(--t3); }
+  .empty .big { font-size: 15px; color: var(--t2); margin-bottom: 6px; }
+  .empty .small { font-size: 13.5px; }
+  .skel {
+    height: 148px; border-radius: 6px;
+    background: linear-gradient(90deg, var(--raise) 25%, oklch(0.21 0.010 285) 50%, var(--raise) 75%);
+    background-size: 200% 100%; animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+  /* ── toast ──────────────────────────────────────────────────────────── */
+  .toast {
+    position: fixed; right: 28px; bottom: 28px; max-width: 380px; z-index: 50;
+    background: oklch(0.22 0.010 285); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 18px; font-size: 13.5px; color: var(--t1);
+    box-shadow: 0 8px 28px oklch(0.08 0.01 285 / .5);
+    opacity: 0; transform: translateY(8px); pointer-events: none;
+    transition: opacity .16s ease, transform .16s ease;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.err { border-color: var(--bad); color: oklch(0.86 0.06 25); }
+
+  .hidden { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
@@ -138,77 +283,96 @@
 
 <div class="head">
   <img src="/static/logo.png" alt="kishizu">
-  <div>
-    <h1>kishizu</h1>
-    <div class="sub">seasonal anime downloader</div>
-  </div>
+  <h1>kishizu</h1>
+  <span class="season" id="season"></span>
 </div>
+<p class="tagline">Declare the season. Watch the episodes. Stop thinking about it.</p>
 
-<div id="banner" class="banner hidden"></div>
-
-<div id="panel-train" class="card hidden" style="margin-bottom:20px">
-  <h2 id="train-title">Training</h2>
-  <div class="meta" id="train-meta"></div>
-  <div id="candidates"></div>
-  <div class="teach">
-    <div class="meta">Grade a release: paste a Nyaa link or a release title, then mark each part good / acceptable / wrong.</div>
-    <div class="row">
-      <input id="teach-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]" style="flex:1">
-      <input id="teach-ep" type="number" min="1" style="width:64px" title="episode">
-      <button class="ghost" onclick="inspect()">Inspect</button>
-    </div>
-    <div id="grade-panel"></div>
-  </div>
-  <div class="row">
-    <button onclick="commit()">Finish &amp; save</button>
-    <button class="ghost" onclick="cancelTrain()">Cancel</button>
-  </div>
-  <div class="offsets" id="offsets"></div>
-  <div id="resolved"></div>
-</div>
-
-<div class="card addshow">
-  <h2>Add a show</h2>
-  <div class="meta">Name it exactly as animeschedule.net lists it (or paste a Nyaa-friendly alias). Max episodes is the season length, 0 if unknown.</div>
-  <div class="row">
-    <input id="add-name" type="text" placeholder="Show name" style="flex:1; min-width:220px">
-    <input id="add-aliases" type="text" placeholder="aliases, comma-separated (optional)" style="flex:1; min-width:220px">
-    <input id="add-max" type="number" min="0" value="0" style="width:70px" title="max episodes">
-    <button onclick="addShow()">Add</button>
-  </div>
-  <span class="ok-note hidden" id="add-note"></span>
-</div>
+<div class="summary" id="summary"></div>
 
 <div id="shows"></div>
 
-<div class="card" id="panel-grade-any" style="margin-top:26px">
-  <h2>Grade a release</h2>
-  <div class="meta">Paste a Nyaa link or release title. Pick the show and episode, then mark each part good / acceptable / wrong.</div>
-  <div class="row">
-    <select id="any-show" style="flex:1"></select>
-    <input id="any-ep" type="number" min="1" style="width:64px" title="episode">
+<details class="disc" id="disc-add">
+  <summary><span class="chev">&rsaquo;</span> Add a show</summary>
+  <div class="body">
+    <p class="hint">Name it as animeschedule.net lists it, or use whatever you'd search Nyaa for. Max episodes is the season length — 0 if unknown.</p>
+    <div class="fields">
+      <div><label for="add-name">Name</label><input id="add-name" type="text" placeholder="Show name"></div>
+      <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
+      <div><label for="add-max">Episodes</label><input id="add-max" type="number" min="0" value="0"></div>
+      <div><button class="btn" onclick="addShow()">Add</button></div>
+    </div>
+    <div class="field-error" id="add-error"></div>
   </div>
-  <div class="row">
-    <input id="any-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]" style="flex:1">
-    <button onclick="inspectAny()">Inspect</button>
+</details>
+
+<details class="disc" id="disc-train">
+  <summary><span class="chev">&rsaquo;</span> Train a show</summary>
+  <div class="body">
+    <div id="train-pick">
+      <p class="hint">Pick a show and the episode you want to teach it. kishizu searches Nyaa and asks you to confirm which release is that episode.</p>
+      <div class="fields">
+        <div><label for="train-show">Show</label><select id="train-show"></select></div>
+        <div><label for="train-ep">Episode</label><input id="train-ep" type="number" min="1" value="1"></div>
+        <div><button class="btn" onclick="startTrain()">Start</button></div>
+      </div>
+      <div class="field-error" id="train-error"></div>
+    </div>
+    <div id="train-run" class="hidden">
+      <h2 id="train-title" style="font-size:15px;font-weight:500;margin:0 0 4px"></h2>
+      <p class="hint" id="train-meta"></p>
+      <div id="candidates"></div>
+      <div id="resolved"></div>
+      <div class="offsets" id="offsets"></div>
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button class="btn" onclick="commit()">Finish &amp; save</button>
+        <button class="btn ghost" onclick="cancelTrain()">Cancel</button>
+      </div>
+    </div>
   </div>
-  <div id="any-grade-panel"></div>
-</div>
+</details>
+
+<details class="disc" id="disc-grade">
+  <summary><span class="chev">&rsaquo;</span> Grade a release</summary>
+  <div class="body">
+    <p class="hint">Paste a Nyaa link or release title. Pick the show and episode, then mark each part good, acceptable or wrong.</p>
+    <div class="fields">
+      <div><label for="any-show">Show</label><select id="any-show"></select></div>
+      <div><label for="any-ep">Episode</label><input id="any-ep" type="number" min="1" value="1"></div>
+    </div>
+    <div class="fields" style="grid-template-columns:1fr auto;margin-top:14px">
+      <div><label for="any-title">Release</label><input id="any-title" type="text" placeholder="nyaa.si/view/... or [Group] Show - 07 [1080p]"></div>
+      <div><button class="btn" onclick="inspectAny()">Inspect</button></div>
+    </div>
+    <div class="field-error" id="grade-error"></div>
+    <div id="any-grade-panel"></div>
+  </div>
+</details>
 
 </div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 let state = { active: false };
+let shows = [];
 
 function el(id) { return document.getElementById(id); }
 function show(id, yes) { el(id).classList.toggle('hidden', !yes); }
 
-function banner(msg, isErr) {
-  const b = el('banner');
-  b.textContent = msg;
-  b.classList.toggle('err', !!isErr);
-  show('banner', !!msg);
+let toastTimer = null;
+function toast(msg, isErr) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.classList.toggle('err', !!isErr);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), isErr ? 8000 : 5000);
 }
+
+// Inline validation sits next to the control that caused it. A message at the
+// top of the page is missed when the user's attention is at the bottom.
+function fieldError(id, msg) { el(id).textContent = msg || ''; }
 
 async function api(path, body, method) {
   const opts = body
@@ -220,50 +384,76 @@ async function api(path, body, method) {
   return j;
 }
 
+async function loadSummary() {
+  try {
+    const s = await api('/api/summary');
+    const next = s.next
+      ? `<b>${escapeHtml(s.next.show)}</b> ep ${s.next.episode} <span>· ${when(s.next.airs_at)} (${rel(s.next.airs_at)})</span>`
+      : '<span>nothing scheduled</span>';
+    el('summary').innerHTML = `
+      <div class="stat"><div class="v">${s.ready}</div><div class="k">to watch</div></div>
+      <div class="stat"><div class="v">${s.hunting}</div><div class="k">hunting</div></div>
+      <div class="stat"><div class="v">${s.missing}</div><div class="k">needs you</div></div>
+      <div class="stat next"><div class="v">${next}</div><div class="k">next up</div></div>`;
+  } catch (e) { /* summary is decorative; the list still works */ }
+}
+
 async function loadShows() {
-  const shows = await api('/shows');
-  el('any-show').innerHTML = shows.map(s =>
-    `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  shows = await api('/shows');
+
+  const opts = shows.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  el('any-show').innerHTML = opts;
+  el('train-show').innerHTML = opts;
 
   // Airing = the schedule knows the next air time. Everything else is
-  // upcoming: seeded but not yet on an air date.
+  // upcoming: declared but not yet on an air date.
   const byAir = (a, b) => new Date(a.next_schedule.airs_at) - new Date(b.next_schedule.airs_at);
   const airing = shows.filter(s => s.next_schedule).sort(byAir);
   const upcoming = shows.filter(s => !s.next_schedule);
 
-  const sect = (label, list) => list.length
+  const sect = (label, list, noart) => list.length
     ? `<div class="sect">${label} <span class="sect-n">${list.length}</span></div>
-       <div class="grid">${list.map(card).join('')}</div>` : '';
-  el('shows').innerHTML = sect('Airing', airing) + sect('Upcoming', upcoming);
+       ${list.map(s => card(s, noart)).join('')}` : '';
+
+  if (!shows.length) {
+    el('shows').innerHTML = `
+      <div class="empty">
+        <div class="big">No shows yet</div>
+        <div class="small">Add the shows you're watching this season to get started.</div>
+      </div>`;
+    return;
+  }
+  el('shows').innerHTML = sect('Airing', airing, false) + sect('Upcoming', upcoming, true);
+  loadSummary();
 }
 
 // Add a show by name. Aliases are optional; the canonical name is always an
 // alias of itself, so matching never special-cases it.
 async function addShow() {
   const name = el('add-name').value.trim();
-  if (!name) { banner('Give the show a name first.', true); return; }
+  if (!name) { fieldError('add-error', 'Give the show a name first.'); return; }
+  fieldError('add-error', '');
   const aliases = el('add-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
   const max = parseInt(el('add-max').value, 10) || 0;
   try {
     const r = await api('/api/shows', { name, aliases, max_episode: max });
     el('add-name').value = ''; el('add-aliases').value = ''; el('add-max').value = '0';
-    const note = el('add-note');
-    note.textContent = `Added ${r.name}. It will pick up an air date at the next schedule refresh.`;
-    note.classList.remove('hidden');
-    setTimeout(() => note.classList.add('hidden'), 8000);
+    toast(`Added ${r.name}. It picks up an air date at the next schedule refresh.`);
     loadShows();
-  } catch (e) { banner(e.message, true); }
+  } catch (e) { fieldError('add-error', e.message); }
 }
 
-// One show card. Status is the hero; everything else is quieter than it.
-function card(s) {
+// One show row. Status is the hero; everything else is quieter than it.
+// noart drops the cover-art column — used for Upcoming, which has no art and
+// needs nothing from the user.
+function card(s, noart) {
   const st = s.state || 'unknown';
   const cls = {
-    'ready to watch': 'st-ready',
-    'hunting':        'st-hunting',
-    'missing':        'st-missing',
-    'no release found': 'st-missing',
-    'up-to-date':     s.trained ? 'st-ok' : 'st-idle',
+    'ready to watch':   'st-ok',
+    'hunting':          'st-hunt',
+    'missing':          'st-miss',
+    'no release found': 'st-miss',
+    'up-to-date':       'st-idle',
   }[st] || 'st-idle';
 
   // Air line: the next episode the user actually owes, with its air time when
@@ -275,56 +465,40 @@ function card(s) {
   } else if (s.next_schedule) {
     const sc = s.next_schedule;
     const past = new Date(sc.airs_at) < Date.now();
-    air = `Ep ${sc.episode} ${past ? 'aired' : 'airs'} <b>${when(sc.airs_at)}</b>`
-        + ` <span class="rel">${rel(sc.airs_at)}</span>`;
+    air = `Ep ${sc.episode} ${past ? 'aired' : 'airs'} <b>${when(sc.airs_at)}</b> (${rel(sc.airs_at)})`;
   } else {
     air = `Ep ${s.next}${s.max ? ' of ' + s.max : ''}`;
   }
 
+  const n = escapeHtml(s.name).replace(/'/g, "\\'");
   const nGroups = Object.keys(s.offsets || {}).length;
-  const counts = [
-    s.watched ? `${s.watched} watched` : '',
-    s.downloaded ? `${s.downloaded} on disk` : '',
-    s.deleted ? `${s.deleted} deleted` : '',
-  ].filter(Boolean).join(' &middot; ');
+
+  // One primary action, context-dependent. The rest are secondary or tucked
+  // behind the offsets disclosure.
+  let acts = `<button onclick="watchedUpTo(${s.id}, ${s.next}, '${n}')">Watched</button>`;
+  if (st === 'missing') {
+    acts = `<button onclick="unlatch(${s.id}, ${s.next}, '${n}')">Re-grab</button>` + acts;
+  }
+  acts += `<button onclick="openTrain(${s.id}, ${s.next})">Train</button>`;
+  if (s.trained) {
+    acts += `<button onclick="toggleOffsets(${s.id})">${nGroups} offsets</button>`;
+  }
+  acts += `<button class="danger" onclick="removeShow(${s.id}, '${n}')">Remove</button>`;
+
+  const art = (s.image_url && !noart)
+    ? `<img class="art" src="${escapeHtml(s.image_url)}" loading="lazy" alt="">`
+    : (noart ? '' : `<div class="art"></div>`);
 
   return `
-  <div class="card">
-    <div class="body">
-      ${s.image_url ? `<img class="art" src="${escapeHtml(s.image_url)}" loading="lazy" alt=""
-        onerror="this.remove()">` : ''}
-      <div class="grow">
-        <h2>${escapeHtml(s.name)}</h2>
-        <div class="row" style="margin:2px 0 0">
-          <span class="status ${cls}">${escapeHtml(st)}</span>
-          ${s.needs_attention ? '<span class="status st-missing">needs attention</span>' : ''}
-        </div>
-        <div class="air ${s.next_schedule && s.next_schedule.status === 'upcoming' ? 'soon' : ''}">${air}</div>
-        ${s.state === 'missing' ? `<div class="row" style="margin-bottom:8px">
-          <span class="meta" style="color:var(--warn)">file gone before the watch signal</span>
-          <button onclick="unlatch(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Re-download</button>
-          <button class="ghost" onclick="watchedUpTo(${s.id}, ${s.next}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Mark watched</button>
-        </div>` : ''}
-        <div class="row">
-          <input id="ep-${s.id}" type="number" min="1" value="${s.next}" style="width:64px"
-            title="episode number for the actions below">
-          <button class="ghost" onclick="watchedUpTo(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
-            title="mark episodes 1..N watched, so they are never grabbed">Watched up to</button>
-          <button class="ghost" onclick="setDownloaded(${s.id}, document.getElementById('ep-${s.id}').value, '${escapeHtml(s.name).replace(/'/g, "\\'")}')"
-            title="mark this episode as already on disk, ready to watch">Have it</button>
-          <button class="ghost" onclick="startTrain(${s.id})"
-            title="teach kishizu which releases match this show">Train</button>
-        </div>
-        <div class="foot">
-          ${counts || 'no episodes yet'}
-          ${s.trained ? ` &middot; <button onclick="toggleOffsets(${s.id})">${nGroups} group offsets</button>
-            <button onclick="resetShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">reset</button>`
-          : ' &middot; untrained'}
-          &middot; <button class="danger" onclick="removeShow(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')">remove</button>
-        </div>
-        <div class="chips" id="off-${s.id}"></div>
-      </div>
+  <div class="row ${noart ? 'noart' : ''}" id="row-${s.id}">
+    ${art}
+    <div>
+      <div class="name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</div>
+      <div class="sub">${air}</div>
     </div>
+    <span class="st ${cls}"><span class="dot"></span>${escapeHtml(st)}</span>
+    <span class="acts">${acts}</span>
+    <div class="chips" id="off-${s.id}"></div>
   </div>`;
 }
 
@@ -353,14 +527,13 @@ function rel(iso) {
 function toggleOffsets(id) {
   const box = el('off-' + id);
   if (box.classList.contains('open')) { box.classList.remove('open'); return; }
-  fetch('/shows').then(r => r.json()).then(shows => {
-    const s = shows.find(x => x.id === id);
-    box.innerHTML = Object.entries(s.offsets || {})
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([g, o]) => `<span class="chip">${escapeHtml(g)} <b>${o > 0 ? '+' + o : o}</b></span>`)
-      .join('') || '<span class="chip">no offsets</span>';
-    box.classList.add('open');
-  });
+  const s = shows.find(x => x.id === id);
+  if (!s) return;
+  box.innerHTML = Object.entries(s.offsets || {})
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([g, o]) => `<span class="chip">${escapeHtml(g)} <b>${o > 0 ? '+' + o : o}</b></span>`)
+    .join('') || '<span class="chip">no offsets</span>';
+  box.classList.add('open');
 }
 
 function escapeHtml(s) {
@@ -371,31 +544,36 @@ function dayName(n) {
   return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][n] || '?';
 }
 
-// Re-download an episode: the only way out of a terminal state, and the
-// "that deletion was an accident" path for a missing file.
-async function unlatch(showId, ep, name) {
-  ep = parseInt(ep, 10);
-  if (!ep || ep < 1) { banner('Set an episode number first.', true); return; }
-  if (!confirm(`Re-download ep ${ep} of ${name}? It will be hunted again.`)) return;
-  try {
-    const r = await api('/api/unlatch', { show_id: showId, episode: ep });
-    banner(`${name} ep ${r.episode}: ${r.state}, will be hunted again.`);
-    loadShows();
-  } catch (e) { banner(e.message, true); }
+// Inline confirmation, replacing window.confirm. The prompt appears in the
+// row itself, next to the action, so the user never loses their place — and
+// it is keyboard reachable, which a native dialog is not.
+function askConfirm(rowId, question, onYes) {
+  const row = el(rowId);
+  const acts = row.querySelector('.acts');
+  const original = acts.innerHTML;
+  acts.classList.add('confirming');
+  acts.innerHTML = `<span class="ask">${escapeHtml(question)}</span>
+    <button class="yes" onclick="void 0">Yes</button>
+    <button onclick="void 0">Cancel</button>`;
+  const [yes, no] = acts.querySelectorAll('button');
+  const restore = () => { acts.innerHTML = original; acts.classList.remove('confirming'); };
+  yes.onclick = async () => { restore(); await onYes(); };
+  no.onclick = restore;
+  yes.focus();
 }
 
-// Mark an episode as already on disk. For files obtained outside kishizu —
-// the user has them on their PC, so the tool should stop hunting and show
-// them as ready to watch.
-async function setDownloaded(showId, ep, name) {
+// Re-download an episode: the only way out of a terminal state, and the
+// "that deletion was an accident" path for a missing file.
+function unlatch(showId, ep, name) {
   ep = parseInt(ep, 10);
-  if (!ep || ep < 1) { banner('Set an episode number first.', true); return; }
-  if (!confirm(`Mark ep ${ep} of ${name} as already downloaded (ready to watch)?`)) return;
-  try {
-    const r = await api('/api/set-state', { show_id: showId, episode: ep, state: 'downloaded' });
-    banner(`${name} ep ${r.episode}: ${r.state}.`);
-    loadShows();
-  } catch (e) { banner(e.message, true); }
+  if (!ep || ep < 1) { toast('No episode to re-grab.', true); return; }
+  askConfirm('row-' + showId, `Re-grab ep ${ep}?`, async () => {
+    try {
+      const r = await api('/api/unlatch', { show_id: showId, episode: ep });
+      toast(`${name} ep ${r.episode}: ${r.state}, will be hunted again.`);
+      loadShows();
+    } catch (e) { toast(e.message, true); }
+  });
 }
 
 // Mark episodes 1..n watched. This is the single way to record progress:
@@ -404,96 +582,101 @@ async function setDownloaded(showId, ep, name) {
 //
 // Only episodes with no state yet are touched, so an episode already
 // downloading or downloaded is left alone.
-async function watchedUpTo(showId, upto, name) {
+function watchedUpTo(showId, upto, name) {
   upto = parseInt(upto, 10);
-  if (isNaN(upto) || upto < 1) { banner('Set an episode number first.', true); return; }
-  if (!confirm(`Mark episodes 1..${upto} of ${name} as watched? They will never be auto-grabbed.`)) return;
-  try {
-    let r = await api('/api/watched-up-to', { show_id: showId, up_to: upto });
-    // Nothing latched usually means an episode is still downloading. Offer to
-    // override, since a torrent with no seeders never completes and would
-    // otherwise leave the user unable to record that they watched it.
-    if (r.newly_marked === 0) {
-      const force = confirm(
-        `Nothing was marked — episode ${upto} may still be downloading.\n\n` +
-        `Mark it watched anyway? Only do this if the download is stuck or you watched it another way.`);
-      if (!force) { banner('Left as-is.'); return; }
-      r = await api('/api/watched-up-to', { show_id: showId, up_to: upto, force: true });
-    }
-    banner(`${name}: ${r.newly_marked} episode(s) latched as watched.`);
-    loadShows();
-  } catch (e) { banner(e.message, true); }
-}
-
-
-
-// The episode is chosen by the user at training time, not fixed to "next":
-// which episode you train on is a judgement call (you may want one that has
-// already aired and has several competing releases).
-async function startTrain(showId) {
-  banner('');
-  const input = el('ep-' + showId);
-  const ep = parseInt(input && input.value, 10) || 0;
-  try {
-    const r = await api('/api/train/start', { show_id: showId, episode: ep, seed_index: -1 });
-    if (r.needs_seed) { renderSeedPicker(showId, ep, r); return; }
-    state = r;
-    renderTrain();
-  } catch (e) { banner('Could not start: ' + e.message, true); }
-}
-
-async function resetShow(showId, name) {
-  if (!confirm(`Clear learned offsets for ${name}? You can retrain afterwards.`)) return;
-  try {
-    await api('/api/train/reset', { show_id: showId });
-    banner(`Cleared offsets for ${name}.`);
-    loadShows();
-  } catch (e) { banner(e.message, true); }
+  if (isNaN(upto) || upto < 1) { toast('No episode to mark.', true); return; }
+  askConfirm('row-' + showId, `Watched through ep ${upto}?`, async () => {
+    try {
+      const r = await api('/api/watched-up-to', { show_id: showId, up_to: upto });
+      // Nothing latched usually means an episode is still downloading. Ask
+      // before overriding — a torrent with no seeders never completes, and
+      // without this the user would be unable to record that they watched it.
+      // The override is only sent once the user has agreed to it.
+      if (r.newly_marked === 0) {
+        askConfirm('row-' + showId, `Ep ${upto} is still downloading. Mark anyway?`, async () => {
+          try {
+            const f = await api('/api/watched-up-to', { show_id: showId, up_to: upto, force: true });
+            toast(`${name}: ${f.newly_marked} episode(s) latched as watched.`);
+            loadShows();
+          } catch (e) { toast(e.message, true); }
+        });
+        return;
+      }
+      toast(`${name}: ${r.newly_marked} episode(s) latched as watched.`);
+      loadShows();
+    } catch (e) { toast(e.message, true); }
+  });
 }
 
 // Remove a show entirely: the way to drop a finished season, or undo one
 // added by mistake. Files on disk are left alone — this stops kishizu
 // tracking the show, it does not delete episodes.
-async function removeShow(showId, name) {
-  if (!confirm(`Remove ${name} from kishizu?\n\nThis forgets the show and everything learned about it. Files on disk are not deleted.`)) return;
+function removeShow(showId, name) {
+  askConfirm('row-' + showId, `Remove ${name}?`, async () => {
+    try {
+      await api('/api/shows', { id: showId }, 'DELETE');
+      toast(`Removed ${name}. Files on disk were left alone.`);
+      loadShows();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
+// Open the training panel with a show preselected, then start.
+function openTrain(showId, ep) {
+  el('disc-train').open = true;
+  el('train-show').value = showId;
+  el('train-ep').value = ep || 1;
+  startTrain();
+}
+
+// The episode is chosen by the user at training time, not fixed to "next":
+// which episode you train on is a judgement call (you may want one that has
+// already aired and has several competing releases).
+async function startTrain() {
+  const showId = parseInt(el('train-show').value, 10);
+  const ep = parseInt(el('train-ep').value, 10) || 0;
+  if (!showId) { fieldError('train-error', 'Pick a show first.'); return; }
+  fieldError('train-error', '');
   try {
-    await api('/api/shows', { id: showId }, 'DELETE');
-    banner(`Removed ${name}.`);
-    loadShows();
-  } catch (e) { banner(e.message, true); }
+    const r = await api('/api/train/start', { show_id: showId, episode: ep, seed_index: -1 });
+    if (r.needs_seed) { renderSeedPicker(showId, ep, r); return; }
+    state = r;
+    renderTrain();
+  } catch (e) { fieldError('train-error', 'Could not start: ' + e.message); }
 }
 
 // The newest release is often the PREVIOUS episode, so we cannot safely guess a
 // seed. Ask the user to pick the release that IS the target episode.
 function renderSeedPicker(showId, ep, r) {
-  show('panel-train', true);
+  show('train-pick', false);
+  show('train-run', true);
   el('train-title').textContent = 'Pick a release for episode ' + ep;
   el('train-meta').textContent =
     r.show + ' — no release in the feed is obviously episode ' + ep + '. Choose the right one:';
   el('candidates').innerHTML = r.releases.map(c => `
     <div class="cand">
-      <div class="title">
+      <div class="t">
         <span class="ep ${c.episode ? '' : 'unknown'}">${c.episode ? 'ep' + c.episode : 'ep?'}</span>
         &nbsp;${escapeHtml(c.title)}
       </div>
-      <div class="why">${c.seeders} seeders · ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
-      <div class="row">
-        <button onclick="seedWith(${showId}, ${ep}, ${c.index})">Use this</button>
-      </div>
+      <div class="w">${c.seeders} seeders · ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
+      <button class="btn" onclick="seedWith(${showId}, ${ep}, ${c.index})">Use this</button>
     </div>
   `).join('');
   el('offsets').innerHTML = '';
+  el('resolved').innerHTML = '';
 }
 
 async function seedWith(showId, ep, index) {
   try {
     state = await api('/api/train/start', { show_id: showId, episode: ep, seed_index: index });
     renderTrain();
-  } catch (e) { banner(e.message, true); }
+  } catch (e) { fieldError('train-error', e.message); }
 }
 
 function renderTrain() {
-  show('panel-train', state.active);
+  show('train-run', state.active);
+  show('train-pick', !state.active);
   if (!state.active) return;
 
   el('train-title').textContent = 'Training: ' + state.show;
@@ -502,17 +685,18 @@ function renderTrain() {
 
   el('candidates').innerHTML = state.candidates.map(c => `
     <div class="cand">
-      <div class="title">
+      <div class="t">
         <span class="ep ${c.episode ? '' : 'unknown'}">${c.episode ? 'ep' + c.episode : 'ep?'}</span>
         &nbsp;${escapeHtml(c.title)}
       </div>
-      <div class="why">${escapeHtml(c.why)} · ${c.seeders} seeders · ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
-      <div class="row">
-        <button onclick="answer(${c.index}, true)">Yes, this is ep ${state.episode}</button>
-        <button class="bad" onclick="reject(${c.index})">No</button>
+      <div class="w">${escapeHtml(c.why)} · ${c.seeders} seeders · ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="answer(${c.index}, true)">This is ep ${state.episode}</button>
+        <button class="btn ghost" onclick="showReasons(${c.index})">No</button>
       </div>
+      <div class="reasons hidden" id="why-${c.index}"></div>
     </div>
-  `).join('') || '<div class="meta">Nothing more to ask.</div>';
+  `).join('') || '<p class="hint">Nothing more to ask.</p>';
 
   const offs = Object.entries(state.offsets || {});
   el('offsets').innerHTML = offs.length
@@ -522,102 +706,131 @@ function renderTrain() {
   // Show what the model now resolves on its own, so learning is visible.
   const res = state.resolved || [];
   el('resolved').innerHTML = res.length
-    ? '<div class="meta">resolved without asking:</div>' + res.map(c => `
+    ? '<p class="hint" style="margin-top:20px">resolved without asking:</p>' + res.map(c => `
       <div class="cand resolved">
         <span class="ep">ep${c.episode}</span>&nbsp;${escapeHtml(c.title)}
       </div>`).join('')
     : '';
 }
 
-let grading = null;
-let gradingAny = null;
+// Rejection reasons, as buttons rather than a prompt() the user has to type
+// an enum into. The first two teach the matcher; the rest only adjust
+// filters and preferences — which is why the wording says so.
+const REASONS = [
+  ['wrong_episode', 'wrong episode'],
+  ['wrong_show',    'wrong show'],
+  ['batch',         'it’s a batch'],
+  ['dub',           'it’s a dub'],
+  ['codec',         'wrong codec'],
+  ['quality',       'wrong quality'],
+  ['other',         'something else'],
+];
 
-// Standalone grading: works without an active training session, so a release
-// can be graded the moment you see it rather than only mid-session.
+function showReasons(index) {
+  const box = el('why-' + index);
+  if (!box) return;
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  box.innerHTML = '<span class="lbl">Why not?</span>' + REASONS.map(([v, label]) =>
+    `<button onclick="reject(${index}, '${v}')">${label}</button>`).join('');
+  box.classList.remove('hidden');
+}
+
+async function answer(index, accept) {
+  try {
+    state = await api('/api/train/answer', { index, accept });
+    renderTrain();
+  } catch (e) { fieldError('train-error', e.message); }
+}
+
+async function reject(index, reason) {
+  try {
+    state = await api('/api/train/answer', { index, accept: false, reason });
+    renderTrain();
+  } catch (e) { fieldError('train-error', e.message); }
+}
+
+async function commit() {
+  try {
+    const r = await api('/api/train/commit', {});
+    const n = (r.verified || []).length;
+    toast(`Saved. ${r.accepted} accepted, ${r.rejected} rejected. ${n} release(s) now match ep ${state.episode}.`);
+    state = { active: false };
+    renderTrain();
+    loadShows();
+  } catch (e) { fieldError('train-error', e.message); }
+}
+
+function cancelTrain() {
+  state = { active: false };
+  renderTrain();
+}
+
+// ── grading ───────────────────────────────────────────────────────────────
+// One panel, not two. Grading works without a training session in flight, so
+// the duplicate copy that used to live inside the training panel is gone.
+let grading = null;
+
 async function inspectAny() {
   const input = el('any-title').value.trim();
-  if (!input) { banner('Paste a Nyaa link or release title first.', true); return; }
+  if (!input) { fieldError('grade-error', 'Paste a Nyaa link or release title first.'); return; }
+  fieldError('grade-error', '');
   const showId = parseInt(el('any-show').value, 10);
   const ep = parseInt(el('any-ep').value, 10) || 1;
+  if (!showId) { fieldError('grade-error', 'Pick a show first.'); return; }
   try {
     const r = await api('/api/inspect', { input, show_id: showId, episode: ep });
-    gradingAny = { release: r.release, episode: ep, show_id: showId, grades: {} };
-    renderGradingInto('any-grade-panel', r, 'any');
-  } catch (e) { banner(e.message, true); }
-}
-
-async function submitGradesAny() {
-  if (!gradingAny) return;
-  try {
-    const rel = collectEdits('any', gradingAny.release);
-    const r = await api('/api/grade', {
-      title: rel.title,
-      show_id: gradingAny.show_id,
-      episode: gradingAny.episode,
-      grades: gradingAny.grades,
-      release: rel,
-    });
-    el('any-grade-panel').innerHTML = '';
-    el('any-title').value = '';
-    gradingAny = null;
-    banner(r.notes.length ? 'Learned: ' + r.notes.join('; ') : 'No changes.');
-    loadShows();
-  } catch (e) { banner(e.message, true); }
-}
-
-async function inspect() {
-  const input = el('teach-title').value.trim();
-  if (!input) { banner('Paste a Nyaa link or release title first.', true); return; }
-  const ep = parseInt(el('teach-ep').value, 10) || state.episode;
-  try {
-    const r = await api('/api/train/inspect', { input, episode: ep });
-    grading = { release: r.release, episode: r.episode, grades: {} };
+    grading = { release: r.release, episode: ep, show_id: showId, grades: {} };
     renderGrading(r);
-  } catch (e) { banner(e.message, true); }
+  } catch (e) { fieldError('grade-error', e.message); }
 }
 
-// prefix keeps the two panels' buttons from selecting each other's elements.
-function renderGradingInto(panelId, r, prefix) {
+function renderGrading(r) {
   const rel = r.release;
-  el(panelId).innerHTML = `
-    <div class="meta" style="margin-top:8px">${escapeHtml(rel.title)}</div>
-    ${r.matched ? `<div class="meta">confidence ${(rel.confidence*100).toFixed(0)}% &middot; ${escapeHtml(r.why)}</div>`
-                : `<div class="meta">not matched: ${escapeHtml(r.why)}</div>`}
+  el('any-grade-panel').innerHTML = `
+    <p class="hint" style="margin-top:20px">${escapeHtml(rel.title)}</p>
+    ${r.matched
+      ? `<p class="hint">confidence ${(rel.confidence*100).toFixed(0)}% · ${escapeHtml(r.why)}</p>`
+      : `<p class="hint">not matched: ${escapeHtml(r.why)}</p>`}
     ${rel.attrs.map(a => `
       <div class="attr">
         <span class="attr-name">${escapeHtml(a.label)}</span>
         <span class="attr-val ${a.present ? '' : 'absent'}">
           ${a.editable
-            ? `<input class="attr-edit" data-p="${prefix}" data-k="${a.key}" value="${escapeHtml(a.value)}" placeholder="absent">`
+            ? `<input class="attr-edit" data-k="${a.key}" value="${escapeHtml(a.value)}" placeholder="absent">`
             : escapeHtml(a.value || 'absent')}
           ${a.hint ? `<span class="attr-hint">${escapeHtml(a.hint)}</span>` : ''}
         </span>
         <span class="grades">
-          ${['good','acceptable','wrong'].map(g => `<button class="g-${g}" data-p="${prefix}" data-k="${a.key}" data-g="${g}" onclick="setGrade('${prefix}','${a.key}','${g}')">${g}</button>`).join('')}
+          ${['good','acceptable','wrong'].map(g =>
+            `<button class="g-${g}" data-k="${a.key}" data-g="${g}"
+              onclick="setGrade('${a.key}','${g}')">${g}</button>`).join('')}
         </span>
       </div>`).join('')}
-    <div class="row">
-      <button onclick="${prefix === 'any' ? 'submitGradesAny()' : 'submitGrades()'}">Apply grades</button>
-      <button class="ghost" onclick="el('${panelId}').innerHTML=''; ${prefix === 'any' ? 'gradingAny' : 'grading'}=null;">Discard</button>
+    <div style="display:flex;gap:8px;margin-top:20px">
+      <button class="btn" onclick="submitGrades()">Apply grades</button>
+      <button class="btn ghost" onclick="discardGrades()">Discard</button>
     </div>`;
 }
 
-function renderGrading(r) { renderGradingInto('grade-panel', r, 'train'); }
-
-function setGrade(prefix, key, g) {
-  const target = prefix === 'any' ? gradingAny : grading;
-  if (!target) return;
-  target.grades[key] = g;
-  document.querySelectorAll(`[data-p="${prefix}"][data-k="${key}"]`).forEach(b =>
+function setGrade(key, g) {
+  if (!grading) return;
+  grading.grades[key] = g;
+  document.querySelectorAll(`[data-k="${key}"]`).forEach(b =>
     b.classList.toggle('sel', b.dataset.g === g));
+}
+
+function discardGrades() {
+  el('any-grade-panel').innerHTML = '';
+  el('any-title').value = '';
+  grading = null;
 }
 
 // Pull any edited attribute values into the payload. The episode is editable
 // because the parser cannot know the user's own numbering: a title reading 47
 // may be episode 7 of this season.
-function collectEdits(prefix, release) {
+function collectEdits(release) {
   const out = JSON.parse(JSON.stringify(release));
-  document.querySelectorAll(`input.attr-edit[data-p="${prefix}"]`).forEach(inp => {
+  document.querySelectorAll('input.attr-edit').forEach(inp => {
     const a = out.attrs.find(x => x.key === inp.dataset.k);
     if (a) a.value = inp.value.trim();
   });
@@ -627,53 +840,27 @@ function collectEdits(prefix, release) {
 async function submitGrades() {
   if (!grading) return;
   try {
-    const rel = collectEdits('train', grading.release);
-    const r = await api('/api/train/grade', {
+    const rel = collectEdits(grading.release);
+    const r = await api('/api/grade', {
       title: rel.title,
+      show_id: grading.show_id,
       episode: grading.episode,
       grades: grading.grades,
       release: rel,
     });
-    state = r.state;
-    el('grade-panel').innerHTML = '';
-    el('teach-title').value = '';
-    grading = null;
-    banner(r.notes.length ? 'Learned: ' + r.notes.join('; ') : 'No changes.');
-    renderTrain();
-  } catch (e) { banner(e.message, true); }
-}
-
-async function answer(index, accept) {
-  try {
-    state = await api('/api/train/answer', { index, accept });
-    renderTrain();
-  } catch (e) { banner(e.message, true); }
-}
-
-async function reject(index) {
-  const reason = prompt('Why? (wrong_episode, wrong_show, batch, dub, codec, quality, other)', 'wrong_episode');
-  if (reason === null) return;
-  try {
-    state = await api('/api/train/answer', { index, accept: false, reason });
-    renderTrain();
-  } catch (e) { banner(e.message, true); }
-}
-
-async function commit() {
-  try {
-    const r = await api('/api/train/commit', {});
-    const n = (r.verified || []).length;
-    banner(`Saved. ${r.accepted} accepted, ${r.rejected} rejected. ${n} release(s) now match ep ${state.episode}.`);
-    state = { active: false };
-    renderTrain();
+    discardGrades();
+    toast(r.notes.length ? 'Learned: ' + r.notes.join('; ') : 'No changes.');
     loadShows();
-  } catch (e) { banner(e.message, true); }
+  } catch (e) { fieldError('grade-error', e.message); }
 }
 
-function cancelTrain() {
-  state = { active: false };
-  renderTrain();
-}
+// Season label in the header, derived from the current date. Purely cosmetic:
+// it tells the user which cour they are looking at.
+(function seasonLabel() {
+  const d = new Date();
+  const season = ['Winter', 'Spring', 'Summer', 'Autumn'][Math.floor(d.getMonth() / 3)];
+  el('season').textContent = `${season} ${d.getFullYear()}`;
+})();
 
 loadShows();
 </script>
