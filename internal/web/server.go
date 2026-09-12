@@ -273,11 +273,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type perShow struct {
-		Name       string `json:"name"`
-		Next       int    `json:"next"`
-		Downloaded int    `json:"downloaded"`
-		Watched    int    `json:"watched"`
-		Deleted    int    `json:"deleted"`
+		Name        string `json:"name"`
+		Next        int    `json:"next"`
+		Downloading int    `json:"downloading"`
+		Downloaded  int    `json:"downloaded"`
+		Watched     int    `json:"watched"`
+		Deleted     int    `json:"deleted"`
 	}
 	out := struct {
 		Shows       int       `json:"shows"`
@@ -287,6 +288,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		Deleted     int       `json:"deleted"`
 		PerShow     []perShow `json:"per_show"`
 	}{PerShow: []perShow{}}
+
+	out.Shows = len(shows)
 
 	for _, sh := range shows {
 		eps, err := s.st.EpisodesForShow(sh.ID)
@@ -298,12 +301,16 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			switch episode.ParseState(string(ep.State)) {
 			case episode.Downloading:
 				out.Downloading++
+				p.Downloading++
 			case episode.Downloaded:
 				out.Downloaded++
+				p.Downloaded++
 			case episode.Watched:
 				out.Watched++
+				p.Watched++
 			case episode.Deleted:
 				out.Deleted++
+				p.Deleted++
 			}
 		}
 		out.PerShow = append(out.PerShow, p)
