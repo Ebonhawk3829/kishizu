@@ -36,7 +36,7 @@ func TestDeletedEpisodeIsNeverRegrabbed(t *testing.T) {
 func TestMayAutoGrab(t *testing.T) {
 	cases := map[State]bool{
 		Wanted:      true,
-		Downloading: true,
+		Downloading: false, // in flight: a second grab would duplicate it
 		Downloaded:  false, // on disk; remake is a manual decision
 		Watched:     false,
 		Deleted:     false,
@@ -46,6 +46,20 @@ func TestMayAutoGrab(t *testing.T) {
 		if got := s.MayAutoGrab(); got != want {
 			t.Errorf("%s.MayAutoGrab() = %v, want %v", s, got, want)
 		}
+	}
+}
+
+// TestDownloadingIsNotRegrabbed pins the duplicate-download guard.
+//
+// Every release group publishes a distinct infohash, so the "already seen"
+// check cannot stop a second grab of the same episode. The state latch is the
+// only thing that can, and it must refuse while downloading.
+func TestDownloadingIsNotRegrabbed(t *testing.T) {
+	if Downloading.MayAutoGrab() {
+		t.Error("downloading must not be re-grabbable: distinct infohashes per group mean the seen-check cannot stop it")
+	}
+	if !Wanted.MayAutoGrab() {
+		t.Error("wanted must remain grabbable")
 	}
 }
 

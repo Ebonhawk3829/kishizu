@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/art"
@@ -30,11 +32,11 @@ func itoa(n int) string { return fmt.Sprint(n) }
 // it is switched on, and the user decides when. In dry-run the loop logs every
 // decision with its reason, so the behaviour can be reviewed before anything
 // downloads.
-func runLoop(st *store.Store, artCache *art.Cache, rpcURL, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
+func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
 	l := listen.New(st)
 	tc := transmission.New(rpcURL)
 	w := watch.New(st, library, keep)
-	rec := grab.New(st, tc)
+	rec := grab.New(st, tc, staging, library)
 	n := ntfy.New(ntfyURL)
 
 	log.Printf("listener: polling every %s (dry-run=%v, transmission=%s)",
@@ -79,7 +81,15 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, library string, keep 
 					log.Printf("WOULD GRAB %s ep%d %s (%s)", d.Show, d.Episode, d.Item.Title, d.Reason)
 					continue
 				}
-				if err := tc.AddWithDir(magnetFor(d.Item.InfoHash, d.Item.Title), library); err != nil {
+				// One staging directory per show. Transmission creates it on
+				// add, but making it here means the path is known to exist
+				// and is owned by our uid rather than Transmission's.
+				dir := filepath.Join(staging, watch.Sanitise(d.Show))
+				if err := os.MkdirAll(dir, 0o775); err != nil {
+					log.Printf("staging mkdir %s: %v", dir, err)
+					continue
+				}
+				if err := tc.AddWithDir(magnetFor(d.Item.InfoHash, d.Item.Title), dir); err != nil {
 					log.Printf("transmission add: %v", err)
 					// Alert once, then stay quiet until it recovers. At a
 					// 3-minute poll, pinging every failure is ~480 a day.
