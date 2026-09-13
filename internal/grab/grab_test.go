@@ -1,12 +1,14 @@
 package grab
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
+	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
 // offsets mirrors the real BLEACH group_offset rows: most groups continue the
@@ -229,4 +231,105 @@ func newTestStore(t *testing.T) *store.Store {
 	}
 	t.Cleanup(func() { st.Close() })
 	return st
+}
+
+// TestFinaliseUsesRenameNotCopy guards the deployment constraint that made
+// v0.3.3 fail in production.
+//
+// Staging and library MUST live under a single bind mount. Separate mounts are
+// distinct mount points even on the same device, and rename(2) refuses to move
+// a file between them (EXDEV). This test cannot see the container's mounts, so
+// it asserts the weaker but still useful property that finalise relies on a
+// plain rename and does not silently fall back to copying.
+//
+// The failure it protects against: os.Rename returned "invalid cross-device
+// link" and the episode stayed in "downloading" forever. Note that `mv` would
+// NOT have caught this — coreutils falls back to copy-then-delete on EXDEV,
+// which is exactly why the original check passed and the bug shipped.
+func TestFinaliseUsesRenameNotCopy(t *testing.T) {
+	st := newTestStore(t)
+	sh, err := st.CreateShow("EXDEV Show", nil, 12)
+	if err != nil {
+		t.Fatalf("CreateShow: %v", err)
+	}
+	if err := st.SetGroupOffset(sh.ID, "Erai-raws", 0, "test"); err != nil {
+		t.Fatalf("SetGroupOffset: %v", err)
+	}
+	if err := st.UpsertEpisode(sh.ID, 1, episode.Downloading, "h", "[Erai-raws] EXDEV Show - 01 [1080p]"); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+
+	root := t.TempDir()
+	staging := filepath.Join(root, "staging")
+	library := filepath.Join(root, "library")
+	showDir := filepath.Join(staging, "EXDEV Show")
+	if err := os.MkdirAll(showDir, 0o775); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	src := filepath.Join(showDir, "[Erai-raws] EXDEV Show - 01 [1080p].mkv")
+	if err := os.WriteFile(src, []byte("video"), 0o664); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	r := New(st, nil, staging, library)
+	if err := r.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// A rename leaves no source behind. A copy fallback would leave the
+	// original in staging, which is the symptom we must not reintroduce.
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Errorf("source still present after move: a copy fallback would leave it behind (stat err = %v)", err)
+	}
+	want := filepath.Join(library, "EXDEV Show", "EXDEV Show - E01.mkv")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected %s: %v", want, err)
+	}
+}
+
+// TestSweepDeletesAllWhenKeepZero: the user wants no watched episodes retained.
+func TestSweepDeletesAllWhenKeepZero(t *testing.T) {
+	st := newTestStore(t)
+	sh, err := st.CreateShow("Tidy Show", nil, 12)
+	if err != nil {
+		t.Fatalf("CreateShow: %v", err)
+	}
+	library := t.TempDir()
+	var paths []string
+	for i := 1; i <= 3; i++ {
+		p := filepath.Join(library, "Tidy Show", fmt.Sprintf("Tidy Show - E%02d.mkv", i))
+		if err := os.MkdirAll(filepath.Dir(p), 0o775); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("video"), 0o664); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if err := st.UpsertEpisode(sh.ID, i, episode.Downloaded, "", ""); err != nil {
+			t.Fatalf("UpsertEpisode: %v", err)
+		}
+		if err := st.SetFilePath(sh.ID, i, p); err != nil {
+			t.Fatalf("SetFilePath: %v", err)
+		}
+		if err := st.UpsertEpisode(sh.ID, i, episode.Watched, "", ""); err != nil {
+			t.Fatalf("mark watched: %v", err)
+		}
+		paths = append(paths, p)
+	}
+
+	h := watch.New(st, library, 0)
+	deleted, kept, err := h.Sweep()
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(kept) != 0 {
+		t.Errorf("keep=0 retained %d files, want 0: %v", len(kept), kept)
+	}
+	if len(deleted) != 3 {
+		t.Errorf("deleted %d files, want 3", len(deleted))
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s should have been deleted, stat err = %v", p, err)
+		}
+	}
 }
