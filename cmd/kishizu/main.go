@@ -39,7 +39,8 @@ func main() {
 	ep := flag.Int("ep", 0, "episode number to train against (0 = next unwatched)")
 	serve := flag.String("serve", "", "start the web UI on this address (e.g. 127.0.0.1:8098)")
 	rpc := flag.String("transmission", "http://100.64.0.1:9091/transmission/rpc", "Transmission RPC endpoint")
-	library := flag.String("library", "/downloads/anime", "library root for downloaded episodes, as Transmission sees it")
+	library := flag.String("library", "/media/anime", "library root for finished episodes, as kishizu sees it")
+	staging := flag.String("staging", "/downloads/anime", "staging root Transmission downloads into, as kishizu sees it")
 	keep := flag.Int("keep", 2, "recently watched episodes to keep on disk")
 	interval := flag.Duration("interval", 5*time.Minute, "RSS poll interval")
 	dryRun := flag.Bool("dry-run", true, "poll and decide but do not hand off to Transmission")
@@ -85,7 +86,7 @@ func main() {
 		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
-		go runLoop(st, artCache, *rpc, *library, *keep, *interval, *dryRun, *ntfyURL)
+		go runLoop(st, artCache, *rpc, *staging, *library, *keep, *interval, *dryRun, *ntfyURL)
 		if err := srv.ListenAndServe(*serve); err != nil {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 			os.Exit(1)

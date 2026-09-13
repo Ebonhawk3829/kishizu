@@ -60,13 +60,18 @@ func (s State) Terminal() bool {
 //
 //   - Blocked: never, regardless of quality.
 //   - Watched/Deleted: never. Terminal — see Terminal().
-//   - Wanted/Downloading: yes, but only a better-ranked candidate should replace
-//     an existing one, and only inside the delay window. That decision belongs to
-//     the ranker, not here.
+//   - Wanted: yes.
+//   - Downloading: NO. A magnet has already been handed off; the episode is
+//     in flight. Grabbing again would download the same episode repeatedly,
+//     because every release group publishes a distinct infohash and so no
+//     "already seen" check fires. Quality is guaranteed up front instead: the
+//     resolution floor and group preferences are applied before the grab, so
+//     whatever was chosen already meets the user's standard. There is nothing
+//     useful left for a second grab to buy.
 //   - Downloaded: no. The episode is on disk; a remake is surfaced for manual
 //     action rather than auto-replacing a file that might be mid-watch.
 func (s State) MayAutoGrab() bool {
-	return s == Wanted || s == Downloading
+	return s == Wanted
 }
 
 // Advance moves the state forward, refusing to move backwards. Returns false when
