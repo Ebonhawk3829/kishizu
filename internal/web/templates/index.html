@@ -671,18 +671,27 @@ async function gradeDetail(index) {
   } catch (e) { fieldError('train-error', e.message); }
 }
 
+// Grading runs in two rounds, because "is this what the title says" and "do I
+// want this" are different questions asked of different objects — the parser
+// and the release.
+//
+//   Round 1 verifies the parse: per attribute, correct / not in title / it is
+//   actually this other value. Output: verified facts about the release.
+//
+//   Round 2 grades preference: given those verified facts, per attribute,
+//   preferred / acceptable / bad. Output: filters and preferences.
+//
+// Doing both at once meant "bad" on a resolution both disputed the parse and
+// wrote a filter — so a parser error could silently become a rule about what
+// to download.
 function renderGradePanel(g, title) {
   const box = el('candidates');
-  // Verdicts are held on the row, not popped up: a held grade keeps a coloured
-  // border until saved, so answered attributes are visible at a glance.
-  //
-  // "Acceptable" is deliberately not offered here. This panel is about whether
-  // the parse is right; preference lives in the quick-accept buttons, and
-  // mixing "is it correct" with "do I want it" on the same buttons conflates
-  // two different questions.
+  const prefs = ['group', 'resolution', 'codec', 'source', 'service', 'audio'];
   box.innerHTML = `
     <div class="cand">
       <div class="t">${escapeHtml(title)}</div>
+
+      <p class="hint" style="margin-top:14px"><b>Round 1 — verify the parse.</b> Does the title actually say this?</p>
       ${g.attrs.map(a => `
         <div class="attr" id="attr-${a.key}">
           <span class="attr-name">${escapeHtml(a.label)}</span>
@@ -696,28 +705,58 @@ function renderGradePanel(g, title) {
           </div>
         </div>`).join('')}
       <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn" onclick="submitGrades()">Save grades</button>
+        <button class="btn" onclick="submitGrades()">Confirm parse</button>
         <button class="btn ghost" onclick="renderTrain()">Back</button>
       </div>
+
+      <p class="hint" style="margin-top:22px"><b>Round 2 — grade preferences.</b> Given the verified facts, what do you want? Unlocks once round 1 is confirmed.</p>
+      ${g.attrs.filter(a => a.present && prefs.includes(a.key)).map(a => `
+        <div class="attr pref" id="pref-${a.key}">
+          <span class="attr-name">${escapeHtml(a.label)}</span>
+          <span class="attr-val" id="pv-${a.key}">${escapeHtml(a.value)}</span>
+          <div class="grades">
+            <button disabled onclick="setPref('${a.key}','good')">preferred</button>
+            <button disabled onclick="setPref('${a.key}','acceptable')">acceptable</button>
+            <button disabled onclick="setPref('${a.key}','wrong')">reject</button>
+          </div>
+        </div>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn" id="pref-save" onclick="submitPrefs()" disabled>Save preferences</button>
+      </div>
     </div>`;
-  window._grading = { title, attrs: g.attrs, grades: {} };
+  window._grading = { title, attrs: g.attrs, grades: {}, prefs: {} };
 }
 
-// A held grade: the row keeps its coloured border until saved, so answered
-// attributes are visible at a glance rather than remembered.
+// A held verdict: the button keeps its coloured state and the attribute name
+// turns accent until the round is saved, so what has been answered is visible
+// at a glance.
 function setGrade(key, grade) {
   if (!window._grading) return;
   window._grading.grades[key] = grade;
   const row = el('attr-' + key);
-  if (row) row.classList.add('held');
+  if (!row) return;
+  row.classList.add('held');
+  row.querySelectorAll('.grades button').forEach(b => {
+    b.classList.toggle('sel', b.classList.contains('g-' + grade));
+  });
 }
 
+function setPref(key, grade) {
+  if (!window._grading) return;
+  window._grading.prefs[key] = grade;
+  const row = el('pref-' + key);
+  if (!row) return;
+  row.classList.add('held');
+  row.querySelectorAll('.grades button').forEach(b => {
+    b.classList.toggle('sel', b.classList.contains('g-' + grade));
+  });
+}
+
+// Round 1 only. Confirming the parse makes no statement about preference, so
+// it writes offsets and aliases and nothing else. Round 2 unlocks on success.
 async function submitGrades() {
   const g = window._grading;
   if (!g) return;
-  // Carry any corrected values back so "different value" works, not just
-  // "correct / absent / bad".
-  const release = { ...g.attrs };
   for (const a of g.attrs) {
     const f = el('av-' + a.key);
     if (f) a.value = f.value;
@@ -727,9 +766,34 @@ async function submitGrades() {
       title: g.title, grades: g.grades, release: { title: g.title, attrs: g.attrs },
     });
     state = r.state;
+    // Verified values are now facts; round 2 grades against them.
+    g.attrs.forEach(a => {
+      const pv = el('pv-' + a.key);
+      if (pv && a.present) pv.textContent = a.value;
+    });
+    document.querySelectorAll('#candidates .pref .grades button').forEach(b => b.disabled = false);
+    el('pref-save').disabled = false;
+    // Round 1 is settled; its buttons lock so the two rounds cannot be mixed.
+    document.querySelectorAll('#candidates .attr:not(.pref) .grades button').forEach(b => b.disabled = true);
+    toast('Parse confirmed. Round 2 unlocked — grade preferences below.');
+    if (r.notes && r.notes.length) toast(r.notes.join('; '));
+  } catch (e) { fieldError('train-error', e.message); }
+}
+
+// Round 2. Preference grades only; they write filters and preferences against
+// the values confirmed in round 1.
+async function submitPrefs() {
+  const g = window._grading;
+  if (!g) return;
+  try {
+    const r = await api('/api/train/grade', {
+      title: g.title, grades: g.prefs, release: { title: g.title, attrs: g.attrs },
+    });
+    state = r.state;
     window._grading = null;
     renderTrain();
-    toast((r.notes || []).join('; ') || 'Saved.');
+    toast((r.notes || []).join('; ') || 'Preferences saved.');
+    loadShows();
   } catch (e) { fieldError('train-error', e.message); }
 }
 
