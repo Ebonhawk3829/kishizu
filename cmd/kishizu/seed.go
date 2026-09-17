@@ -61,10 +61,9 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 				return err
 			}
 		}
-		// Match on every alias, not just the canonical name: the schedule uses
-		// romaji, so the English name alone often scores zero.
-		aliases := append([]string{cs.Name}, cs.Aliases...)
-		if e := schedule.FindWithAliases(sched, aliases); e != nil && !e.AirsAt.IsZero() {
+		// Matched by slug alone. A seed entry without one gets no air date,
+		// which is correct: there is nothing to match it against.
+		if e := schedule.FindBySlug(sched, sh.Slug); e != nil && !e.AirsAt.IsZero() {
 			if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
 				return err
 			}
@@ -103,7 +102,7 @@ func listShowsWithSchedule(st *store.Store) error {
 			}
 		}
 		line := fmt.Sprintf("  %-52s next %d", truncate(sh.CanonicalName, 50), next)
-		if e := schedule.FindWithAliases(sched, sh.Aliases); e != nil && !e.AirsAt.IsZero() {
+		if e := schedule.FindBySlug(sched, sh.Slug); e != nil && !e.AirsAt.IsZero() {
 			line += fmt.Sprintf("  | ep %d airs %s", e.NextEp, e.AirsAt.Format("Mon 2 Jan 15:04"))
 			if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
 				return err

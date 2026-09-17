@@ -21,6 +21,8 @@ const showPage = `<html><head>
     <div class="information-content-wrapper"><h3>Status</h3><div>Ongoing</div></div>
     <div class="information-content-wrapper"><h3>Episodes</h3>
         <div itemprop="numberOfEpisodes">19</div></div>
+    <div class="information-content-wrapper"><h3>Release Date</h3>
+        <time id="start-date-mobile" itemprop="startDate" datetime="2026-04-08">Apr 08, 2026</time></div>
 </section>
 <section id="alternative-names-section-small" class="section-content">
     <div class="alternative-name-wrapper">
@@ -84,6 +86,11 @@ func TestParseShow(t *testing.T) {
 	if sh.MyAnimeListID != 61316 {
 		t.Errorf("MyAnimeListID = %d, want 61316", sh.MyAnimeListID)
 	}
+	// Release Date is the season's start. For an unaired show it is the only
+	// air information that exists, since the timetable covers ~1 week.
+	if got := sh.ReleaseDate.Format("2006-01-02"); got != "2026-04-08" {
+		t.Errorf("ReleaseDate = %s, want 2026-04-08", got)
+	}
 	// The title carries the parenthesised English gloss; it is the display
 	// name, not an alias, so it is kept whole.
 	if !strings.Contains(sh.Title, "Re:Zero kara Hajimeru Isekai Seikatsu 4") {
@@ -98,10 +105,11 @@ func TestParseShowAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseShow: %v", err)
 	}
+	// Japanese is excluded: Nyaa titles are romanised, so it never appears in
+	// a release name and only adds noise to the alias set.
 	want := []string{
 		"Re:Zero kara Hajimeru Isekai Seikatsu 4",
 		"Re:Zero - Starting Life in Another World 4",
-		"Re:ゼロから始める異世界生活 4",
 		"Re:ZERO -Starting Life in Another World- Season 4",
 		"Re:Zero kara Hajimeru Isekai Seikatsu 4th Season",
 	}
@@ -116,21 +124,80 @@ func TestParseShowAliases(t *testing.T) {
 	}
 }
 
-// TestAbbreviationExcludedFromAliases: the abbreviation is too short to match
-// on safely, so it must not reach the matcher. It is still available for feed
-// queries, where a broad net is what you want.
-func TestAbbreviationExcludedFromAliases(t *testing.T) {
+// TestJapaneseAndAbbreviationExcludedFromAliases: neither kind may reach the
+// matcher.
+//
+// Japanese names never appear in Nyaa release titles, which are romanised, so
+// they are dead weight — and a short Japanese abbreviation is actively
+// dangerous: it scored above the alias threshold against an unrelated show on
+// token overlap alone, which silently pointed that show at another show's air
+// times. Abbreviations are too short to carry identity for the same reason.
+func TestJapaneseAndAbbreviationExcludedFromAliases(t *testing.T) {
 	sh, err := ParseShow(strings.NewReader(showPage), "slug")
 	if err != nil {
 		t.Fatalf("ParseShow: %v", err)
 	}
 	for _, a := range sh.Aliases() {
 		if a == "ReZero 4" {
-			t.Error("abbreviation leaked into Aliases(); it must stay feed-only")
+			t.Error("abbreviation leaked into Aliases()")
+		}
+		if a == "Re:ゼロから始める異世界生活 4" {
+			t.Error("japanese name leaked into Aliases()")
 		}
 	}
-	if got := sh.Abbreviations(); len(got) != 1 || got[0] != "ReZero 4" {
-		t.Errorf("Abbreviations() = %v, want [ReZero 4]", got)
+	// The romaji, English and synonym names must still be there.
+	want := map[string]bool{
+		"Re:Zero kara Hajimeru Isekai Seikatsu 4":           false,
+		"Re:Zero - Starting Life in Another World 4":        false,
+		"Re:ZERO -Starting Life in Another World- Season 4": false,
+		"Re:Zero kara Hajimeru Isekai Seikatsu 4th Season":  false,
+	}
+	for _, a := range sh.Aliases() {
+		if _, ok := want[a]; ok {
+			want[a] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("alias %q missing from Aliases()", name)
+		}
+	}
+}
+
+// TestJapaneseFilteredFromAnyField: the site files Japanese names under
+// "Japanese" but also slips them into "Synonyms", so filtering by field label
+// lets them through. Filtering must be by script.
+func TestJapaneseFilteredFromAnyField(t *testing.T) {
+	page := `<html><head><title>Show | AnimeSchedule</title></head><body>
+<section id="alternative-names-section-small" class="section-content">
+    <div class="alternative-name-wrapper">
+        <span class="alternative-name-heading">Romaji</span>
+        <div class="alternative-name">Shangri-La Frontier 3rd Season</div>
+    </div>
+    <div class="alternative-name-wrapper">
+        <span class="alternative-name-heading">Synonyms</span>
+        <div class="alternative-name" itemprop="alternateName">神ゲーに挑まんとす〜 3rd season</div>
+        <div class="alternative-name" itemprop="alternateName">Shangri-La Frontier Season 3</div>
+    </div>
+</section></body></html>`
+	sh, err := ParseShow(strings.NewReader(page), "slug")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	for _, a := range sh.Aliases() {
+		if hasJapanese(a) {
+			t.Errorf("japanese alias %q survived the filter", a)
+		}
+	}
+	// The romanised synonym in the same block must survive.
+	found := false
+	for _, a := range sh.Aliases() {
+		if a == "Shangri-La Frontier Season 3" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("romanised synonym was dropped: %v", sh.Aliases())
 	}
 }
 
@@ -183,36 +250,6 @@ func TestSeasonLengthKeepsMovieCount(t *testing.T) {
 		if got := sh.SeasonLength(); got != c.want {
 			t.Errorf("SeasonLength(%s, %d) = %d, want %d", c.typ, c.episodes, got, c.want)
 		}
-	}
-}
-
-// TestFindWithAliasesSkipsShortAliases: recall scoring rewards an alias whose
-// tokens are all present in the candidate, so a very short alias scores a
-// perfect 1.0 against almost anything.
-//
-// This is not hypothetical. "シャンフロ３" (two tokens) matched "PetitCure:
-// Precure Fairies 3rd Season" at ep 26, and the daily refresh then projected 26
-// episode rows onto Shangri-La Frontier — a different show entirely. Short
-// aliases carry too little identity to be trusted on the fallback path.
-func TestFindWithAliasesSkipsShortAliases(t *testing.T) {
-	entries := []Entry{
-		{Title: "PetitCure: Precure Fairies 3rd Season", NextEp: 26, Slug: "petitcure"},
-		{Title: "Re:Zero kara Hajimeru Isekai Seikatsu 4", NextEp: 18, Slug: "rezero"},
-	}
-
-	// A two-token alias must not match, however well it scores.
-	if e := FindWithAliases(entries, []string{"シャンフロ３"}); e != nil {
-		t.Errorf("short alias matched %q; it must be skipped", e.Title)
-	}
-	// A long alias still matches normally.
-	if e := FindWithAliases(entries, []string{"Re:Zero kara Hajimeru Isekai Seikatsu 4"}); e == nil {
-		t.Error("long alias should still match")
-	} else if e.Slug != "rezero" {
-		t.Errorf("matched %q, want rezero", e.Slug)
-	}
-	// A short alias alongside a long one must not win by scoring higher.
-	if e := FindWithAliases(entries, []string{"シャンフロ３", "Re:Zero kara Hajimeru Isekai Seikatsu 4"}); e == nil || e.Slug != "rezero" {
-		t.Errorf("mixed aliases matched %v, want rezero", e)
 	}
 }
 

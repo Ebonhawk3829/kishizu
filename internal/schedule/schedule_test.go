@@ -6,11 +6,15 @@ import (
 	"time"
 )
 
+// Each tile is wrapped in a link carrying the slug, exactly as the real page
+// does. The slug is what the refresh looks a show up by.
 const samplePage = `<html><body>
-<h2 class="show-title-bar show-title-small">BLEACH: Sennen Kessen-hen - Kashin-tan</h2>
+<a href="anime/bleach-sennen-kessen-hen-kashin-tan" class="show-link">
+<h2 class="show-title-bar show-title-small">BLEACH: Sennen Kessen-hen - Kashin-tan</h2></a>
 <h3 class="time-bar"><span class="show-episode">Ep 8</span>
 <time datetime="2026-09-13T00:00&#43;10:00" class="show-air-time">12:00 AM</time></h3>
-<h2 class="show-title-bar show-title-small">Clevatess II: Majuu no Ou to Itsuwari no Yuusha Denshou</h2>
+<a href="anime/clevatess-ii" class="show-link">
+<h2 class="show-title-bar show-title-small">Clevatess II: Majuu no Ou to Itsuwari no Yuusha Denshou</h2></a>
 <h3 class="time-bar"><span class="show-episode">Ep 10</span>
 <time datetime="2026-09-09T22:00&#43;10:00" class="show-air-time">10:00 PM</time></h3>
 </body></html>`
@@ -28,6 +32,12 @@ func TestParse(t *testing.T) {
 	}
 	if got[0].NextEp != 8 {
 		t.Errorf("next ep = %d, want 8", got[0].NextEp)
+	}
+	if got[0].Slug != "bleach-sennen-kessen-hen-kashin-tan" {
+		t.Errorf("slug = %q", got[0].Slug)
+	}
+	if got[1].Slug != "clevatess-ii" {
+		t.Errorf("slug = %q", got[1].Slug)
 	}
 }
 
@@ -78,39 +88,47 @@ func TestParseProducesRealTimestamps(t *testing.T) {
 	}
 }
 
-// TestFindPrefersRomajiAlias: the schedule uses romaji while the user's names
-// are English, so matching must work off aliases. Jaccard similarity fails here
-// because the two share almost no words; recall on the alias succeeds.
-func TestFindPrefersRomajiAlias(t *testing.T) {
+// TestFindBySlugIsExact: lookup is by slug, so it cannot pick the wrong show
+// and it does not care that the timetable's romaji title shares no words with
+// the user's English name. This is why there is no fuzzy title matching: every
+// show is added from an animeschedule URL, so every show has a slug.
+func TestFindBySlugIsExact(t *testing.T) {
 	entries, err := Parse(strings.NewReader(samplePage))
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// The English name alone does not match.
-	if got := Find(entries, "BLEACH: Thousand-Year Blood War - The Calamity"); got != nil {
-		t.Errorf("english name should not match, got %q", got.Title)
+	var want *Entry
+	for i := range entries {
+		if entries[i].Slug != "" {
+			want = &entries[i]
+			break
+		}
 	}
-	// With the romaji alias it does.
-	got := FindWithAliases(entries, []string{
-		"BLEACH: Thousand-Year Blood War - The Calamity",
-		"Bleach: Sennen Kessen Hen - Kashin Tan",
-	})
+	if want == nil {
+		t.Fatal("sample page has no slugs to look up")
+	}
+	got := FindBySlug(entries, want.Slug)
 	if got == nil {
-		t.Fatal("romaji alias should match")
+		t.Fatalf("FindBySlug(%q) = nil", want.Slug)
 	}
-	if !strings.Contains(got.Title, "BLEACH") {
-		t.Errorf("matched %q, want BLEACH", got.Title)
+	if got.Title != want.Title {
+		t.Errorf("FindBySlug(%q) = %q, want %q", want.Slug, got.Title, want.Title)
 	}
 }
 
-func TestFindRejectsUnrelated(t *testing.T) {
+// TestFindBySlugMissesCleanly: a show not on the timetable is simply absent.
+// It must never fall back to guessing — a wrong match silently points a show at
+// another show's air times, which is far worse than having none.
+func TestFindBySlugMissesCleanly(t *testing.T) {
 	entries, err := Parse(strings.NewReader(samplePage))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := FindWithAliases(entries, []string{"Some Completely Different Show"}); got != nil {
-		t.Errorf("should not match, got %q", got.Title)
+	if got := FindBySlug(entries, "some-show-that-is-not-airing"); got != nil {
+		t.Errorf("unknown slug matched %q; lookup must be exact", got.Title)
+	}
+	if got := FindBySlug(entries, ""); got != nil {
+		t.Errorf("empty slug matched %q", got.Title)
 	}
 }
 

@@ -146,14 +146,10 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 		}
 		updated := 0
 		for _, sh := range shows {
-			// Slug first: an exact identity beats a fuzzy title guess. The
-			// guess is only reached for shows added before slugs existed, or
-			// with no schedule page at all.
+			// Matched by slug alone. Every show is added from an animeschedule
+			// URL, so every show has one; there is nothing to guess. A show
+			// absent from the timetable is simply not airing this week.
 			e := schedule.FindBySlug(sched, sh.Slug)
-			if e == nil {
-				aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
-				e = schedule.FindWithAliases(sched, aliases)
-			}
 			if e != nil && !e.AirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
 					continue
@@ -180,12 +176,7 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 		if artCache != nil {
 			onAir := map[string]bool{}
 			for _, sh := range shows {
-				e := schedule.FindBySlug(sched, sh.Slug)
-				if e == nil {
-					aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
-					e = schedule.FindWithAliases(sched, aliases)
-				}
-				if e != nil {
+				if schedule.FindBySlug(sched, sh.Slug) != nil {
 					onAir[sh.CanonicalName] = true
 				}
 			}

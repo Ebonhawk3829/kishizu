@@ -78,11 +78,18 @@ func backfillSlugs(st *store.Store, path string) error {
 			}
 			added++
 		}
-		// Abbreviations are stored but tagged: too short to match on safely,
-		// still useful as a Nyaa feed query.
-		for _, a := range info.Abbreviations() {
-			if err := st.AddAliasFrom(sh.ID, a, "abbreviation"); err != nil {
-				fmt.Fprintf(os.Stderr, "  %s: add abbreviation %q: %v\n", sh.CanonicalName, a, err)
+
+		// The page's Release Date is the season's start, and for an unaired
+		// show it is the only air information available. Only fill it when the
+		// show has no schedule point yet, so a live season's real next-episode
+		// time is never overwritten with its premiere date.
+		if !info.ReleaseDate.IsZero() {
+			if _, at, _ := st.NextEpisode(sh.ID); at == nil {
+				if err := st.SetNextEpisode(sh.ID, 1, info.ReleaseDate); err != nil {
+					fmt.Fprintf(os.Stderr, "  %s: set release date: %v\n", sh.CanonicalName, err)
+				} else {
+					_ = st.ProjectAirDates(sh.ID)
+				}
 			}
 		}
 

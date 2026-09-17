@@ -172,15 +172,23 @@ https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 ```
 
 The trailing part is the show's **slug** — an exact identity on the schedule.
-kishizu stores it and uses it to look the show up, instead of guessing from the
-title. From the page it also fills in:
+kishizu stores it and looks the show up by it. There is no title matching
+anywhere in the schedule lookup: either the show is on the timetable this week,
+or it isn't.
+
+From the page it also fills in:
 
 - the **season length**, which is otherwise typed by hand and usually left at 0
-- every **alternative name** (romaji, English, Japanese, synonyms) as an alias
+- every **alternative name** (romaji, English, synonyms) as an alias
+- the **release date**, which is the show's first air time — and for a show
+  that hasn't premiered yet, the only air information that exists, since the
+  timetable only covers about a week
 - the **cover art**
 
-A plain name still works and behaves exactly as before; it just gets none of
-that for free.
+Japanese names and abbreviations are deliberately not imported. Nyaa release
+titles are romanised, so a Japanese name can never appear in one — and a short
+one can clear the alias threshold against an unrelated show on token overlap
+alone, which silently points a show at another show's air times.
 
 Shows added before slugs existed can be backfilled with `-backfill-slugs`,
 which reads a hand-maintained `name: slug` map (see `slugs.yaml` for the
@@ -308,11 +316,14 @@ enough.
 <details>
 <summary><strong>Do I have to use animeschedule.net URLs?</strong></summary>
 
-No. A plain name works exactly as it always did. You just don't get the season
-length, the alternative names or the cover art filled in for you, and the daily
-schedule refresh has to fall back to fuzzy-matching your title against the
-timetable — which fails whenever a show is on a break, outside the ~1 week
-window, or titled differently in romaji versus English.
+Yes, in practice. Adding a show means pasting its animeschedule.net URL — that
+is how kishizu knows which show you mean. The slug in the URL is an exact
+identity, so there is no title matching anywhere in the schedule lookup: either
+the show is on the timetable this week, or it isn't.
+
+A plain name still works, but such a show has no slug, so it never gets an air
+date from the schedule. It will sit until you train it and it picks up a
+release.
 
 </details>
 

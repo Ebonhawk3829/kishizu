@@ -33,8 +33,14 @@ type Show struct {
 	// statement about a film and a disastrous one about a season. Callers
 	// filling in a season length must check this first.
 	Type string
-	// Status is the airing status: "Ongoing", "Finished", "Not Yet Aired".
+	// Status is the airing status: "Ongoing", "Finished", "Upcoming".
 	Status string
+	// ReleaseDate is when the season starts, from the page's Release Date
+	// field. This is the show's first air time, and for a show that has not
+	// premiered yet it is the ONLY air information available — the timetable
+	// only covers a ~1 week window, so a show premiering months out is simply
+	// not on it. Zero when the page does not say.
+	ReleaseDate time.Time
 	// Season is the broadcast season, e.g. "Spring 2026".
 	Season string
 	// Names are the alternative titles, keyed by kind: Romaji, English,
@@ -50,19 +56,17 @@ type Show struct {
 
 // Aliases returns the names worth matching a release against.
 //
-// Abbreviation is deliberately excluded. It is too short to be safe: "ReZero 4"
-// scores a perfect recall against any release containing those two tokens, and
-// since the alias gate is the only thing standing between a release and the
-// pipeline, a promiscuous alias admits releases for the wrong show. It is still
-// stored (as source "abbreviation") because it makes a good Nyaa feed query,
-// where a broad net is what you want and the matcher filters the results.
+// Only Romaji, English and Synonyms. Two kinds are deliberately excluded:
+//
+//   - Japanese. Nyaa release titles are romanised; Japanese names never appear
+//     in them, so they are dead weight in the alias set. Worse, they are what
+//     produced a false match against an unrelated show: a short Japanese
+//     abbreviation scored above the threshold on token overlap alone.
+//
+//   - Abbreviation. Too short to carry identity — "ReZero 4" matches any
+//     release containing those tokens.
 func (s *Show) Aliases() []string {
-	return s.namesOf("Romaji", "English", "Japanese", "Synonyms")
-}
-
-// Abbreviations returns just the short forms, for feed queries only.
-func (s *Show) Abbreviations() []string {
-	return s.namesOf("Abbreviation")
+	return s.namesOf("Romaji", "English", "Synonyms")
 }
 
 // SeasonLength returns the episode count to use as a season length, or 0 when
@@ -90,11 +94,36 @@ func (s *Show) namesOf(kinds ...string) []string {
 			if n == "" || seen[n] {
 				continue
 			}
+			// Filter by script, not by which field the name came from. The
+			// site files Japanese names under "Japanese" but also slips them
+			// into "Synonyms", so trusting the field label lets them through.
+			if hasJapanese(n) {
+				continue
+			}
 			seen[n] = true
 			out = append(out, n)
 		}
 	}
 	return out
+}
+
+// hasJapanese reports whether a string contains kana or kanji.
+//
+// Nyaa release titles are romanised, so a name in Japanese script can never
+// appear in one. Including it only adds noise — and a short Japanese name is
+// actively dangerous, since it can clear the alias threshold against an
+// unrelated show on token overlap alone.
+func hasJapanese(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= 0x3040 && r <= 0x309F, // hiragana
+			r >= 0x30A0 && r <= 0x30FF, // katakana
+			r >= 0x4E00 && r <= 0x9FFF, // kanji
+			r >= 0xFF66 && r <= 0xFF9F: // halfwidth katakana
+			return true
+		}
+	}
+	return false
 }
 
 // ShowURL is the canonical page for a slug.
@@ -124,6 +153,9 @@ var (
 		`(?s)<h3>Status</h3>\s*<div[^>]*>([^<]+)</div>`)
 	reType = regexp.MustCompile(
 		`(?s)<h3>Type</h3>\s*<a[^>]*>([^<]+)</a>`)
+	// Release Date is a bare date with no time: datetime="2027-01-10".
+	reRelease = regexp.MustCompile(
+		`(?s)<h3>Release Date</h3>\s*<time[^>]*datetime="([^"]+)"`)
 	reSeason = regexp.MustCompile(
 		`(?s)<h3>Season</h3>\s*<a[^>]*>([^<]+)</a>`)
 	// Alternative names are a flat sequence of headings and values in document
@@ -138,9 +170,9 @@ var (
 	reAltTag = regexp.MustCompile(
 		`(?s)<span class="alternative-name-heading">([^<]+)</span>` +
 			`|<div class="alternative-name"[^>]*>([^<]+)</div>`)
-	reAniList  = regexp.MustCompile(`anilist\.co/anime/(\d+)`)
-	reMAL      = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
-	reShowImg  = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
+	reAniList = regexp.MustCompile(`anilist\.co/anime/(\d+)`)
+	reMAL     = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
+	reShowImg = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
 )
 
 // ParseShow extracts a Show from a show page.
@@ -174,6 +206,9 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 	}
 	if m := reType.FindStringSubmatch(s); m != nil {
 		sh.Type = strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if m := reRelease.FindStringSubmatch(s); m != nil {
+		sh.ReleaseDate = parseDate(m[1])
 	}
 	if m := reSeason.FindStringSubmatch(s); m != nil {
 		sh.Season = strings.TrimSpace(html.UnescapeString(m[1]))
@@ -217,6 +252,22 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 		return nil, fmt.Errorf("no title parsed from %s (markup may have changed)", ShowURL(slug))
 	}
 	return sh, nil
+}
+
+// parseDate reads the bare YYYY-MM-DD the Release Date field carries.
+//
+// No time component and no offset, so it is parsed as UTC midnight. That is
+// the season's start day; the precise weekly slot only becomes knowable once
+// the show appears on the timetable, which is what the daily refresh is for.
+func parseDate(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // SlugFromURL extracts the animeschedule slug from a URL or bare slug.
