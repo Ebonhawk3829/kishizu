@@ -129,6 +129,11 @@ type candidateJSON struct {
 	// Unseen names what is new about it, so the user can see why it is at the
 	// top rather than taking the ordering on faith.
 	Unseen      []string `json:"unseen"`
+	// Attrs is the full parse — every attribute the parser reads, present or
+	// not. Quick accept confirms all of these, so all of them must be shown:
+	// asking the user to confirm a source and service they were never shown is
+	// not confirmation.
+	Attrs       []train.AttrValue `json:"attrs"`
 }
 
 func (s *Server) trainState() trainStateJSON {
@@ -169,6 +174,7 @@ func (s *Server) candidateJSON(i int, c train.Candidate) candidateJSON {
 		Uncertainty: c.Uncertainty,
 		Novelty:     c.Novelty,
 		Unseen:      c.Unseen,
+		Attrs:       train.Inspect(c.Item.Title, c.Episode).Attrs,
 	}
 }
 

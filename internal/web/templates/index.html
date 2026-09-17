@@ -175,6 +175,29 @@
   .disc .body { padding: 6px 0 28px; max-width: 64ch; }
   .hint { font-size: 13.5px; color: var(--t3); margin: 0 0 18px; }
 
+  /* ── training modal ─────────────────────────────────────────────────── */
+  /* Opens over the page rather than inline: grading means comparing against
+     the show list, and an inline panel pushed that list down and out of view.
+     The page dims behind so the panel is unambiguously the focus. */
+  .modal-backdrop {
+    position: fixed; inset: 0; z-index: 40;
+    background: oklch(0.12 0.01 285 / .72);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 5vh 16px 16px;
+  }
+  .modal-backdrop.hidden { display: none; }
+  .modal {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+    width: min(860px, 100%); max-height: 90vh;
+    padding: 20px 22px; display: flex; flex-direction: column;
+    box-shadow: 0 24px 60px oklch(0 0 0 / .5);
+  }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px; font-size: 16px; font-weight: 500;
+  }
+  .modal-scroll { overflow-y: auto; margin-top: 14px; padding-right: 6px; }
+
   /* ── form controls ──────────────────────────────────────────────────── */
   label {
     display: block; font-size: 11.5px; color: var(--t3); text-transform: uppercase;
@@ -318,21 +341,30 @@
 
 <!-- Training is scoped to a show and opened from that show's row. There is no
      separate "grade a release" path: grading one release and training the show
-     are the same activity, so they share one panel. -->
-<details class="disc" id="disc-train">
-  <summary><span class="chev">&rsaquo;</span> <span id="train-heading">Train</span></summary>
-  <div class="body">
+     are the same activity, so they share one panel.
+
+     It renders as a modal overlay rather than an inline disclosure. An inline
+     panel pushed the show list down and out of view, and the list is exactly
+     what you are comparing against while grading. -->
+<div class="modal-backdrop hidden" id="train-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span id="train-heading">Train</span>
+      <button class="btn ghost" onclick="cancelTrain()">Close</button>
+    </div>
     <p class="hint">Releases found by searching every alias, most informative first. Grade one and the list reorders — when nothing new remains, there is nothing left to teach.</p>
     <div class="field-error" id="train-error"></div>
-    <div id="candidates"></div>
-    <div id="resolved"></div>
-    <div class="offsets" id="offsets"></div>
-    <div style="display:flex;gap:8px;margin-top:20px">
+    <div class="modal-scroll">
+      <div id="candidates"></div>
+      <div id="resolved"></div>
+      <div class="offsets" id="offsets"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn" onclick="commit()">Finish &amp; save</button>
       <button class="btn ghost" onclick="cancelTrain()">Cancel</button>
     </div>
   </div>
-</details>
+</div>
 
 <div id="shows"></div>
 
@@ -535,14 +567,22 @@ function groupLabel(g) { return g === '(none)' ? 'no group' : g; }
 // Training is opened from a show's row and scoped to that show. There is no
 // episode picker: the episode comes from whichever release the user grades.
 function openTrain(showId) {
-  const d = el('disc-train');
-  d.open = true;
   const s = shows.find(x => x.id === showId);
   el('train-heading').textContent = s ? 'Train: ' + s.name : 'Train';
-  d.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  d.querySelector('summary').focus({ preventScroll: true });
+  el('train-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden'; // the page behind stays put
   startTrain(showId);
 }
+
+// Close on backdrop click; the panel itself stops propagation so clicking
+// inside it does not dismiss.
+(function () {
+  const backdrop = el('train-modal');
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) cancelTrain(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) cancelTrain();
+  });
+})();
 
 async function startTrain(showId) {
   fieldError('train-error', '');
@@ -573,8 +613,12 @@ function renderTrain() {
         <span class="ep ${c.episode ? '' : 'unknown'}">${c.episode ? 'ep' + c.episode : 'ep?'}</span>
         &nbsp;${escapeHtml(c.title)}
       </div>
-      <div class="w">${escapeHtml(c.why)} &middot; ${c.seeders} seeders &middot; ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
+      <div class="w">${escapeHtml(c.why)} &middot; ${c.seeders} seeders</div>
       ${noveltyNote(c)}
+      <div class="chips open">
+        ${(c.attrs || []).filter(a => a.present).map(a =>
+          `<span class="chip">${escapeHtml(a.label)} <b>${escapeHtml(a.value)}</b></span>`).join('')}
+      </div>
       ${c.episode
         ? ''
         : '<div class="w" style="color:var(--warn)">no episode number readable — use Grade in detail and supply one</div>'}
@@ -701,7 +745,8 @@ async function commit() {
 
 function cancelTrain() {
   state = { active: false };
-  renderTrain();
+  el('train-modal').classList.add('hidden');
+  document.body.style.overflow = '';
 }
 
 // ── grading ───────────────────────────────────────────────────────────────
