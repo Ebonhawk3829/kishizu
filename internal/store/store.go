@@ -188,7 +188,7 @@ type Show struct {
 	CadenceSource  string
 	CadenceFetched *time.Time
 	// ImageURL is the season's cover art from the schedule, for the UI.
-	ImageURL  string
+	ImageURL string
 	// Slug is the animeschedule.net slug, an exact identity for the show on
 	// the schedule. Empty when the show has no schedule page.
 	Slug      string
@@ -407,7 +407,19 @@ func (s *Store) SetCadence(showID int64, weekday int, source string, fetched tim
 // SetNextEpisode records the schedule's authoritative next-episode point:
 // episode n airs at t. This is the one fact animeschedule.net gives us, and it
 // is held until a download confirms the episode is real.
+// SetNextEpisode records the schedule's authoritative next-episode point.
+//
+// n is clamped to at least 1. The timetable renders "Ep 0" for a show that has
+// been announced but has not premiered, and storing that verbatim breaks
+// everything downstream: episode numbers are 1-based, plausible() rejects
+// anything below 1, and the season-complete check (next > max) can never fire
+// for a next of 0. Treating it as episode 1 is the honest reading — the next
+// episode is the first one — and the daily refresh corrects the time once the
+// show actually appears on the timetable.
 func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
+	if n < 1 {
+		n = 1
+	}
 	_, err := s.db.Exec(`UPDATE show SET next_ep = ?, next_airs_at = ?,
 		schedule_fetched_at = datetime('now') WHERE id = ?`,
 		n, t.UTC().Format("2006-01-02 15:04:05"), showID)

@@ -1001,7 +1001,13 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 					nextAirs = &t
 				}
 			}
-			j.State, j.NeedsAttention = showState(states, j.Trained)
+			// Aired means episode 1 has happened. Until then there is nothing
+			// to train on and nothing to hunt for, so the show is simply
+			// waiting. An unknown air time counts as not yet aired: the site
+			// lists announced-but-unscheduled shows, and we cannot claim an
+			// episode exists when we do not know when it would.
+			aired := nextAirs != nil && !nextAirs.After(time.Now())
+			j.State, j.NeedsAttention = showState(states, j.Trained, aired)
 			if nextAirs != nil {
 				status := "upcoming"
 				if nextAirs.Before(time.Now()) {
@@ -1041,18 +1047,35 @@ func (s *Server) imageFor(sh *store.Show) string {
 // inert. Nothing will ever be downloaded for it until it is trained.
 const NeedsTraining = "needs training"
 
+// Upcoming is the state of a show whose first episode has not aired yet.
+//
+// Training is impossible before there is anything to train on — there are no
+// releases for an episode that does not exist. So an unaired show is not
+// "needs training", it is simply waiting. The air time may also be unknown
+// (the site lists announced-but-unscheduled shows), which is why this reads
+// "upcoming" rather than counting down to a date.
+const Upcoming = "upcoming"
+
 // The most demanding episode wins: hunting beats ready-to-watch beats
 // up-to-date. Any no-release-found episode sets NeedsAttention, since that is
 // the state asking the user to look at it.
 //
 // trained is passed in rather than derived here because it is a property of the
-// show, not of any episode, and the caller already has it.
-func showState(states []cycle.State, trained bool) (string, bool) {
+// show, not of any episode, and the caller already has it. aired reports
+// whether episode 1 has happened yet; until it has, there is nothing to train
+// on and nothing to hunt for.
+func showState(states []cycle.State, trained, aired bool) (string, bool) {
 	attention := false
 	for _, s := range states {
 		if s == cycle.NoReleaseFound {
 			attention = true
 		}
+	}
+	// Nothing to train on until the first episode exists. Saying "needs
+	// training" about a show premiering in four months is asking for something
+	// that cannot be done.
+	if !aired {
+		return Upcoming, false
 	}
 	// An untrained show cannot match a release, so nothing else on the card
 	// means anything yet. Say so plainly instead of claiming it is up to date.

@@ -231,6 +231,12 @@ group offset there is nothing to reason with, so polling would only burn
 requests to conclude what was already known. Untrained shows show as
 *needs training* in the UI rather than a misleading *up to date*.
 
+**But not before it has aired.** Training needs a release to train on, and there
+is no release for an episode that does not exist yet. A show whose first episode
+is still in the future shows as *upcoming* — there is genuinely nothing to do.
+Some shows are announced without a scheduled slot at all; those stay *upcoming*
+until the site publishes a time, and the daily refresh picks it up.
+
 ### Aliases are a gate, not a score
 
 An alias decides whether a release is **eligible** for a show. It does not

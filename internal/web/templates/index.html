@@ -133,6 +133,9 @@
   /* Needs training: setup state, not an incident. Distinct from idle because
      an untrained show is inert — nothing will ever be downloaded for it. */
   .st-train .dot { background: var(--accent); }      .st-train { color: var(--accent); }
+  /* Upcoming: waiting for a first episode that does not exist yet. Quieter
+     than needs-training — there is genuinely nothing to do. */
+  .st-soon .dot { background: oklch(0.52 0.06 250); } .st-soon { color: var(--t2); }
   .st .att { color: var(--warn); font-size: 12px; }
 
   /* ── actions: hidden until hover or keyboard focus ──────────────────── */
@@ -468,6 +471,7 @@ function card(s, noart) {
     'no release found': 'st-miss',
     'up-to-date':       'st-idle',
     'needs training':   'st-train',
+    'upcoming':         'st-soon',
   }[st] || 'st-idle';
 
   // Air line: the next episode the user actually owes, with its air time when
@@ -495,10 +499,10 @@ function card(s, noart) {
   acts += `<button onclick="openTrain(${s.id}, ${s.next})">Train</button>`;
   acts += `<button class="danger" onclick="removeShow(${s.id}, '${n}')">Remove</button>`;
 
-  // The server already says "needs training" as the state, so the badge is
-  // only needed when the state is something else and the show is still
-  // untrained — i.e. it has episodes on disk but no offsets learned.
-  const untrained = (s.trained || st === 'needs training') ? ''
+  // The server already says "needs training" or "upcoming" as the state, so
+  // the badge is only needed when the state is something else and the show is
+  // still untrained — i.e. it has episodes on disk but no offsets learned.
+  const untrained = (s.trained || st === 'needs training' || st === 'upcoming') ? ''
     : ' &middot; <span class="untrained">untrained</span>';
 
   const art = (s.image_url && !noart)
