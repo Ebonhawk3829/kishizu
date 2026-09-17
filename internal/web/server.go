@@ -22,6 +22,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
+	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/train"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
@@ -773,6 +774,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // handleAddShow creates a show from the UI. The canonical name is stored as
 // an alias of itself, so matching needs no special case. Max episode 0 means
 // the season length is unknown; the cycle then uses a generous window.
+//
+// The name field accepts EITHER a plain name or an animeschedule.net URL. A URL
+// is the better input: the slug is an exact identity for the show, and the page
+// it points at carries the season length and every name the season is known by.
+// Those are otherwise typed by hand and go stale.
 func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string   `json:"name"`
@@ -792,13 +798,96 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("max_episode must be >= 0"))
 		return
 	}
+
 	sh, err := s.st.CreateShow(req.Name, req.Aliases, req.MaxEpisode)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	log.Printf("add-show: %s (max %d, %d aliases)", sh.CanonicalName, req.MaxEpisode, len(req.Aliases))
-	writeJSON(w, map[string]any{"id": sh.ID, "name": sh.CanonicalName})
+
+	// A URL (or bare slug) is the identity-bearing input. Resolving it fills in
+	// what the user would otherwise have to type, and records the slug so the
+	// daily refresh can match exactly instead of guessing from the title.
+	slug := schedule.SlugFromURL(req.Name)
+	if slug != "" {
+		if err := s.st.SetSlug(sh.ID, slug); err != nil {
+			log.Printf("add-show: set slug %s: %v", slug, err)
+		} else {
+			sh.Slug = slug
+			s.enrichFromSchedule(sh)
+		}
+	}
+
+	log.Printf("add-show: %s (max %d, %d aliases, slug %q)",
+		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases), sh.Slug)
+	writeJSON(w, map[string]any{
+		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "max_episode": sh.MaxEpisode,
+	})
+}
+
+// enrichFromSchedule fills a show in from its animeschedule page: the season
+// length, every alternative name, and the cover art.
+//
+// Best-effort throughout. A failure here leaves the show exactly as the user
+// typed it, which is still a usable show — the schedule is an enrichment, never
+// a dependency. That is the same posture the daily refresh takes.
+func (s *Server) enrichFromSchedule(sh *store.Show) {
+	if sh.Slug == "" {
+		return
+	}
+	info, err := schedule.FetchShow(nil, sh.Slug)
+	if err != nil {
+		log.Printf("schedule: fetch %s: %v", sh.Slug, err)
+		return
+	}
+
+	// The season length is the plausibility bound the matcher uses and the
+	// signal that a season has finished. The site knows it; the user usually
+	// does not, so most shows sat at 0 (unknown) before this.
+	//
+	// SeasonLength, not Episodes: a film reports "1", and capping a season at
+	// one episode would mark it complete after a single download.
+	if n := info.SeasonLength(); n > 0 && n != sh.MaxEpisode {
+		if err := s.st.SetMaxEpisode(sh.ID, n); err != nil {
+			log.Printf("schedule: set max %s: %v", sh.Slug, err)
+		} else {
+			sh.MaxEpisode = n
+		}
+	}
+
+	// Alternative names, tagged with their provenance. Abbreviations are
+	// stored too but marked separately: too short to match on, still useful as
+	// a Nyaa feed query.
+	for _, a := range info.Aliases() {
+		if err := s.st.AddAliasFrom(sh.ID, a, "schedule"); err != nil {
+			log.Printf("schedule: add alias %q: %v", a, err)
+		}
+	}
+	for _, a := range info.Abbreviations() {
+		if err := s.st.AddAliasFrom(sh.ID, a, "abbreviation"); err != nil {
+			log.Printf("schedule: add abbreviation %q: %v", a, err)
+		}
+	}
+
+	if info.ImageURL != "" {
+		if err := s.st.SetImageURL(sh.ID, info.ImageURL); err != nil {
+			log.Printf("schedule: set image %s: %v", sh.Slug, err)
+		} else {
+			sh.ImageURL = info.ImageURL
+			if s.art != nil {
+				if _, err := s.art.Ensure(info.ImageURL); err != nil {
+					log.Printf("art: cache %s: %v", sh.CanonicalName, err)
+				}
+			}
+		}
+	}
+
+	// Reload so the response carries the aliases we just added.
+	if fresh, err := s.st.GetShow(sh.ID); err == nil && fresh != nil {
+		*sh = *fresh
+	}
+	log.Printf("schedule: enriched %s (max %d, %d aliases)",
+		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases))
 }
 
 // handleDeleteShow removes a show and everything learned about it.
@@ -906,7 +995,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 					nextAirs = &t
 				}
 			}
-			j.State, j.NeedsAttention = showState(states)
+			j.State, j.NeedsAttention = showState(states, j.Trained)
 			if nextAirs != nil {
 				status := "upcoming"
 				if nextAirs.Before(time.Now()) {
@@ -938,15 +1027,31 @@ func (s *Server) imageFor(sh *store.Show) string {
 	return "/art/" + name
 }
 
+// NeedsTraining is the state of a show that has never been trained.
+//
+// It is not a cycle state — the cycle is about episodes, and this is about the
+// show. It is surfaced in the same field because the card has one status line,
+// and "up to date" would be a lie: an untrained show is not up to date, it is
+// inert. Nothing will ever be downloaded for it until it is trained.
+const NeedsTraining = "needs training"
+
 // The most demanding episode wins: hunting beats ready-to-watch beats
 // up-to-date. Any no-release-found episode sets NeedsAttention, since that is
 // the state asking the user to look at it.
-func showState(states []cycle.State) (string, bool) {
+//
+// trained is passed in rather than derived here because it is a property of the
+// show, not of any episode, and the caller already has it.
+func showState(states []cycle.State, trained bool) (string, bool) {
 	attention := false
 	for _, s := range states {
 		if s == cycle.NoReleaseFound {
 			attention = true
 		}
+	}
+	// An untrained show cannot match a release, so nothing else on the card
+	// means anything yet. Say so plainly instead of claiming it is up to date.
+	if !trained {
+		return NeedsTraining, true
 	}
 	// A missing file is the most urgent thing on the card: it needs a decision
 	// (re-grab or mark watched) before anything else makes sense.

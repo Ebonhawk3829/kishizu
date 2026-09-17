@@ -130,6 +130,9 @@
   .st-hunt .dot { background: var(--warn); }           .st-hunt { color: var(--warn); }
   .st-miss .dot { background: var(--bad); }            .st-miss { color: var(--bad); }
   .st-idle .dot { background: oklch(0.42 0.012 285); } .st-idle { color: var(--t3); }
+  /* Needs training: setup state, not an incident. Distinct from idle because
+     an untrained show is inert — nothing will ever be downloaded for it. */
+  .st-train .dot { background: var(--accent); }      .st-train { color: var(--accent); }
   .st .att { color: var(--warn); font-size: 12px; }
 
   /* ── actions: hidden until hover or keyboard focus ──────────────────── */
@@ -301,9 +304,9 @@
 <details class="disc" id="disc-add">
   <summary><span class="chev">&rsaquo;</span> Add a show</summary>
   <div class="body">
-    <p class="hint">Name it as animeschedule.net lists it, or use whatever you'd search Nyaa for. Max episodes is the season length — 0 if unknown.</p>
+    <p class="hint">Paste an animeschedule.net URL and the season length, cover art and every alternative name are filled in for you. Or just type a name — whatever you'd search Nyaa for.</p>
     <div class="fields">
-      <div><label for="add-name">Name</label><input id="add-name" type="text" placeholder="Show name"></div>
+      <div><label for="add-name">Name or URL</label><input id="add-name" type="text" placeholder="https://animeschedule.net/anime/... or show name"></div>
       <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
       <div><label for="add-max">Episodes</label><input id="add-max" type="number" min="0" value="0"></div>
       <div><button class="btn" onclick="addShow()">Add</button></div>
@@ -464,6 +467,7 @@ function card(s, noart) {
     'missing':          'st-miss',
     'no release found': 'st-miss',
     'up-to-date':       'st-idle',
+    'needs training':   'st-train',
   }[st] || 'st-idle';
 
   // Air line: the next episode the user actually owes, with its air time when
@@ -491,8 +495,10 @@ function card(s, noart) {
   acts += `<button onclick="openTrain(${s.id}, ${s.next})">Train</button>`;
   acts += `<button class="danger" onclick="removeShow(${s.id}, '${n}')">Remove</button>`;
 
-  // "up to date" on an untrained show is misleading: nothing will ever match.
-  const untrained = s.trained ? ''
+  // The server already says "needs training" as the state, so the badge is
+  // only needed when the state is something else and the show is still
+  // untrained — i.e. it has episodes on disk but no offsets learned.
+  const untrained = (s.trained || st === 'needs training') ? ''
     : ' &middot; <span class="untrained">untrained</span>';
 
   const art = (s.image_url && !noart)

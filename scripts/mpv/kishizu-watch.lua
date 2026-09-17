@@ -80,7 +80,17 @@ local function notify(msg)
     }, function() end)
 end
 
--- post sends one payload. Returns true on success.
+-- post sends one payload.
+--
+-- Returns one of three outcomes, because they need different handling:
+--   "ok"       — 2xx, the server accepted the signal.
+--   "rejected" — 4xx, the server understood it and refused it. In practice
+--                this means the file is not a tracked show. Retrying can
+--                never change that answer, so the payload is dropped.
+--   "failed"   — curl could not run, or the server errored. Worth retrying.
+--
+-- Collapsing "rejected" into "failed" is what made an untracked file look
+-- like an outage: the old code treated any non-2xx as unreachable.
 local function post(payload)
     local proc = mp.command_native({
         name = 'subprocess',
@@ -91,10 +101,14 @@ local function post(payload)
                 '-d', payload, o.endpoint},
     })
     -- command_native returns a table; status 0 means curl ran.
-    if proc and proc.status == 0 and proc.stdout and proc.stdout:find('^2') then
-        return true
+    if not proc or proc.status ~= 0 or not proc.stdout then
+        return 'failed'
     end
-    return false
+    local code = proc.stdout:match('(%d%d%d)')
+    if not code then return 'failed' end
+    if code:sub(1, 1) == '2' then return 'ok' end
+    if code:sub(1, 1) == '4' then return 'rejected' end
+    return 'failed'
 end
 
 -- flush_spool retries anything left from a previous session.
@@ -108,7 +122,12 @@ local function flush_spool()
 
     local remaining = {}
     for _, payload in ipairs(lines) do
-        if not post(payload) then table.insert(remaining, payload) end
+        -- Only transport failures are worth keeping. A 4xx will never
+        -- succeed on retry, so it is dropped here as well: otherwise one
+        -- untracked file would be re-posted on every mpv start forever.
+        if post(payload) == 'failed' then
+            table.insert(remaining, payload)
+        end
     end
     if #remaining == 0 then
         os.remove(o.spool)
@@ -148,8 +167,14 @@ end
 local function on_exit()
     if not watched or not path then return end
     local payload = utils.format_json({path = path})
-    if post(payload) then
+    local result = post(payload)
+    if result == 'ok' then
         mp.msg.info('kishizu: marked watched: ' .. path)
+    elseif result == 'rejected' then
+        -- The server is fine, it just does not track this show. Not an
+        -- error, and not worth a phone notification: mpv plays plenty of
+        -- things kishizu has never heard of.
+        mp.msg.verbose('kishizu: ignored untracked file: ' .. path)
     else
         spool(payload)
         notify('kishizu: could not reach server; watch signal spooled for ' ..

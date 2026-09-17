@@ -24,6 +24,10 @@ type Entry struct {
 	NextEp    int
 	AirsAt    time.Time
 	SourceURL string
+	// Slug is the show's animeschedule identifier, taken from the tile's link.
+	// It is the exact identity the daily refresh matches on when a show has
+	// one; the title is only a fallback. Empty when the tile has no link.
+	Slug string
 	// ImageURL is the season's cover art, served from animeschedule's image
 	// CDN. Empty when the tile has none.
 	ImageURL string
@@ -33,6 +37,10 @@ var (
 	reTitle = regexp.MustCompile(`(?s)<h2 class="show-title-bar[^"]*">([^<]+)</h2>`)
 	reEp    = regexp.MustCompile(`(?s)<span class="show-episode">Ep\s*(\d+)</span>`)
 	reTime  = regexp.MustCompile(`(?s)<time datetime="([^"]+)"`)
+	// Each tile is wrapped in a link to the show's page. The slug is read
+	// FORWARD from the anchor to the next title: the tile's own markup sits
+	// between them, and looking back would pick up the previous tile's link.
+	reSlug = regexp.MustCompile(`<a href="anime/([^"]+)" class="show-link">`)
 	// Cover art lives in the /anime/ path of their image CDN; restricting the
 	// pattern to that path keeps site logos and icons out.
 	reImage = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
@@ -75,6 +83,18 @@ func Parse(r io.Reader) ([]Entry, error) {
 		if title == "" {
 			continue
 		}
+		// The slug anchor precedes its own title, so search backwards from the
+		// title for the nearest anchor. Bounded, because a tile is small.
+		slug := ""
+		if back := s[:m[0]]; len(back) > 0 {
+			window := back
+			if len(window) > 4000 {
+				window = window[len(window)-4000:]
+			}
+			for _, sm := range reSlug.FindAllStringSubmatch(window, -1) {
+				slug = sm[1] // keep the nearest
+			}
+		}
 		back := s[:m[0]]
 		if len(back) > 4000 {
 			back = back[len(back)-4000:]
@@ -96,12 +116,30 @@ func Parse(r io.Reader) ([]Entry, error) {
 		if tm := reTime.FindStringSubmatch(rest); tm != nil {
 			at = parseAirsAt(html.UnescapeString(tm[1]))
 		}
-		out = append(out, Entry{Title: title, NextEp: ep, AirsAt: at, SourceURL: URL, ImageURL: image})
+		out = append(out, Entry{Title: title, NextEp: ep, AirsAt: at, SourceURL: URL, Slug: slug, ImageURL: image})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no entries parsed from %s (markup may have changed)", URL)
 	}
 	return out, nil
+}
+
+// FindBySlug locates a show by its animeschedule slug.
+//
+// This is the preferred lookup. A slug is an exact identity, so it cannot pick
+// the wrong show and it does not care that the schedule's romaji title shares
+// no words with the user's English name. Returns nil when the show is not on
+// the timetable, which is normal: the timetable only covers a ~1 week window.
+func FindBySlug(entries []Entry, slug string) *Entry {
+	if slug == "" {
+		return nil
+	}
+	for i := range entries {
+		if entries[i].Slug == slug {
+			return &entries[i]
+		}
+	}
+	return nil
 }
 
 // Find locates a show by fuzzy title match. Returns nil when not found, which is

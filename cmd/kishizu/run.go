@@ -146,8 +146,15 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 		}
 		updated := 0
 		for _, sh := range shows {
-			aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
-			if e := schedule.FindWithAliases(sched, aliases); e != nil && !e.AirsAt.IsZero() {
+			// Slug first: an exact identity beats a fuzzy title guess. The
+			// guess is only reached for shows added before slugs existed, or
+			// with no schedule page at all.
+			e := schedule.FindBySlug(sched, sh.Slug)
+			if e == nil {
+				aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
+				e = schedule.FindWithAliases(sched, aliases)
+			}
+			if e != nil && !e.AirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
 					continue
 				}
@@ -173,8 +180,12 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 		if artCache != nil {
 			onAir := map[string]bool{}
 			for _, sh := range shows {
-				aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
-				if e := schedule.FindWithAliases(sched, aliases); e != nil {
+				e := schedule.FindBySlug(sched, sh.Slug)
+				if e == nil {
+					aliases := append([]string{sh.CanonicalName}, sh.Aliases...)
+					e = schedule.FindWithAliases(sched, aliases)
+				}
+				if e != nil {
 					onAir[sh.CanonicalName] = true
 				}
 			}

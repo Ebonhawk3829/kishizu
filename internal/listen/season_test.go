@@ -37,7 +37,7 @@ func TestSeasonCompleteIsNotDue(t *testing.T) {
 	}
 }
 
-// TestSeasonInProgressIsDue: a show mid-season must still be polled.
+// TestSeasonInProgressIsDue: a TRAINED show mid-season must still be polled.
 func TestSeasonInProgressIsDue(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
@@ -48,6 +48,8 @@ func TestSeasonInProgressIsDue(t *testing.T) {
 	_ = st.UpsertEpisode(sh.ID, 6, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 6, time.Now().AddDate(0, 0, -1))
 	_ = st.ProjectAirDates(sh.ID)
+	// Trained: at least one group's offset is known.
+	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
 	l := New(st)
 	if !dueIDs(t, l, 5*time.Minute)[sh.ID] {
@@ -55,14 +57,53 @@ func TestSeasonInProgressIsDue(t *testing.T) {
 	}
 }
 
-// TestUnknownMaxStillPolls: a show with no known season length must not be
-// treated as complete.
+// TestUntrainedShowIsNotDue: an untrained show has no group offsets, so the
+// matcher cannot reach the grab threshold whatever it finds. Polling it would
+// burn requests to conclude what was already known.
+func TestUntrainedShowIsNotDue(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
+	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
+	_ = st.ProjectAirDates(sh.ID)
+	// No SetGroupOffset: the show has never been trained.
+
+	l := New(st)
+	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
+		t.Error("untrained show is being polled; it can never match a release")
+	}
+}
+
+// TestUntrainedShowIsDueOnceTrained: the guard is about training, not about
+// the show. Learning one offset is enough to start polling.
+func TestUntrainedShowIsDueOnceTrained(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
+	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
+	_ = st.ProjectAirDates(sh.ID)
+
+	l := New(st)
+	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
+		t.Fatal("untrained show should not be due")
+	}
+	if err := st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training"); err != nil {
+		t.Fatalf("SetGroupOffset: %v", err)
+	}
+	if !dueIDs(t, l, 5*time.Minute)[sh.ID] {
+		t.Error("show should be due once an offset is learned")
+	}
+}
+
+// TestUnknownMaxStillPolls: a TRAINED show with no known season length must
+// not be treated as complete.
 func TestUnknownMaxStillPolls(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 0) // max unknown
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 	_ = st.ProjectAirDates(sh.ID)
+	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
 	l := New(st)
 	if !dueIDs(t, l, 5*time.Minute)[sh.ID] {

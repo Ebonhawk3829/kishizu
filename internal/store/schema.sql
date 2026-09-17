@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS show (
     next_ep         INTEGER,
     next_airs_at    TEXT,
     schedule_fetched_at TEXT,
+    -- The animeschedule.net slug, e.g. "re-zero-kara-hajimeru-isekai-seikatsu-4".
+    -- An exact identity for the show on the schedule. When present the daily
+    -- refresh matches on this instead of fuzzy-matching titles, which is a
+    -- guess that fails whenever a show is on break, outside the ~1 week
+    -- timetable window, or titled differently in romaji vs English.
+    -- NULL when the show has no schedule page (films, unlisted shows).
+    slug            TEXT,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_show_anilist ON show(anilist_id) WHERE anilist_id IS NOT NULL;
@@ -34,6 +41,14 @@ CREATE TABLE IF NOT EXISTS alias (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     show_id INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
     name    TEXT    NOT NULL,
+    -- Where this alias came from. Provenance matters because aliases arrive
+    -- from three places and they are not equivalent:
+    --   manual   - typed by the user
+    --   schedule - the animeschedule show page (romaji/english/japanese/synonyms)
+    --   training - extracted from a release title during a training run
+    -- Abbreviations from the schedule are stored as source 'abbreviation':
+    -- too short to match on safely, but useful as a Nyaa feed query.
+    source  TEXT    NOT NULL DEFAULT 'manual',
     UNIQUE (show_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_alias_show ON alias(show_id);

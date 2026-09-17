@@ -44,7 +44,7 @@ which is the entire reason it exists.
 
 | Stage | What happens |
 |---|---|
-| **Declare** | Shows live in `shows.yaml`: name, aliases, how many you've watched, season length |
+| **Declare** | Shows live in `shows.yaml`, or are added from the web UI by pasting an animeschedule.net URL |
 | **Hunt** | Polls Nyaa RSS per show, parses each release, matches it to a show and episode |
 | **Grab** | Hands the best matching release to Transmission, per your group preferences |
 | **File** | Renames to `<Show> - E<NN>.mkv` in your library, ready for your player |
@@ -163,6 +163,30 @@ shows:
 
 Re-run with `-seed` after editing. Adding shows from the web UI also works.
 
+### Adding a show by URL
+
+The best way to add a show is to paste its animeschedule.net URL:
+
+```
+https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
+```
+
+The trailing part is the show's **slug** — an exact identity on the schedule.
+kishizu stores it and uses it to look the show up, instead of guessing from the
+title. From the page it also fills in:
+
+- the **season length**, which is otherwise typed by hand and usually left at 0
+- every **alternative name** (romaji, English, Japanese, synonyms) as an alias
+- the **cover art**
+
+A plain name still works and behaves exactly as before; it just gets none of
+that for free.
+
+Shows added before slugs existed can be backfilled with `-backfill-slugs`,
+which reads a hand-maintained `name: slug` map (see `slugs.yaml` for the
+shape). Resolving a name to the right season needs a judgement call, so it is
+done once by hand rather than guessed every day.
+
 ### Flags
 
 | Flag | Default | Purpose |
@@ -176,6 +200,8 @@ Re-run with `-seed` after editing. Adding shows from the web UI also works.
 | `-interval` | `5m` | RSS poll interval |
 | `-dry-run` | `true` | Decide but don't download |
 | `-infer` | — | Derive group offsets from the feed instead of training by hand |
+| `-backfill-slugs` | — | Attach animeschedule slugs from the mapping file and enrich from the schedule |
+| `-slugs` | `slugs.yaml` | Name → slug mapping used by `-backfill-slugs` |
 | `-prefer` | `VARYG,Erai-Raws,SubsPlease,ToonsHub` | Preferred release groups, best first |
 | `-ntfy` | — | ntfy topic for notifications; empty disables |
 
@@ -189,6 +215,31 @@ and `[Erai-raws] Show - 07` can both resolve to episode 7.
 Offsets are learned either by training (propose-and-confirm, a few examples per
 numbering convention) or by `-infer`, which derives them from the structure of
 each group's numbering. Both are reviewable and resettable per show in the UI.
+
+**A show is not hunted until it has been trained.** Without at least one known
+group offset there is nothing to reason with, so polling would only burn
+requests to conclude what was already known. Untrained shows show as
+*needs training* in the UI rather than a misleading *up to date*.
+
+### Aliases are a gate, not a score
+
+An alias decides whether a release is **eligible** for a show. It does not
+contribute to how good a match looks.
+
+That distinction matters because the alias set is wide — the schedule page alone
+contributes romaji, English, Japanese and synonyms, and those names carry very
+different amounts of identity. Scoring them made the short ones dangerous: an
+abbreviation like `ReZero 4` is a perfect match against any release containing
+those two tokens, so it inflated confidence for releases that merely looked
+similar.
+
+So: any alias that clears the threshold makes the release a candidate, and how
+well it cleared is discarded. Choosing *which* candidate to download is left to
+the criteria that genuinely distinguish releases — group, resolution, codec,
+source — which is what the preference ranker already does.
+
+Abbreviations are still stored, but tagged and excluded from matching. They are
+used as Nyaa feed queries, where a broad net is what you want.
 
 ## Watch signal
 
@@ -237,6 +288,31 @@ No, deliberately. Currently-airing seasons only.
 <summary><strong>What happens if AniList goes down?</strong></summary>
 
 Nothing, because kishizu doesn't ask it anything at runtime. That's the point.
+
+</details>
+
+<details>
+<summary><strong>Why is my new show not downloading anything?</strong></summary>
+
+It probably hasn't been trained. A show needs at least one release group's
+episode offset before kishizu can tell which release is the episode you're
+waiting for, so untrained shows are not polled at all. They show as
+*needs training* in the UI.
+
+Train it from the show's row: pick the episode, and confirm which of the
+proposed releases is that episode. One example per numbering convention is
+enough.
+
+</details>
+
+<details>
+<summary><strong>Do I have to use animeschedule.net URLs?</strong></summary>
+
+No. A plain name works exactly as it always did. You just don't get the season
+length, the alternative names or the cover art filled in for you, and the daily
+schedule refresh has to fall back to fuzzy-matching your title against the
+timetable — which fails whenever a show is on a break, outside the ~1 week
+window, or titled differently in romaji versus English.
 
 </details>
 

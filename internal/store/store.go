@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -91,7 +92,27 @@ func (s *Store) migrate() error {
 	}
 	// Runs after the schema so columns added since this database was created
 	// are present before anything selects them.
-	return s.addColumns()
+	if err := s.addColumns(); err != nil {
+		return err
+	}
+	// Indexes on migrated columns are created here, not in schema.sql: the
+	// schema runs before addColumns, so an index referencing a column that
+	// does not exist yet on an older database would fail the whole open.
+	return s.addIndexes()
+}
+
+// addIndexes creates indexes that depend on migrated columns.
+//
+// The slug index is partial and unique: most shows have a slug, the ones that
+// do not (films, unlisted shows) are simply not indexed, and two shows must
+// never claim the same schedule page.
+func (s *Store) addIndexes() error {
+	_, err := s.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("create idx_show_slug: %w", err)
+	}
+	return nil
 }
 
 // addColumns brings an existing database up to date.
@@ -108,6 +129,8 @@ func (s *Store) addColumns() error {
 		{"show", "next_airs_at", "TEXT"},
 		{"show", "schedule_fetched_at", "TEXT"},
 		{"show", "image_url", "TEXT"},
+		{"show", "slug", "TEXT"},
+		{"alias", "source", "TEXT NOT NULL DEFAULT 'manual'"},
 		{"episode", "airs_at", "TEXT"},
 	}
 	for _, c := range cols {
@@ -166,6 +189,9 @@ type Show struct {
 	CadenceFetched *time.Time
 	// ImageURL is the season's cover art from the schedule, for the UI.
 	ImageURL  string
+	// Slug is the animeschedule.net slug, an exact identity for the show on
+	// the schedule. Empty when the show has no schedule page.
+	Slug      string
 	CreatedAt time.Time
 	Aliases   []string
 }
@@ -209,15 +235,16 @@ func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
 	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, anilist_id, source,
-		cadence_weekday, cadence_source, cadence_fetched_at, image_url, created_at FROM show WHERE id = ?`, id)
+		cadence_weekday, cadence_source, cadence_fetched_at, image_url, slug, created_at FROM show WHERE id = ?`, id)
 
 	var sh Show
 	var weekday, anilistID sql.NullInt64
-	var src, source, fetched, created, image sql.NullString
+	var src, source, fetched, created, image, slug sql.NullString
 	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &anilistID, &source,
-		&weekday, &src, &fetched, &image, &created); err != nil {
+		&weekday, &src, &fetched, &image, &slug, &created); err != nil {
 		return nil, err
 	}
+	sh.Slug = slug.String
 	if weekday.Valid {
 		w := int(weekday.Int64)
 		sh.CadenceWeekday = &w
@@ -279,12 +306,49 @@ func (s *Store) ListShows() ([]*Show, error) {
 }
 
 // AddAlias records another title for a show. Idempotent.
+//
+// Source is provenance: manual | schedule | training | abbreviation. It is
+// recorded but not read back by the matcher, which treats every alias the
+// same. It exists so a future UI can show where a name came from, and so a
+// schedule-derived alias the user deleted can be told apart from one they
+// typed.
 func (s *Store) AddAlias(showID int64, alias string) error {
+	return s.AddAliasFrom(showID, alias, "manual")
+}
+
+// AddAliasFrom records a title with an explicit provenance.
+func (s *Store) AddAliasFrom(showID int64, alias, source string) error {
 	if alias == "" {
 		return nil
 	}
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO alias (show_id, name) VALUES (?, ?)`, showID, alias)
+	if source == "" {
+		source = "manual"
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO alias (show_id, name, source) VALUES (?, ?, ?)`,
+		showID, alias, source)
 	return err
+}
+
+// SetSlug records the animeschedule.net slug for a show.
+func (s *Store) SetSlug(showID int64, slug string) error {
+	_, err := s.db.Exec(`UPDATE show SET slug = ? WHERE id = ?`, slug, showID)
+	return err
+}
+
+// ShowBySlug looks a show up by its animeschedule slug. Returns nil when no
+// show carries it.
+func (s *Store) ShowBySlug(slug string) (*Show, error) {
+	if slug == "" {
+		return nil, nil
+	}
+	var id int64
+	if err := s.db.QueryRow(`SELECT id FROM show WHERE slug = ?`, slug).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return s.GetShow(id)
 }
 
 // SetAniListID records the AniList media id, making a re-import idempotent.

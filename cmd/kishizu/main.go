@@ -47,6 +47,8 @@ func main() {
 	ntfyURL := flag.String("ntfy", "http://100.64.0.1:8085/kishizu", "ntfy topic URL for notifications (empty disables)")
 	debugOn := flag.Bool("debug", false, "verbose logging of every decision (toggleable at runtime via POST /api/debug)")
 	infer := flag.Bool("infer", false, "derive group offsets from air dates instead of training by hand")
+	backfill := flag.Bool("backfill-slugs", false, "attach animeschedule slugs from the mapping file and enrich from the schedule")
+	slugFile := flag.String("slugs", "slugs.yaml", "name -> animeschedule slug mapping used by -backfill-slugs")
 	preferred := flag.String("prefer", "VARYG,Erai-Raws,SubsPlease,ToonsHub", "preferred release groups, best first")
 	flag.Parse()
 
@@ -97,6 +99,14 @@ func main() {
 	if *infer {
 		if err := inferOffsets(st, *preferred); err != nil {
 			fmt.Fprintf(os.Stderr, "infer: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *backfill {
+		if err := backfillSlugs(st, *slugFile); err != nil {
+			fmt.Fprintf(os.Stderr, "backfill: %v\n", err)
 			os.Exit(1)
 		}
 		return

@@ -47,7 +47,16 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := nyaa.Fetch(nil, nyaa.FeedURL(sh.CanonicalName))
+	// Query on every alias, not just the canonical name. Nyaa's search is a
+	// plain substring match, so a long specific name misses groups that write
+	// the title differently — and training is exactly where you need to see
+	// those groups, since learning their offsets is the point.
+	//
+	// This mirrors what the listener does. Previously training used a single
+	// canonical-name query, so it could offer fewer candidates than the
+	// listener would later consider, and a group that only ever appears under
+	// an alias could never be trained.
+	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("fetch feed: %w", err))
 		return

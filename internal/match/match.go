@@ -46,8 +46,12 @@ type Result struct {
 // the answer, so asking wastes the only scarce resource here — their attention.
 func (r Result) Confident() bool { return r.Confidence >= ConfidentThreshold }
 
-// Threshold is the minimum title score for a match. Measured gap on real data:
-// accepted releases 1.00, best non-match 0.33 — so this sits in empty space.
+// Threshold is the minimum title score for a release to be eligible at all.
+// Measured gap on real data: accepted releases 1.00, best non-match 0.33 — so
+// this sits in empty space.
+//
+// It is a GATE, not a score. A release either clears it or it does not; how far
+// it clears it by is deliberately discarded. See AliasGate for why.
 const Threshold = 0.6
 
 // ConfidentThreshold is the confidence at which the model stops asking.
@@ -56,10 +60,16 @@ const ConfidentThreshold = 0.75
 // Evidence weights. Deliberately hand-tuned rather than learned: with a handful
 // of examples per show, fitted weights overfit immediately. The structure is
 // fixed but the inputs accumulate, so the estimate sharpens with context.
+//
+// There is deliberately no wAlias. The alias is an eligibility gate, not a
+// contributor: once a release is eligible, ranking it is the job of the
+// release's own properties (group, resolution, codec, source), which the
+// preference ranker already does. Folding alias quality into confidence made a
+// short alias like "ReZero 4" score a perfect 1.0 against anything containing
+// those tokens, inflating confidence for releases that merely looked similar.
 const (
-	wAlias      = 0.5 // how well the title matches a known alias
-	wGroupKnown = 0.3 // do we have this exact group's offset
-	wAgreement  = 0.2 // do the known offsets agree with each other
+	wGroupKnown = 0.6 // do we have this exact group's offset
+	wAgreement  = 0.4 // do the known offsets agree with each other
 )
 
 // offsetAgreement is how strongly the known offsets concur, 0..1.
@@ -91,8 +101,13 @@ func offsetAgreement(s Show) float64 {
 }
 
 // confidence combines the available evidence into a 0..1 estimate.
-func confidence(aliasScore float64, groupKnown bool, agreement float64) float64 {
-	c := wAlias * aliasScore
+//
+// The alias is not an input. It has already done its job by the time this is
+// called: a release that reaches here cleared the gate. What remains is how
+// much the model trusts the EPISODE NUMBER it read, which is a question about
+// groups and offsets, not about titles.
+func confidence(groupKnown bool, agreement float64) float64 {
+	c := 0.0
 	if groupKnown {
 		c += wGroupKnown
 	}
@@ -103,6 +118,28 @@ func confidence(aliasScore float64, groupKnown bool, agreement float64) float64 
 	return c
 }
 
+// AliasGate reports whether a release title is eligible for a show at all.
+//
+// It is a gate, not a score, and that is the point. The alias set is now wide
+// — the schedule page contributes romaji, English, Japanese and synonyms — and
+// those names differ wildly in how much identity they carry. Scoring them made
+// the short ones dangerous: "ReZero 4" is a perfect recall match against any
+// release containing those two tokens, so it contributed a full alias score to
+// releases that merely looked similar.
+//
+// Treating the alias as eligibility fixes that. ANY alias that clears the
+// threshold makes the release a candidate; how well it cleared is discarded.
+// Deciding which candidate to actually download is then left to the criteria
+// that genuinely distinguish releases — group, resolution, codec, source —
+// which is what the preference ranker already does.
+func AliasGate(aliases []string, title string) (bool, string) {
+	score := release.TitleScore(aliases, title)
+	if score < Threshold {
+		return false, fmt.Sprintf("title score %.2f below %.2f", score, Threshold)
+	}
+	return true, fmt.Sprintf("alias matched (%.2f)", score)
+}
+
 // Match decides whether a release belongs to a show, and which episode it is.
 //
 // The offset is applied PER GROUP, not per show. This is the single most
@@ -110,21 +147,21 @@ func confidence(aliasScore float64, groupKnown bool, agreement float64) float64 
 // numbering. BLEACH TYBW episode 7 is "07" to Erai-raws and "47" to SubsPlease,
 // ToonsHub and VARYG. A single show-level offset cannot satisfy both.
 func Match(s Show, title string) Result {
-	score := release.TitleScore(s.Aliases(), title)
-	if score < Threshold {
-		return Result{Reason: fmt.Sprintf("title score %.2f below %.2f", score, Threshold)}
+	ok, why := AliasGate(s.Aliases(), title)
+	if !ok {
+		return Result{Reason: why}
 	}
 
 	r := release.Parse(title)
 	raw := r.RawEpisode()
 	if raw == 0 {
-		// Matches the show but the episode number is unreadable. This is the
-		// maximally informative case for training: it needs a human.
+		// Eligible but the episode number is unreadable. This is the maximally
+		// informative case for training: it needs a human.
 		return Result{
 			Matched:    true,
 			Episode:    0,
-			Confidence: wAlias * score,
-			Reason:     "matches show, episode unreadable",
+			Confidence: 0,
+			Reason:     "eligible, episode unreadable",
 		}
 	}
 
@@ -142,7 +179,7 @@ func Match(s Show, title string) Result {
 		return Result{
 			Matched:    true,
 			Episode:    ep,
-			Confidence: confidence(score, true, agreement),
+			Confidence: confidence(true, agreement),
 			Reason:     fmt.Sprintf("group %q known offset %d", group, off),
 		}
 	}
@@ -163,12 +200,12 @@ func Match(s Show, title string) Result {
 	if best == 0 {
 		return Result{Reason: fmt.Sprintf("unseen group %q, no plausible offset", group)}
 	}
-	// No group evidence, so confidence rests on the alias and on how much the
-	// known offsets agree. This is the case that improves with context.
+	// No group evidence, so confidence rests entirely on how much the known
+	// offsets agree. This is the case that improves with context.
 	return Result{
 		Matched:    true,
 		Episode:    best,
-		Confidence: confidence(score, false, agreement),
+		Confidence: confidence(false, agreement),
 		Reason:     fmt.Sprintf("group %q unseen, inferred episode", group),
 	}
 }

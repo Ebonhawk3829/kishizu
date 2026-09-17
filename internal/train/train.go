@@ -156,8 +156,7 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 		if it.InfoHash != "" && s.Asked[it.InfoHash] {
 			continue
 		}
-		score := release.TitleScore(s.m.Aliases(), it.Title)
-		if score < match.Threshold {
+		if ok, _ := match.AliasGate(s.m.Aliases(), it.Title); !ok {
 			continue
 		}
 
@@ -204,8 +203,7 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 func (s *Session) Resolved(items []nyaa.Item, n int) []Candidate {
 	var out []Candidate
 	for _, it := range items {
-		score := release.TitleScore(s.m.Aliases(), it.Title)
-		if score < match.Threshold {
+		if ok, _ := match.AliasGate(s.m.Aliases(), it.Title); !ok {
 			continue
 		}
 		res := match.Match(s.m, it.Title)

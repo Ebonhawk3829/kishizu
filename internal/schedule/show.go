@@ -1,0 +1,255 @@
+package schedule
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/net/html"
+)
+
+// Show is the detail animeschedule.net publishes about one anime, at
+// https://animeschedule.net/anime/<slug>.
+//
+// This is the authoritative record for a season: it carries the episode count
+// and every name the season is known by, which are exactly the two things that
+// are otherwise typed by hand and get out of date.
+type Show struct {
+	// Slug is the animeschedule identifier, e.g.
+	// "re-zero-kara-hajimeru-isekai-seikatsu-4".
+	Slug string
+	// Title is the schedule's own display name (usually romaji).
+	Title string
+	// Episodes is the season length. 0 when the site does not say, which is
+	// common for shows announced before their run is confirmed.
+	Episodes int
+	// Type is the media type: TV, Movie, TV Short, OVA, ONA.
+	//
+	// It matters because a Movie reports "Episodes: 1", which is a true
+	// statement about a film and a disastrous one about a season. Callers
+	// filling in a season length must check this first.
+	Type string
+	// Status is the airing status: "Ongoing", "Finished", "Not Yet Aired".
+	Status string
+	// Season is the broadcast season, e.g. "Spring 2026".
+	Season string
+	// Names are the alternative titles, keyed by kind: Romaji, English,
+	// Japanese, Abbreviation, Synonyms.
+	Names map[string][]string
+	// ImageURL is the season's cover art on their CDN.
+	ImageURL string
+	// AniListID and MyAnimeListID are the cross-references the page links to.
+	// 0 when absent.
+	AniListID     int
+	MyAnimeListID int
+}
+
+// Aliases returns the names worth matching a release against.
+//
+// Abbreviation is deliberately excluded. It is too short to be safe: "ReZero 4"
+// scores a perfect recall against any release containing those two tokens, and
+// since the alias gate is the only thing standing between a release and the
+// pipeline, a promiscuous alias admits releases for the wrong show. It is still
+// stored (as source "abbreviation") because it makes a good Nyaa feed query,
+// where a broad net is what you want and the matcher filters the results.
+func (s *Show) Aliases() []string {
+	return s.namesOf("Romaji", "English", "Japanese", "Synonyms")
+}
+
+// Abbreviations returns just the short forms, for feed queries only.
+func (s *Show) Abbreviations() []string {
+	return s.namesOf("Abbreviation")
+}
+
+// SeasonLength returns the episode count to use as a season length, or 0 when
+// the page does not give one.
+//
+// A Movie reports "Episodes: 1", and that is the correct answer, not a special
+// case: a film IS one download. The season-complete check is `next > max`, so
+// max=1 still allows episode 1 to be hunted and stops cleanly once it is
+// watched. Suppressing it would be worse than using it — with max=0 the
+// plausibility bound is lost, and a mis-numbered release could be accepted as
+// episode 5 of a film.
+func (s *Show) SeasonLength() int {
+	if s.Episodes <= 0 {
+		return 0
+	}
+	return s.Episodes
+}
+
+func (s *Show) namesOf(kinds ...string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, k := range kinds {
+		for _, n := range s.Names[k] {
+			n = strings.TrimSpace(n)
+			if n == "" || seen[n] {
+				continue
+			}
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// ShowURL is the canonical page for a slug.
+func ShowURL(slug string) string { return URL + "/anime/" + slug }
+
+// FetchShow retrieves one show's page by slug.
+func FetchShow(client *http.Client, slug string) (*Show, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := client.Get(ShowURL(slug))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("animeschedule returned %d for %q", resp.StatusCode, slug)
+	}
+	return ParseShow(resp.Body, slug)
+}
+
+var (
+	reShowTitle = regexp.MustCompile(`(?s)<title>(.*?)</title>`)
+	reEpisodes  = regexp.MustCompile(
+		`(?s)<h3>Episodes</h3>\s*<div[^>]*>(\d+)</div>`)
+	reStatus = regexp.MustCompile(
+		`(?s)<h3>Status</h3>\s*<div[^>]*>([^<]+)</div>`)
+	reType = regexp.MustCompile(
+		`(?s)<h3>Type</h3>\s*<a[^>]*>([^<]+)</a>`)
+	reSeason = regexp.MustCompile(
+		`(?s)<h3>Season</h3>\s*<a[^>]*>([^<]+)</a>`)
+	// Alternative names are a flat sequence of headings and values in document
+	// order: a heading applies to every value that follows it until the next
+	// heading. Synonyms legitimately carry several values.
+	//
+	// Matching "block" shapes does not work here: the value's own closing
+	// </div> is indistinguishable from the wrapper's, so a non-greedy block
+	// regex eats the terminator it needs to match on. Scanning both tags in
+	// order and attributing each value to the last heading seen avoids the
+	// nesting problem entirely.
+	reAltTag = regexp.MustCompile(
+		`(?s)<span class="alternative-name-heading">([^<]+)</span>` +
+			`|<div class="alternative-name"[^>]*>([^<]+)</div>`)
+	reAniList  = regexp.MustCompile(`anilist\.co/anime/(\d+)`)
+	reMAL      = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
+	reShowImg  = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
+)
+
+// ParseShow extracts a Show from a show page.
+//
+// The page is server-rendered, so a plain fetch is enough. Everything here is
+// optional: a missing field yields its zero value rather than an error, because
+// the page layout varies by how complete the site's record is and a partial
+// record is still more than we had before.
+func ParseShow(r io.Reader, slug string) (*Show, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	s := string(raw)
+
+	sh := &Show{Slug: slug, Names: map[string][]string{}}
+
+	if m := reShowTitle.FindStringSubmatch(s); m != nil {
+		// "Re:Zero kara Hajimeru Isekai Seikatsu 4 | AnimeSchedule"
+		t := strings.TrimSpace(m[1])
+		if i := strings.LastIndex(t, "|"); i > 0 {
+			t = strings.TrimSpace(t[:i])
+		}
+		sh.Title = html.UnescapeString(t)
+	}
+	if m := reEpisodes.FindStringSubmatch(s); m != nil {
+		sh.Episodes, _ = strconv.Atoi(m[1])
+	}
+	if m := reStatus.FindStringSubmatch(s); m != nil {
+		sh.Status = strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if m := reType.FindStringSubmatch(s); m != nil {
+		sh.Type = strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if m := reSeason.FindStringSubmatch(s); m != nil {
+		sh.Season = strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if m := reAniList.FindStringSubmatch(s); m != nil {
+		sh.AniListID, _ = strconv.Atoi(m[1])
+	}
+	if m := reMAL.FindStringSubmatch(s); m != nil {
+		sh.MyAnimeListID, _ = strconv.Atoi(m[1])
+	}
+	if m := reShowImg.FindString(s); m != "" {
+		sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m), "&amp;", "&")
+	}
+
+	// Walk headings and values in document order. Each value belongs to the
+	// most recent heading. The page renders the block twice (mobile and
+	// desktop variants), so duplicates are filtered as they are added.
+	kind := ""
+	for _, m := range reAltTag.FindAllStringSubmatch(s, -1) {
+		if m[1] != "" {
+			kind = strings.TrimSpace(html.UnescapeString(m[1]))
+			continue
+		}
+		name := strings.TrimSpace(html.UnescapeString(m[2]))
+		if name == "" || kind == "" {
+			continue
+		}
+		dup := false
+		for _, have := range sh.Names[kind] {
+			if have == name {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			sh.Names[kind] = append(sh.Names[kind], name)
+		}
+	}
+
+	if sh.Title == "" {
+		return nil, fmt.Errorf("no title parsed from %s (markup may have changed)", ShowURL(slug))
+	}
+	return sh, nil
+}
+
+// SlugFromURL extracts the animeschedule slug from a URL or bare slug.
+//
+// Accepts the forms a user is likely to paste:
+//
+//	https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
+//	animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
+//	/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
+//	re-zero-kara-hajimeru-isekai-seikatsu-4
+//
+// Query strings and fragments are dropped. Returns "" when there is no slug to
+// be found, which the caller treats as "not a schedule URL" and falls back to
+// the plain-name path.
+func SlugFromURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	// Drop query and fragment before looking for the path.
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	// Strip any scheme and host.
+	if i := strings.Index(s, "/anime/"); i >= 0 {
+		s = s[i+len("/anime/"):]
+	} else if strings.HasPrefix(s, "anime/") {
+		s = s[len("anime/"):]
+	}
+	s = strings.Trim(s, "/")
+	// A slug is a path segment: no slashes, no spaces.
+	if s == "" || strings.ContainsAny(s, "/ \t") {
+		return ""
+	}
+	return s
+}

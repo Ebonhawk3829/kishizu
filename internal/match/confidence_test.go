@@ -89,17 +89,50 @@ func TestConfidentThreshold(t *testing.T) {
 // TestConfidenceBounded: confidence must stay within 0..1 no matter the inputs.
 func TestConfidenceBounded(t *testing.T) {
 	cases := []struct {
-		alias float64
 		known bool
 		agree float64
 	}{
-		{1, true, 1}, {0, false, 0}, {1, true, 0}, {0.6, false, 1},
+		{true, 1}, {false, 0}, {true, 0}, {false, 1},
 	}
 	for _, c := range cases {
-		got := confidence(c.alias, c.known, c.agree)
+		got := confidence(c.known, c.agree)
 		if got < 0 || got > 1 {
-			t.Errorf("confidence(%v,%v,%v) = %.2f, out of range", c.alias, c.known, c.agree, got)
+			t.Errorf("confidence(%v,%v) = %.2f, out of range", c.known, c.agree, got)
 		}
+	}
+}
+
+// TestConfidenceIgnoresAliasQuality: the alias is an eligibility gate, so two
+// releases that both clear it must score the same confidence however different
+// their alias scores were. Ranking between them is the ranker's job, not
+// confidence's.
+func TestConfidenceIgnoresAliasQuality(t *testing.T) {
+	// Both titles clear the gate against "Tomb Raider King"; one is a much
+	// tighter alias match than the other.
+	tight := "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL"
+	loose := "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL (Dogul Wang, Multi-Subs, Extra Words Here)"
+
+	sh := &MemShow{Name: "Tomb Raider King", Max: 12, Offsets: map[string]int{"ToonsHub": 0}}
+	a := Match(sh, tight)
+	b := Match(sh, loose)
+	if !a.Matched || !b.Matched {
+		t.Fatalf("both should be eligible: a=%+v b=%+v", a, b)
+	}
+	if a.Confidence != b.Confidence {
+		t.Errorf("confidence varied with alias quality: %.2f vs %.2f; "+
+			"the alias is a gate, not a score", a.Confidence, b.Confidence)
+	}
+}
+
+// TestAliasGateIsBinary: a release just below the threshold is rejected and one
+// just above is accepted, with no partial credit carried forward.
+func TestAliasGateIsBinary(t *testing.T) {
+	aliases := []string{"Tomb Raider King"}
+	if ok, _ := AliasGate(aliases, "[Group] Tomb Raider King S01E09 1080p"); !ok {
+		t.Error("exact alias should clear the gate")
+	}
+	if ok, _ := AliasGate(aliases, "[Group] Something Else Entirely - 01"); ok {
+		t.Error("unrelated title should not clear the gate")
 	}
 }
 

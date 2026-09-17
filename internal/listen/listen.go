@@ -60,6 +60,13 @@ func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
 // no-release-found (slow safety net). Shows with no air date at all are polled
 // on the legacy interval: without a schedule point there is no window to
 // reason about, and silently dropping them would be worse than polling.
+//
+// An UNTRAINED show is never due. Training is what teaches the per-group
+// episode offsets, and without them the matcher has nothing to work with:
+// offsetAgreement is 0 and no group is known, so confidence cannot reach the
+// grab threshold no matter how good the release is. Polling such a show just
+// burns requests to conclude what was already known. The UI surfaces these as
+// "needs training" so they are visible rather than silently idle.
 func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration {
 	shows, err := l.st.ListShows()
 	if err != nil {
@@ -90,14 +97,37 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 		}
 
 		if d, ok := cycle.PollInterval(states); ok {
+			// Only now does training matter: a dormant show costs nothing
+			// either way, so there is no point looking up its offsets.
+			if !l.isTrained(sh) {
+				debug.Log("%s: untrained, not polling", sh.CanonicalName)
+				continue
+			}
 			out[sh] = d
 			continue
 		}
-		if !hasAirDate {
+		if !hasAirDate && l.isTrained(sh) {
 			out[sh] = legacy
 		}
 	}
 	return out
+}
+
+// isTrained reports whether a show has any learned group offsets.
+//
+// This is the same test the UI uses for its "untrained" badge, kept in one
+// place so the two cannot drift: a show is trained once at least one release
+// group's numbering convention is known.
+func (l *Listener) isTrained(sh *store.Show) bool {
+	offsets, err := l.st.GroupOffsets(sh.ID)
+	if err != nil {
+		// Fail closed. An untrained show polls and matches nothing, which is
+		// wasteful but harmless; a show wrongly believed trained could grab
+		// the wrong episode.
+		debug.Log("%s: offsets lookup failed: %v", sh.CanonicalName, err)
+		return false
+	}
+	return len(offsets) > 0
 }
 
 // nextEpisode is the first episode not yet watched or deleted — the one the
