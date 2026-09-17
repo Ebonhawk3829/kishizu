@@ -982,6 +982,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
 			var states []cycle.State
 			var nextAirs *time.Time
+			var firstAirs *time.Time
 			for _, ep := range eps {
 				states = append(states, cycle.StateOf(ep, time.Now()))
 				switch episode.ParseState(string(ep.State)) {
@@ -1000,13 +1001,21 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 					t := *ep.AirsAt
 					nextAirs = &t
 				}
+				if ep.Number == 1 && ep.AirsAt != nil {
+					t := *ep.AirsAt
+					firstAirs = &t
+				}
 			}
 			// Aired means episode 1 has happened. Until then there is nothing
 			// to train on and nothing to hunt for, so the show is simply
 			// waiting. An unknown air time counts as not yet aired: the site
 			// lists announced-but-unscheduled shows, and we cannot claim an
 			// episode exists when we do not know when it would.
-			aired := nextAirs != nil && !nextAirs.After(time.Now())
+			//
+			// Episode 1 specifically — not the next unwatched one. Mid-way
+			// through a season the next episode is always in the future, which
+			// made every airing show read as unaired.
+			aired := firstAirs != nil && !firstAirs.After(time.Now())
 			j.State, j.NeedsAttention = showState(states, j.Trained, aired)
 			if nextAirs != nil {
 				status := "upcoming"

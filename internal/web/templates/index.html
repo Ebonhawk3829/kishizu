@@ -412,11 +412,19 @@ async function loadShows() {
   el('train-show').innerHTML = opts;
   renderTrainOffsets();
 
-  // Airing = the schedule knows the next air time. Everything else is
-  // upcoming: declared but not yet on an air date.
-  const byAir = (a, b) => new Date(a.next_schedule.airs_at) - new Date(b.next_schedule.airs_at);
-  const airing = shows.filter(s => s.next_schedule).sort(byAir);
-  const upcoming = shows.filter(s => !s.next_schedule);
+  // Sections follow the server's state: "Airing" is anything whose first
+  // episode has happened, "Upcoming" is everything still waiting. The two must
+  // not disagree — a card in the Airing section with an "upcoming" status
+  // contradicts itself.
+  const byAir = (a, b) => {
+    // A show can have aired without its next episode having a known time;
+    // those sort last rather than crashing on a missing date.
+    const ta = a.next_schedule ? new Date(a.next_schedule.airs_at).getTime() : Infinity;
+    const tb = b.next_schedule ? new Date(b.next_schedule.airs_at).getTime() : Infinity;
+    return ta - tb;
+  };
+  const airing = shows.filter(s => s.state !== 'upcoming').sort(byAir);
+  const upcoming = shows.filter(s => s.state === 'upcoming');
 
   const sect = (label, list) => list.length
     ? `<div class="sect">${label} <span class="sect-n">${list.length}</span></div>

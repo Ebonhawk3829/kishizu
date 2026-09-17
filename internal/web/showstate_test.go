@@ -54,6 +54,23 @@ func TestAiredTrainedShowUsesCycleState(t *testing.T) {
 	}
 }
 
+// TestMidSeasonShowIsNotUpcoming: "aired" means episode 1 has happened, not
+// the next unwatched episode. Mid-way through a season the next episode is
+// always in the future, and using it made every airing show read as unaired —
+// BLEACH at episode 9 was reported as "upcoming".
+func TestMidSeasonShowIsNotUpcoming(t *testing.T) {
+	// Aired + trained + hunting: normal mid-season state.
+	got, _ := showState([]cycle.State{cycle.Hunting}, true, true)
+	if got != string(cycle.Hunting) {
+		t.Errorf("mid-season hunting = %q, want %q", got, cycle.Hunting)
+	}
+	// Aired + untrained: needs training, not upcoming.
+	got, _ = showState([]cycle.State{cycle.UpToDate}, false, true)
+	if got != NeedsTraining {
+		t.Errorf("aired + untrained = %q, want %q", got, NeedsTraining)
+	}
+}
+
 // TestUpcomingBeatsNeedsTraining: a show can be both unaired and untrained.
 // Upcoming wins, because there is nothing to train on yet.
 func TestUpcomingBeatsNeedsTraining(t *testing.T) {
