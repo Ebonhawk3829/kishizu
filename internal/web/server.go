@@ -864,12 +864,12 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 		}
 	}
 
-	// The page's Release Date is the season's start. For a show that has not
+	// The page's Release Time is episode 1's air slot. For a show that has not
 	// premiered it is the only air information that exists, so record it as
 	// the first episode's air time rather than leaving the show dateless.
-	if !info.ReleaseDate.IsZero() {
-		if err := s.st.SetNextEpisode(sh.ID, 1, info.ReleaseDate); err != nil {
-			log.Printf("schedule: set release date %s: %v", sh.Slug, err)
+	if !info.AirsAt.IsZero() {
+		if err := s.st.SetNextEpisode(sh.ID, 1, info.AirsAt); err != nil {
+			log.Printf("schedule: set air time %s: %v", sh.Slug, err)
 		} else if err := s.st.ProjectAirDates(sh.ID); err != nil {
 			log.Printf("schedule: project %s: %v", sh.Slug, err)
 		}

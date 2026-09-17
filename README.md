@@ -180,10 +180,12 @@ From the page it also fills in:
 
 - the **season length**, which is otherwise typed by hand and usually left at 0
 - every **alternative name** (romaji, English, synonyms) as an alias
-- the **release date**, which is the show's first air time — and for a show
-  that hasn't premiered yet, the only air information that exists, since the
-  timetable only covers about a week
-- the **cover art**
+- the **release time**, a full timestamp with a UTC offset, which is episode 1's
+  broadcast slot. For a show that hasn't premiered it is the only air
+  information that exists, since the timetable only covers about a week. It is
+  the *raw* airing — the earliest native broadcast — so the hunt may open a few
+  hours before a subbed upload appears, which is harmless
+- the **cover art**, from the page's canonical `og:image`
 
 Japanese names and abbreviations are deliberately not imported. Nyaa release
 titles are romanised, so a Japanese name can never appear in one — and a short

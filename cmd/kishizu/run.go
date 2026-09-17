@@ -170,24 +170,27 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 				updated++
 			}
 		}
-		// Release art for finished seasons. The schedule drops a show once
-		// it stops airing, so anything with art that is no longer on the
-		// schedule is done — its cover is not coming back.
+		// Release art for finished seasons.
+		//
+		// The signal is "the next episode is past the season length", NOT
+		// "absent from the timetable". The timetable covers about a week, so
+		// a show that is on a break, between cours, or has not premiered yet
+		// is also absent — and stripping its art would be wrong. Inferring
+		// "season over" from absence is what silently deleted the art for
+		// every show not airing this week.
 		if artCache != nil {
-			onAir := map[string]bool{}
 			for _, sh := range shows {
-				if schedule.FindBySlug(sched, sh.Slug) != nil {
-					onAir[sh.CanonicalName] = true
+				if sh.ImageURL == "" || sh.MaxEpisode <= 0 {
+					continue
 				}
-			}
-			for _, sh := range shows {
-				if sh.ImageURL == "" || onAir[sh.CanonicalName] {
+				n, _, err := st.NextEpisode(sh.ID)
+				if err != nil || n <= sh.MaxEpisode {
 					continue
 				}
 				if err := artCache.Release(sh.ImageURL); err != nil {
 					log.Printf("art: release %s: %v", sh.CanonicalName, err)
 				} else {
-					log.Printf("art: released %s (season over)", sh.CanonicalName)
+					log.Printf("art: released %s (season complete)", sh.CanonicalName)
 					_ = st.SetImageURL(sh.ID, "")
 				}
 			}

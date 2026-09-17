@@ -3,6 +3,7 @@ package schedule
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // showPage is a trimmed copy of a real animeschedule.net show page. Only the
@@ -12,6 +13,7 @@ import (
 // it once for mobile and once for desktop, and the parser must not double up.
 const showPage = `<html><head>
 <title>Re:Zero kara Hajimeru Isekai Seikatsu 4 (Re:Zero - Starting Life in Another World 4) | AnimeSchedule</title>
+<meta property="og:image" content="https://img.animeschedule.net/production/assets/public/img/anime/jpg/default/re-zero-4-abc123.jpg">
 </head><body>
 <section id="information-section-small" class="section-content">
     <div class="information-content-wrapper"><h3>Type</h3>
@@ -24,6 +26,13 @@ const showPage = `<html><head>
     <div class="information-content-wrapper"><h3>Release Date</h3>
         <time id="start-date-mobile" itemprop="startDate" datetime="2026-04-08">Apr 08, 2026</time></div>
 </section>
+<div id="release-times-section" class="section-content">
+    <div class="release-time-wrapper release-time-wrapper-raw">
+        <h3 class="release-time-type-text release-time-type-raw">
+            <span class="release-time-episode-number">Episode 1</span> Raw: </h3>
+        <time id="release-time-raw" class="release-time" datetime="2026-04-08T23:00&#43;10:00">Wednesday 08 Apr, 11:00 PM</time>
+    </div>
+</div>
 <section id="alternative-names-section-small" class="section-content">
     <div class="alternative-name-wrapper">
         <span class="alternative-name-heading">Romaji</span>
@@ -86,10 +95,19 @@ func TestParseShow(t *testing.T) {
 	if sh.MyAnimeListID != 61316 {
 		t.Errorf("MyAnimeListID = %d, want 61316", sh.MyAnimeListID)
 	}
-	// Release Date is the season's start. For an unaired show it is the only
-	// air information that exists, since the timetable covers ~1 week.
-	if got := sh.ReleaseDate.Format("2006-01-02"); got != "2026-04-08" {
-		t.Errorf("ReleaseDate = %s, want 2026-04-08", got)
+	// Release Time is episode 1's slot, with an offset. The rendered text is
+	// localised to the viewer, so only the datetime attribute is trustworthy —
+	// and the offset is HTML-escaped, which parseAirsAt already handles.
+	if sh.AirsAt.IsZero() {
+		t.Fatal("AirsAt is zero; Release Time block not parsed")
+	}
+	if got := sh.AirsAt.Format(time.RFC3339); got != "2026-04-08T23:00:00+10:00" {
+		t.Errorf("AirsAt = %s, want 2026-04-08T23:00:00+10:00", got)
+	}
+	// It must carry a real time of day, not midnight: the hunt window is
+	// anchored on this, so a midnight anchor shifts it by most of a day.
+	if sh.AirsAt.Hour() == 0 && sh.AirsAt.Minute() == 0 {
+		t.Error("AirsAt has no time component; expected the broadcast slot")
 	}
 	// The title carries the parenthesised English gloss; it is the display
 	// name, not an alias, so it is kept whole.
@@ -161,6 +179,37 @@ func TestJapaneseAndAbbreviationExcludedFromAliases(t *testing.T) {
 		if !found {
 			t.Errorf("alias %q missing from Aliases()", name)
 		}
+	}
+}
+
+// TestArtComesFromOGImage: the canonical poster is the og:image meta tag.
+//
+// Scraping an /anime/jpg/ URL by document order is a guess — the page is full
+// of them (related shows, similar-anime thumbnails) and the first one is the
+// poster only by accident of layout.
+func TestArtComesFromOGImage(t *testing.T) {
+	sh, err := ParseShow(strings.NewReader(showPage), "slug")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	want := "https://img.animeschedule.net/production/assets/public/img/anime/jpg/default/re-zero-4-abc123.jpg"
+	if sh.ImageURL != want {
+		t.Errorf("ImageURL = %q, want %q", sh.ImageURL, want)
+	}
+}
+
+// TestArtFallsBackToPosterPath: if og:image is ever absent the poster is still
+// findable by its path. Last resort, not the main path.
+func TestArtFallsBackToPosterPath(t *testing.T) {
+	page := `<html><head><title>Show | AnimeSchedule</title></head><body>
+<img src="https://img.animeschedule.net/production/assets/public/img/anime/jpg/default/some-show-1a2b3c.jpg?w=220">
+</body></html>`
+	sh, err := ParseShow(strings.NewReader(page), "slug")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if sh.ImageURL == "" {
+		t.Error("ImageURL empty; expected the poster-path fallback")
 	}
 }
 

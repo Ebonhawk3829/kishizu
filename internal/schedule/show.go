@@ -35,12 +35,21 @@ type Show struct {
 	Type string
 	// Status is the airing status: "Ongoing", "Finished", "Upcoming".
 	Status string
-	// ReleaseDate is when the season starts, from the page's Release Date
-	// field. This is the show's first air time, and for a show that has not
-	// premiered yet it is the ONLY air information available — the timetable
-	// only covers a ~1 week window, so a show premiering months out is simply
-	// not on it. Zero when the page does not say.
-	ReleaseDate time.Time
+	// AirsAt is when episode 1 airs, from the page's Release Time block — a
+	// full timestamp with a UTC offset, e.g. 2027-01-10T19:00+11:00.
+	//
+	// This is the show's first air time, and for a show that has not premiered
+	// it is the only air information available: the timetable covers about a
+	// week, so a show premiering months out is simply not on it.
+	//
+	// It is the RAW broadcast time — the earliest native airing. Subbed uploads
+	// follow it, so it is the right anchor for "when might a release appear".
+	// Starting the hunt a few hours early is harmless; the training is what
+	// decides which release is actually correct.
+	//
+	// Zero when the page has no Release Time block. A schedule site does not
+	// list a show without a slot, so in practice that means no usable page.
+	AirsAt time.Time
 	// Season is the broadcast season, e.g. "Spring 2026".
 	Season string
 	// Names are the alternative titles, keyed by kind: Romaji, English,
@@ -153,9 +162,18 @@ var (
 		`(?s)<h3>Status</h3>\s*<div[^>]*>([^<]+)</div>`)
 	reType = regexp.MustCompile(
 		`(?s)<h3>Type</h3>\s*<a[^>]*>([^<]+)</a>`)
-	// Release Date is a bare date with no time: datetime="2027-01-10".
+	// Release Time carries the full slot with an offset. The rendered text is
+	// localised to the viewer ("07:00 PM" plus a "converted to your timezone"
+	// note), so only the datetime attribute is trustworthy.
+	//
+	// The offset is HTML-escaped: "2027-01-10T19:00&#43;11:00".
 	reRelease = regexp.MustCompile(
-		`(?s)<h3>Release Date</h3>\s*<time[^>]*datetime="([^"]+)"`)
+		`(?s)<time id="release-time-raw"[^>]*datetime="([^"]+)"`)
+	// The canonical poster. Preferred over scraping an /anime/jpg/ URL because
+	// the page contains many of those (related shows, similar-anime thumbs)
+	// and picking one by document order is a guess.
+	reOGImage = regexp.MustCompile(
+		`<meta[^>]+property="og:image"[^>]+content="([^"]+)"`)
 	reSeason = regexp.MustCompile(
 		`(?s)<h3>Season</h3>\s*<a[^>]*>([^<]+)</a>`)
 	// Alternative names are a flat sequence of headings and values in document
@@ -208,7 +226,10 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 		sh.Type = strings.TrimSpace(html.UnescapeString(m[1]))
 	}
 	if m := reRelease.FindStringSubmatch(s); m != nil {
-		sh.ReleaseDate = parseDate(m[1])
+		sh.AirsAt = parseAirsAt(m[1])
+	}
+	if m := reOGImage.FindStringSubmatch(s); m != nil {
+		sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m[1]), "&amp;", "&")
 	}
 	if m := reSeason.FindStringSubmatch(s); m != nil {
 		sh.Season = strings.TrimSpace(html.UnescapeString(m[1]))
@@ -219,8 +240,12 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 	if m := reMAL.FindStringSubmatch(s); m != nil {
 		sh.MyAnimeListID, _ = strconv.Atoi(m[1])
 	}
-	if m := reShowImg.FindString(s); m != "" {
-		sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m), "&amp;", "&")
+	// Fallback only: og:image is authoritative, but if it is ever absent the
+	// poster is still findable by its path. Last resort, not the main path.
+	if sh.ImageURL == "" {
+		if m := reShowImg.FindString(s); m != "" {
+			sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m), "&amp;", "&")
+		}
 	}
 
 	// Walk headings and values in document order. Each value belongs to the
@@ -252,22 +277,6 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 		return nil, fmt.Errorf("no title parsed from %s (markup may have changed)", ShowURL(slug))
 	}
 	return sh, nil
-}
-
-// parseDate reads the bare YYYY-MM-DD the Release Date field carries.
-//
-// No time component and no offset, so it is parsed as UTC midnight. That is
-// the season's start day; the precise weekly slot only becomes knowable once
-// the show appears on the timetable, which is what the daily refresh is for.
-func parseDate(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse("2006-01-02", s); err == nil {
-		return t
-	}
-	return time.Time{}
 }
 
 // SlugFromURL extracts the animeschedule slug from a URL or bare slug.
