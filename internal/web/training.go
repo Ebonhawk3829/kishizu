@@ -441,6 +441,16 @@ func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
 	if res.Matched {
 		resolved = res.Episode
 	}
+
+	// Refuse when no episode could be read. A quick accept without one teaches
+	// nothing: the offset comes from the episode attribute, so "good" on a
+	// release with no number is a no-op that reports success. Those belong in
+	// the detail view, where the user supplies the number themselves.
+	if resolved <= 0 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf(
+			"no episode number readable from this title, so there is nothing to match — grade it in detail instead"))
+		return
+	}
 	g := train.InspectWithConfidence(req.Title, resolved, res.Confidence)
 
 	prefer := strings.EqualFold(req.Mode, "preferred")

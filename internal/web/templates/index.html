@@ -247,6 +247,13 @@
   .grades button.g-wrong.sel {
     background: oklch(0.72 0.14 25 / .16); border-color: var(--bad); color: var(--bad);
   }
+  .grades button.g-absent.sel {
+    background: oklch(0.6 0.02 285 / .2); border-color: var(--t3); color: var(--t3);
+  }
+  /* A held grade keeps a coloured border on the row until saved, so answered
+     attributes are visible at a glance rather than remembered. */
+  .attr.held input { border-color: var(--accent); }
+  .attr.held .attr-name { color: var(--accent); }
 
   .offsets { font-size: 13px; color: var(--t3); margin-top: 16px; }
   .offsets code { color: var(--t1); font-size: 13px; }
@@ -568,9 +575,13 @@ function renderTrain() {
       </div>
       <div class="w">${escapeHtml(c.why)} &middot; ${c.seeders} seeders &middot; ${escapeHtml(c.resolution || '?')} ${escapeHtml(c.codec || '')}</div>
       ${noveltyNote(c)}
+      ${c.episode
+        ? ''
+        : '<div class="w" style="color:var(--warn)">no episode number readable — use Grade in detail and supply one</div>'}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn" onclick="acceptAll(${c.index}, 'preferred')">Correct &amp; preferred</button>
-        <button class="btn ghost" onclick="acceptAll(${c.index}, 'parse')">Parse correct</button>
+        ${c.episode ? `
+          <button class="btn" onclick="acceptAll(${c.index}, 'preferred')">Correct &amp; preferred</button>
+          <button class="btn ghost" onclick="acceptAll(${c.index}, 'parse')">Parse correct</button>` : ''}
         <button class="btn ghost" onclick="gradeDetail(${c.index})">Grade in detail</button>
       </div>
     </div>
@@ -618,20 +629,26 @@ async function gradeDetail(index) {
 
 function renderGradePanel(g, title) {
   const box = el('candidates');
+  // Verdicts are held on the row, not popped up: a held grade keeps a coloured
+  // border until saved, so answered attributes are visible at a glance.
+  //
+  // "Acceptable" is deliberately not offered here. This panel is about whether
+  // the parse is right; preference lives in the quick-accept buttons, and
+  // mixing "is it correct" with "do I want it" on the same buttons conflates
+  // two different questions.
   box.innerHTML = `
     <div class="cand">
       <div class="t">${escapeHtml(title)}</div>
       ${g.attrs.map(a => `
-        <div class="attr">
-          <span class="lbl">${escapeHtml(a.label)}</span>
+        <div class="attr" id="attr-${a.key}">
+          <span class="attr-name">${escapeHtml(a.label)}</span>
           ${a.present
             ? `<input id="av-${a.key}" value="${escapeHtml(a.value)}" ${a.editable ? '' : 'readonly'}>`
-            : `<span class="w">not in title</span>`}
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button onclick="setGrade('${a.key}','good')">correct</button>
-            <button onclick="setGrade('${a.key}','absent')">not in title</button>
-            <button onclick="setGrade('${a.key}','acceptable')">acceptable</button>
-            <button onclick="setGrade('${a.key}','wrong')">bad</button>
+            : `<span class="attr-val absent">not in title</span>`}
+          <div class="grades">
+            <button class="g-good" onclick="setGrade('${a.key}','good')">correct</button>
+            <button class="g-absent" onclick="setGrade('${a.key}','absent')">not in title</button>
+            <button class="g-wrong" onclick="setGrade('${a.key}','wrong')">bad</button>
           </div>
         </div>`).join('')}
       <div style="display:flex;gap:8px;margin-top:14px">
@@ -642,10 +659,13 @@ function renderGradePanel(g, title) {
   window._grading = { title, attrs: g.attrs, grades: {} };
 }
 
+// A held grade: the row keeps its coloured border until saved, so answered
+// attributes are visible at a glance rather than remembered.
 function setGrade(key, grade) {
   if (!window._grading) return;
   window._grading.grades[key] = grade;
-  toast(key + ': ' + grade);
+  const row = el('attr-' + key);
+  if (row) row.classList.add('held');
 }
 
 async function submitGrades() {
