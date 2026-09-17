@@ -114,15 +114,6 @@
   }
   .row .sub b { color: var(--t2); font-weight: 450; }
 
-  /* Upcoming shows have no cover art and need nothing from the user, so the
-     section drops the art column and tightens up. The page's visual weight
-     stays on Airing, which is where the attention belongs. */
-  .row.noart {
-    grid-template-columns: minmax(0, 1fr) 168px 300px; padding: 15px 12px 15px 0;
-  }
-  .row.noart .name { font-size: 15px; }
-  .row.noart .sub { font-size: 13px; }
-
   /* ── status: dot + word, own column so they align down the page ─────── */
   .st { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; white-space: nowrap; }
   .st .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
@@ -427,9 +418,9 @@ async function loadShows() {
   const airing = shows.filter(s => s.next_schedule).sort(byAir);
   const upcoming = shows.filter(s => !s.next_schedule);
 
-  const sect = (label, list, noart) => list.length
+  const sect = (label, list) => list.length
     ? `<div class="sect">${label} <span class="sect-n">${list.length}</span></div>
-       ${list.map(s => card(s, noart)).join('')}` : '';
+       ${list.map(s => card(s)).join('')}` : '';
 
   if (!shows.length) {
     el('shows').innerHTML = `
@@ -439,7 +430,7 @@ async function loadShows() {
       </div>`;
     return;
   }
-  el('shows').innerHTML = sect('Airing', airing, false) + sect('Upcoming', upcoming, true);
+  el('shows').innerHTML = sect('Airing', airing) + sect('Upcoming', upcoming);
   loadSummary();
 }
 
@@ -460,9 +451,7 @@ async function addShow() {
 }
 
 // One show row. Status is the hero; everything else is quieter than it.
-// noart drops the cover-art column — used for Upcoming, which has no art and
-// needs nothing from the user.
-function card(s, noart) {
+function card(s) {
   const st = s.state || 'unknown';
   const cls = {
     'ready to watch':   'st-ok',
@@ -505,12 +494,14 @@ function card(s, noart) {
   const untrained = (s.trained || st === 'needs training' || st === 'upcoming') ? ''
     : ' &middot; <span class="untrained">untrained</span>';
 
-  const art = (s.image_url && !noart)
+  // Art comes from the show page at add time, so even an unaired show has a
+  // poster. The placeholder keeps rows aligned when one genuinely has none.
+  const art = s.image_url
     ? `<img class="art" src="${escapeHtml(s.image_url)}" loading="lazy" alt="">`
-    : (noart ? '' : `<div class="art"></div>`);
+    : `<div class="art"></div>`;
 
   return `
-  <div class="row ${noart ? 'noart' : ''}" id="row-${s.id}">
+  <div class="row" id="row-${s.id}">
     ${art}
     <div>
       <div class="name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</div>
