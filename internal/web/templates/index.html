@@ -694,9 +694,6 @@ function cancelTrain() {
 })();
 
 loadShows();
-</script>
-</body>
-</html>
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -786,3 +783,6 @@ function askConfirm(rowId, question, onYes) {
   no.onclick = restore;
   yes.focus();
 }
+</script>
+</body>
+</html>
