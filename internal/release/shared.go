@@ -12,18 +12,27 @@ import (
 	"strings"
 )
 
-// ResolutionRank orders resolutions so a floor can be compared numerically.
+// ResQuality orders resolutions by ascending quality, for comparing a release
+// against a floor. 0 means unknown.
 //
-// Shared by the trainer (which writes the floor) and the listener (which
-// enforces it). They must agree, so the ordering lives here rather than being
-// duplicated in each.
-var ResolutionRank = map[string]int{
-	"480p": 1, "720p": 2, "1080p": 3, "2160p": 4, "4k": 4,
+// Deliberately separate from ResolutionPenalty in rules.go. The penalty map
+// ranks by *preference*, which is not the same thing: 2160p is acceptable but
+// not preferred, so it carries a small penalty while still being higher quality
+// than 1080p. Deriving one from the other conflates the two and makes a floor
+// comparison reject resolutions it should accept.
+var ResQuality = map[string]int{
+	"480p":  1,
+	"720p":  2,
+	"1080p": 3,
+	"1440p": 4,
+	"2160p": 5,
+	"4k":    5,
 }
 
-// ResRank returns the ordering of a resolution string, or 0 when unknown.
+// ResRank returns the quality ordering of a resolution string, or 0 when
+// unknown.
 func ResRank(s string) int {
-	return ResolutionRank[strings.ToLower(strings.TrimSpace(s))]
+	return ResQuality[strings.ToLower(strings.TrimSpace(s))]
 }
 
 // NormaliseGroup lowercases and strips the punctuation release groups use

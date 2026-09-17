@@ -249,13 +249,26 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		}
 	}
 
-	// 4. Hard filters.
+	// 4. Global rules. These hold for every show, so they are checked before
+	// the per-show filters: a batch or a sub-1080p release is never wanted,
+	// and no per-show preference should be able to override that.
+	if r := release.Parse(it.Title); func() bool {
+		rejected, why := release.RuleReject(&r)
+		if rejected {
+			d.Reason = why
+		}
+		return rejected
+	}() {
+		return d
+	}
+
+	// 5. Hard filters.
 	if why := applyFilters(filters, it.Title); why != "" {
 		d.Reason = why
 		return d
 	}
 
-	// 5. Episode must be readable. A release whose episode number cannot be
+	// 6. Episode must be readable. A release whose episode number cannot be
 	// read cannot be grabbed: there is nothing to record it against, and it
 	// would bypass every per-episode guard above.
 	if res.Episode <= 0 {
@@ -263,7 +276,7 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		return d
 	}
 
-	// 6. Air-date guard. If the show's cadence is known, a release published
+	// 7. Air-date guard. If the show's cadence is known, a release published
 	// well before this week's air date is for an older episode — either a
 	// mis-numbered back-catalogue upload or a batch. Rejecting it prevents
 	// grabbing the wrong episode during a show's first run.
@@ -275,7 +288,7 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		return d
 	}
 
-	// 7. Confidence gate. Below this the model is guessing, and a wrong guess
+	// 8. Confidence gate. Below this the model is guessing, and a wrong guess
 	// downloads the wrong episode — worse than downloading nothing.
 	if res.Confidence < match.ConfidentThreshold {
 		d.Reason = fmt.Sprintf("confidence %.2f below %.2f", res.Confidence, match.ConfidentThreshold)
@@ -400,8 +413,16 @@ func Best(decisions []Decision, prefs []store.Preference) []Decision {
 }
 
 // better reports whether candidate a beats the current pick.
+//
+// Ordering is: group preference, then the global rules, then seeders, then
+// recency. Group comes first because which group posted a release says more
+// about its quality than any attribute of the file does.
 func better(a, b Decision, prefs []store.Preference) bool {
-	ra, rb := rankOf(a, prefs), rankOf(b, prefs)
+	ga, gb := groupRank(a, prefs), groupRank(b, prefs)
+	if ga != gb {
+		return ga < gb
+	}
+	ra, rb := ruleRank(a), ruleRank(b)
 	if ra != rb {
 		return ra < rb
 	}
@@ -411,31 +432,41 @@ func better(a, b Decision, prefs []store.Preference) bool {
 	return a.Item.PubDate.After(b.Item.PubDate)
 }
 
-// rankOf sums the preference ranks a release incurs. A release matching a
-// preferred codec, group, service and audio accumulates 0; one matching
-// demoted values accumulates more.
-func rankOf(d Decision, prefs []store.Preference) int {
+// groupRank is where a release's group sits in the preferred order.
+//
+// Promoted to the primary ordering: the user's group preference is the
+// strongest signal available, stronger than codec or resolution, because a
+// good group is consistently good and a bad one is consistently bad.
+// Unlisted groups sort last but are not excluded — the list is a ranking, not
+// an allowlist.
+func groupRank(d Decision, prefs []store.Preference) int {
 	r := release.Parse(d.Item.Title)
-	sum := 0
+	best := -1
 	for _, p := range prefs {
-		var match bool
-		switch p.Kind {
-		case "group":
-			match = strings.EqualFold(r.Group, p.Value)
-		case "codec":
-			match = strings.EqualFold(r.Codec, p.Value)
-		case "service":
-			match = strings.EqualFold(r.Service, p.Value)
-		case "audio":
-			match = strings.EqualFold(r.Audio, p.Value)
-		case "source":
-			match = strings.EqualFold(r.Source, p.Value)
+		if p.Kind != "group" {
+			continue
 		}
-		if match {
-			sum += p.Rank
+		if !strings.EqualFold(r.Group, p.Value) {
+			continue
+		}
+		if best < 0 || p.Rank < best {
+			best = p.Rank
 		}
 	}
-	return sum
+	if best < 0 {
+		return 1000 // unlisted group: last, but still eligible
+	}
+	return best
+}
+
+// ruleRank scores a release against the global rules: codec, resolution, dub
+// and uncensored. Lower is better.
+//
+// These are constants, not per-release grades. Nobody wants a batch or a dub,
+// and x264 beats a re-encoded x265, so asking per release was wasted effort.
+func ruleRank(d Decision) int {
+	r := release.Parse(d.Item.Title)
+	return release.RuleRank(&r)
 }
 
 // FilterPreferences reduces grab decisions to one per (show, episode), keeping

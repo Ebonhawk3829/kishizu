@@ -343,12 +343,51 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 		resolved = res.Episode
 	}
 
+	// Fill any field the parser missed using the learned vocabulary, so the
+	// panel shows what kishizu will actually see once taught — not what the
+	// dumb parser sees in isolation.
+	parsed := release.Parse(title)
+	s.vocab.ApplyVocabulary(&parsed)
+
 	writeJSON(w, map[string]any{
 		"release": train.InspectWithConfidence(title, resolved, res.Confidence),
+		"parsed":  parsed,
 		"episode": ep,
 		"matched": res.Matched,
 		"why":     res.Reason,
 	})
+}
+
+// handleTrainVocab records that a title token means a canonical value.
+//
+// This is the point of training. Offsets are per-group and saturate after one
+// example; vocabulary compounds — one correction makes every future release
+// using that spelling readable, for every group and every show.
+func (s *Server) handleTrainVocab(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Kind      string `json:"kind"`      // resolution | codec | source | service | audio
+		Token     string `json:"token"`     // as written in the title
+		Canonical string `json:"canonical"` // what kishizu calls it
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Kind = strings.TrimSpace(req.Kind)
+	req.Token = strings.TrimSpace(req.Token)
+	req.Canonical = strings.TrimSpace(req.Canonical)
+	if req.Kind == "" || req.Token == "" || req.Canonical == "" {
+		writeErr(w, http.StatusBadRequest,
+			fmt.Errorf("kind, token and canonical are all required"))
+		return
+	}
+	if err := s.st.LearnVocabulary(req.Kind, req.Token, req.Canonical); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.vocab.Learn(req.Kind, req.Token, req.Canonical)
+	log.Printf("vocabulary: %s %q -> %q", req.Kind, req.Token, req.Canonical)
+	writeJSON(w, map[string]any{"learned": req.Token + " -> " + req.Canonical})
 }
 
 // handleTrainGrade applies per-attribute verdicts.

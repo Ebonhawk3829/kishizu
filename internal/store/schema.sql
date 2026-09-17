@@ -37,6 +37,21 @@ CREATE TABLE IF NOT EXISTS show (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_show_anilist ON show(anilist_id) WHERE anilist_id IS NOT NULL;
 
+-- Vocabulary: the words release groups actually use, mapped to the canonical
+-- values kishizu reasons about.
+--
+-- The parser knows a fixed word list, so a release written in an unexpected
+-- vocabulary reads as nothing and cannot be ranked. Training supplies both
+-- halves — the canonical value and the token that meant it — and the pair is
+-- recorded here. One correction makes every future release using that token
+-- readable, for every group and every show.
+CREATE TABLE IF NOT EXISTS vocabulary (
+    kind      TEXT NOT NULL, -- resolution | codec | source | service | audio
+    token     TEXT NOT NULL, -- as written in the title, e.g. "AVC"
+    canonical TEXT NOT NULL, -- what kishizu calls it, e.g. "h.264"
+    PRIMARY KEY (kind, token)
+);
+
 CREATE TABLE IF NOT EXISTS alias (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     show_id INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,

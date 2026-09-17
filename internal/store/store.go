@@ -329,6 +329,45 @@ func (s *Store) AddAliasFrom(showID int64, alias, source string) error {
 	return err
 }
 
+// LearnVocabulary records that a title token means a canonical value.
+//
+// Both halves are required. The canonical value alone tells us the answer but
+// not which word produced it, so there would be nothing to apply to the next
+// release that uses the same spelling.
+func (s *Store) LearnVocabulary(kind, token, canonical string) error {
+	token = strings.TrimSpace(token)
+	canonical = strings.TrimSpace(canonical)
+	if token == "" || canonical == "" {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO vocabulary (kind, token, canonical) VALUES (?, ?, ?)
+		 ON CONFLICT(kind, token) DO UPDATE SET canonical = excluded.canonical`,
+		kind, token, strings.ToLower(canonical))
+	return err
+}
+
+// Vocabulary loads every learned synonym, grouped by kind.
+func (s *Store) Vocabulary() (map[string]map[string]string, error) {
+	rows, err := s.db.Query(`SELECT kind, token, canonical FROM vocabulary`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]map[string]string{}
+	for rows.Next() {
+		var kind, token, canonical string
+		if err := rows.Scan(&kind, &token, &canonical); err != nil {
+			return nil, err
+		}
+		if out[kind] == nil {
+			out[kind] = map[string]string{}
+		}
+		out[kind][token] = canonical
+	}
+	return out, rows.Err()
+}
+
 // SetSlug records the animeschedule.net slug for a show.
 func (s *Store) SetSlug(showID int64, slug string) error {
 	_, err := s.db.Exec(`UPDATE show SET slug = ? WHERE id = ?`, slug, showID)

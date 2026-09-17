@@ -52,6 +52,9 @@ type Server struct {
 	// art caches cover art on disk so the UI does not depend on the
 	// schedule's CDN at page-load time. Optional; nil means no art.
 	art *art.Cache
+	// vocab holds the learned title vocabulary, so a release written in an
+	// unexpected spelling still resolves. Never nil after New.
+	vocab *release.Vocabulary
 }
 
 // New builds the server and parses the embedded templates.
@@ -60,7 +63,15 @@ func New(st *store.Store) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	return &Server{st: st, tmpl: tmpl}, nil
+	srv := &Server{st: st, tmpl: tmpl, vocab: release.NewVocabulary()}
+	// Seed the vocabulary from the database. A failure here is not fatal: the
+	// tool still works, it just reads fewer titles until it is taught again.
+	if entries, err := st.Vocabulary(); err == nil {
+		srv.vocab.Load(entries)
+	} else {
+		log.Printf("vocabulary: load: %v", err)
+	}
+	return srv, nil
 }
 
 // SetWatch attaches the watch handler. Optional: without it, /api/watched
@@ -108,6 +119,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/train/reset", s.handleTrainReset)
 	mux.HandleFunc("POST /api/train/teach", s.handleTrainTeach)
 	mux.HandleFunc("POST /api/train/accept-all", s.handleTrainAcceptAll)
+	mux.HandleFunc("POST /api/train/vocab", s.handleTrainVocab)
 	mux.HandleFunc("POST /api/train/inspect", s.handleTrainInspect)
 	mux.HandleFunc("POST /api/train/grade", s.handleTrainGrade)
 

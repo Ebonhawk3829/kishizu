@@ -277,6 +277,23 @@
      attributes are visible at a glance rather than remembered. */
   .attr.held input { border-color: var(--accent); }
   .attr.held .attr-name { color: var(--accent); }
+  /* The correction pass: a tick for "the parser got this right", and the two
+     fields that appear when it did not. */
+  .attr .tick {
+    display: inline-flex; align-items: center; gap: 6px; margin-left: auto;
+    font-size: 12.5px; color: var(--t3); cursor: pointer; white-space: nowrap;
+  }
+  .attr .tick input { width: auto; margin: 0; cursor: pointer; }
+  .attr .fix {
+    display: flex; gap: 8px; width: 100%; margin-top: 8px; padding-left: 110px;
+  }
+  .attr .fix.hidden { display: none; }
+  .attr .fix select, .attr .fix input {
+    padding: 6px 9px; font-size: 13px; background: var(--raise);
+    border: 1px solid var(--line); border-radius: 7px; color: var(--t1);
+  }
+  .attr .fix select { width: 150px; }
+  .attr .fix input { flex: 1; min-width: 0; }
 
   .offsets { font-size: 13px; color: var(--t3); margin-top: 16px; }
   .offsets code { color: var(--t1); font-size: 13px; }
@@ -671,128 +688,139 @@ async function gradeDetail(index) {
   } catch (e) { fieldError('train-error', e.message); }
 }
 
-// Grading runs in two rounds, because "is this what the title says" and "do I
-// want this" are different questions asked of different objects — the parser
-// and the release.
+// The correction pass. Training now teaches exactly two things: the offset for
+// a group, and the vocabulary a group writes in. Everything else — resolution,
+// codec, batch, dub, uncensored — is a global rule that holds for every show,
+// so it is never graded per release.
 //
-//   Round 1 verifies the parse: per attribute, correct / not in title / it is
-//   actually this other value. Output: verified facts about the release.
+// Each attribute is presented as the parsed value plus a "correct" tick. The
+// tick is on by default: the common case is that the parser is right, so the
+// user only acts where it is wrong. Unticking reveals two fields:
 //
-//   Round 2 grades preference: given those verified facts, per attribute,
-//   preferred / acceptable / bad. Output: filters and preferences.
+//   should be   — the canonical value, from a dropdown of known values
+//   title says  — the token in the title that meant it, free text
 //
-// Doing both at once meant "bad" on a resolution both disputed the parse and
-// wrote a filter — so a parser error could silently become a rule about what
-// to download.
+// Both are needed. The canonical value alone gives the answer but not which
+// word produced it, so there would be nothing to apply to the next release
+// that uses the same spelling. The pair is what gets learned.
 function renderGradePanel(g, title) {
   const box = el('candidates');
-  const prefs = ['group', 'resolution', 'codec', 'source', 'service', 'audio'];
   box.innerHTML = `
     <div class="cand">
       <div class="t">${escapeHtml(title)}</div>
-
-      <p class="hint" style="margin-top:14px"><b>Round 1 — verify the parse.</b> Does the title actually say this?</p>
-      ${g.attrs.map(a => `
-        <div class="attr" id="attr-${a.key}">
-          <span class="attr-name">${escapeHtml(a.label)}</span>
-          ${a.present
-            ? `<input id="av-${a.key}" value="${escapeHtml(a.value)}" ${a.editable ? '' : 'readonly'}>`
-            : `<span class="attr-val absent">not in title</span>`}
-          <div class="grades">
-            <button class="g-good" onclick="setGrade('${a.key}','good')">correct</button>
-            <button class="g-absent" onclick="setGrade('${a.key}','absent')">not in title</button>
-            <button class="g-wrong" onclick="setGrade('${a.key}','wrong')">bad</button>
-          </div>
-        </div>`).join('')}
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn" onclick="submitGrades()">Confirm parse</button>
+      <p class="hint" style="margin-top:12px">
+        Confirm what kishizu read. Untick anything wrong and say what it should
+        be — and what the title actually calls it, so that can be learned too.
+      </p>
+      ${g.attrs.map(a => attrRow(a)).join('')}
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn" onclick="submitCorrections()">Confirm parse</button>
         <button class="btn ghost" onclick="renderTrain()">Back</button>
       </div>
+    </div>`;
+  window._grading = { title, attrs: g.attrs, corrections: {} };
+}
 
-      <p class="hint" style="margin-top:22px"><b>Round 2 — grade preferences.</b> Given the verified facts, what do you want? Unlocks once round 1 is confirmed.</p>
-      ${g.attrs.filter(a => a.present && prefs.includes(a.key)).map(a => `
-        <div class="attr pref" id="pref-${a.key}">
-          <span class="attr-name">${escapeHtml(a.label)}</span>
-          <span class="attr-val" id="pv-${a.key}">${escapeHtml(a.value)}</span>
-          <div class="grades">
-            <button disabled onclick="setPref('${a.key}','good')">preferred</button>
-            <button disabled onclick="setPref('${a.key}','acceptable')">acceptable</button>
-            <button disabled onclick="setPref('${a.key}','wrong')">reject</button>
-          </div>
-        </div>`).join('')}
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn" id="pref-save" onclick="submitPrefs()" disabled>Save preferences</button>
+// Known values per attribute, for the "should be" dropdown. N/A is the value
+// for "the title does not say this" — absence is just another value, not a
+// separate verdict.
+const ATTR_VALUES = {
+  resolution: ['480p', '720p', '1080p', '1440p', '2160p', '4k', 'N/A'],
+  codec:      ['x264', 'h.264', 'x265', 'hevc', 'av1', 'N/A'],
+  source:     ['web-dl', 'webrip', 'web', 'bd', 'blu-ray', 'remux', 'N/A'],
+  service:    ['nf', 'amzn', 'cr', 'dsnp', 'hulu', 'bili', 'iqiyi', 'adn',
+               'hidive', 'funimation', 'wakanim', 'max', 'hbo', 'N/A'],
+  audio:      ['aac', 'eac3', 'ddp', 'ac3', 'flac', 'opus', 'mp3', 'truehd',
+               'dts', 'N/A'],
+  batch:      ['present', 'N/A'],
+  uncensored: ['present', 'N/A'],
+};
+
+function attrRow(a) {
+  const opts = ATTR_VALUES[a.key] || [];
+  const val = a.present ? a.value : 'N/A';
+  return `
+    <div class="attr" id="attr-${a.key}">
+      <span class="attr-name">${escapeHtml(a.label)}</span>
+      <span class="attr-val ${a.present ? '' : 'absent'}">${escapeHtml(val)}</span>
+      <label class="tick">
+        <input type="checkbox" checked onchange="toggleCorrect('${a.key}')">
+        correct
+      </label>
+      <div class="fix hidden" id="fix-${a.key}">
+        <select id="sb-${a.key}" onchange="recordCorrection('${a.key}')">
+          <option value="">should be…</option>
+          ${opts.map(o => `<option value="${escapeHtml(o)}"${o === val ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+        </select>
+        <input id="ts-${a.key}" placeholder="title says…"
+               oninput="recordCorrection('${a.key}')">
       </div>
     </div>`;
-  window._grading = { title, attrs: g.attrs, grades: {}, prefs: {} };
 }
 
-// A held verdict: the button keeps its coloured state and the attribute name
-// turns accent until the round is saved, so what has been answered is visible
-// at a glance.
-function setGrade(key, grade) {
-  if (!window._grading) return;
-  window._grading.grades[key] = grade;
+function toggleCorrect(key) {
   const row = el('attr-' + key);
-  if (!row) return;
-  row.classList.add('held');
-  row.querySelectorAll('.grades button').forEach(b => {
-    b.classList.toggle('sel', b.classList.contains('g-' + grade));
-  });
-}
-
-function setPref(key, grade) {
-  if (!window._grading) return;
-  window._grading.prefs[key] = grade;
-  const row = el('pref-' + key);
-  if (!row) return;
-  row.classList.add('held');
-  row.querySelectorAll('.grades button').forEach(b => {
-    b.classList.toggle('sel', b.classList.contains('g-' + grade));
-  });
-}
-
-// Round 1 only. Confirming the parse makes no statement about preference, so
-// it writes offsets and aliases and nothing else. Round 2 unlocks on success.
-async function submitGrades() {
-  const g = window._grading;
-  if (!g) return;
-  for (const a of g.attrs) {
-    const f = el('av-' + a.key);
-    if (f) a.value = f.value;
+  const box = el('fix-' + key);
+  const ticked = row.querySelector('input[type=checkbox]').checked;
+  box.classList.toggle('hidden', ticked);
+  row.classList.toggle('held', !ticked);
+  if (ticked) {
+    delete window._grading.corrections[key];
+  } else {
+    recordCorrection(key);
   }
-  try {
-    const r = await api('/api/train/grade', {
-      title: g.title, grades: g.grades, release: { title: g.title, attrs: g.attrs },
-    });
-    state = r.state;
-    // Verified values are now facts; round 2 grades against them.
-    g.attrs.forEach(a => {
-      const pv = el('pv-' + a.key);
-      if (pv && a.present) pv.textContent = a.value;
-    });
-    document.querySelectorAll('#candidates .pref .grades button').forEach(b => b.disabled = false);
-    el('pref-save').disabled = false;
-    // Round 1 is settled; its buttons lock so the two rounds cannot be mixed.
-    document.querySelectorAll('#candidates .attr:not(.pref) .grades button').forEach(b => b.disabled = true);
-    toast('Parse confirmed. Round 2 unlocked — grade preferences below.');
-    if (r.notes && r.notes.length) toast(r.notes.join('; '));
-  } catch (e) { fieldError('train-error', e.message); }
 }
 
-// Round 2. Preference grades only; they write filters and preferences against
-// the values confirmed in round 1.
-async function submitPrefs() {
+// A correction is only learnable once both halves are present: the canonical
+// value and the token that meant it.
+function recordCorrection(key) {
   const g = window._grading;
   if (!g) return;
+  const canonical = el('sb-' + key).value;
+  const token = el('ts-' + key).value.trim();
+  if (!canonical) {
+    delete g.corrections[key];
+    return;
+  }
+  g.corrections[key] = { canonical, token };
+}
+
+async function submitCorrections() {
+  const g = window._grading;
+  if (!g) return;
+
+  // Teach the vocabulary first. One correction makes every future release
+  // using that spelling readable, for every group and every show.
+  for (const [key, c] of Object.entries(g.corrections)) {
+    if (!c.token) continue; // no token supplied: fix this release only
+    try {
+      await api('/api/train/vocab', {
+        kind: key, token: c.token, canonical: c.canonical,
+      });
+    } catch (e) { fieldError('train-error', e.message); return; }
+  }
+
+  // Then apply the corrected values, so the offset and aliases are right.
+  const grades = {};
+  for (const a of g.attrs) {
+    const c = g.corrections[a.key];
+    if (c) {
+      a.value = c.canonical === 'N/A' ? '' : c.canonical;
+      a.present = c.canonical !== 'N/A';
+      grades[a.key] = a.present ? 'good' : 'absent';
+    } else if (a.present) {
+      grades[a.key] = 'good';
+    }
+  }
+
   try {
     const r = await api('/api/train/grade', {
-      title: g.title, grades: g.prefs, release: { title: g.title, attrs: g.attrs },
+      title: g.title, grades, release: { title: g.title, attrs: g.attrs },
     });
     state = r.state;
     window._grading = null;
     renderTrain();
-    toast((r.notes || []).join('; ') || 'Preferences saved.');
+    toast((r.notes || []).join('; ') || 'Parse confirmed.');
     loadShows();
   } catch (e) { fieldError('train-error', e.message); }
 }
