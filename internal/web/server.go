@@ -24,7 +24,6 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-	"github.com/Ebonhawk3829/kishizu/internal/train"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
@@ -108,12 +107,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/train/commit", s.handleTrainCommit)
 	mux.HandleFunc("POST /api/train/reset", s.handleTrainReset)
 	mux.HandleFunc("POST /api/train/teach", s.handleTrainTeach)
+	mux.HandleFunc("POST /api/train/accept-all", s.handleTrainAcceptAll)
 	mux.HandleFunc("POST /api/train/inspect", s.handleTrainInspect)
 	mux.HandleFunc("POST /api/train/grade", s.handleTrainGrade)
-
-	// Session-free grading: grade a release without starting a training run.
-	mux.HandleFunc("POST /api/inspect", s.handleInspect)
-	mux.HandleFunc("POST /api/grade", s.handleGrade)
 
 	// Watch signal from the mpv script, and manual marking from the UI.
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
@@ -642,117 +638,6 @@ func resolveTitle(input string) (string, error) {
 		return input, nil
 	}
 	return nyaa.ResolveLink(nil, input)
-}
-
-// handleInspect breaks a release into gradable attributes for a given show,
-// without needing an active training session.
-func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Input   string `json:"input"`
-		ShowID  int64  `json:"show_id"`
-		Episode int    `json:"episode"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	input := strings.TrimSpace(req.Input)
-	if input == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("paste a Nyaa link or release title"))
-		return
-	}
-	title, err := resolveTitle(input)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that link: %w", err))
-		return
-	}
-
-	sh, err := s.st.GetShow(req.ShowID)
-	if err != nil || sh == nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ShowID))
-		return
-	}
-
-	m, err := s.st.NewMatcher(sh)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	res := match.Match(m, title)
-	resolved := 0
-	if res.Matched {
-		resolved = res.Episode
-	}
-	writeJSON(w, map[string]any{
-		"release": train.InspectWithConfidence(title, resolved, res.Confidence),
-		"episode": req.Episode,
-		"matched": res.Matched,
-		"why":     res.Reason,
-	})
-}
-
-// handleGrade applies per-attribute verdicts straight to the store, so a
-// release can be graded without a training session in flight.
-func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Title   string               `json:"title"`
-		ShowID  int64                `json:"show_id"`
-		Episode int                  `json:"episode"`
-		Grades  map[string]string    `json:"grades"`
-		Release *train.GradedRelease `json:"release"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	sh, err := s.st.GetShow(req.ShowID)
-	if err != nil || sh == nil {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ShowID))
-		return
-	}
-
-	grades := make(map[train.Attribute]train.Grade, len(req.Grades))
-	for k, v := range req.Grades {
-		g, err := train.ParseGrade(v)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		grades[train.Attribute(k)] = g
-	}
-
-	// A short-lived session gives us the same learning rules as the interactive
-	// flow, without requiring one to be open.
-	sess, err := train.NewSession(s.st, sh, req.Episode)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	m, err := s.st.NewMatcher(sh)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	res := match.Match(m, req.Title)
-	resolved := 0
-	if res.Matched {
-		resolved = res.Episode
-	}
-	g := train.InspectWithConfidence(req.Title, resolved, res.Confidence)
-	if req.Release != nil {
-		g = *req.Release
-	}
-
-	notes, err := sess.ApplyGrades(g, grades, req.Episode)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := sess.Commit(); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, map[string]any{"notes": notes})
 }
 
 // ListenAndServe starts the server.

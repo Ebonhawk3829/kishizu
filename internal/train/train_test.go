@@ -138,13 +138,13 @@ func TestProposeSkipsAsked(t *testing.T) {
 	}
 }
 
-// TestProposeSkipsConfident: once a group's offset is known, releases from that
-// group are resolved silently instead of being asked about.
+// TestProposeKeepsConfident: a confidently resolved release is still offered.
 //
-// Regression: the tool used to ask "is this ep 7?" about releases it had already
-// resolved as ep 9, which is asking the user to confirm something the model
-// claims to know is false.
-func TestProposeSkipsConfident(t *testing.T) {
+// This is the opposite of the old behaviour, which filtered confident matches
+// out to save attention. That hid the worst failure mode: a model that is
+// confidently wrong. The cost of showing one is a click; the cost of hiding a
+// wrong one is a bad download that may never be noticed.
+func TestProposeKeepsConfident(t *testing.T) {
 	st := testStore(t)
 	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
 	s, _ := NewSession(st, sh, 9)
@@ -152,16 +152,64 @@ func TestProposeSkipsConfident(t *testing.T) {
 
 	// Same group, a different episode: the known offset resolves it to 10.
 	it := item("[ToonsHub] Tomb Raider King S01E10 1080p CR WEB-DL")
-	if got := s.Propose([]nyaa.Item{it}, 3); len(got) != 0 {
-		t.Errorf("confident candidate was proposed: %+v", got)
+	got := s.Propose([]nyaa.Item{it}, 3)
+	if len(got) != 1 {
+		t.Fatalf("confident candidate was filtered out; got %d, want 1", len(got))
 	}
-	// It should instead show up as resolved, so the learning is visible.
-	res := s.Resolved([]nyaa.Item{it}, 5)
-	if len(res) != 1 {
-		t.Fatalf("resolved got %d, want 1", len(res))
+	if got[0].Episode != 10 {
+		t.Errorf("episode = %d, want 10", got[0].Episode)
 	}
-	if res[0].Episode != 10 {
-		t.Errorf("resolved episode = %d, want 10", res[0].Episode)
+}
+
+// TestProposeOrdersByNovelty: a title containing something the model has not
+// seen is offered before one it has already learned from.
+//
+// Novelty is a measurable property of the data, unlike the model's own
+// uncertainty — so ordering by it means every grade teaches something new.
+func TestProposeOrdersByNovelty(t *testing.T) {
+	st := testStore(t)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	s, _ := NewSession(st, sh, 9)
+	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
+
+	known := item("[ToonsHub] Tomb Raider King S01E10 1080p CR WEB-DL")
+	novel := item("[BrandNewGroup] Tomb Raider King S01E10 1080p CR WEB-DL")
+
+	got := s.Propose([]nyaa.Item{known, novel}, 5)
+	if len(got) != 2 {
+		t.Fatalf("got %d candidates, want 2", len(got))
+	}
+	if got[0].Item.Title != novel.Title {
+		t.Errorf("first = %q, want the unseen group %q", got[0].Item.Title, novel.Title)
+	}
+	if got[0].Novelty <= got[1].Novelty {
+		t.Errorf("novelty not descending: %.2f then %.2f", got[0].Novelty, got[1].Novelty)
+	}
+	if len(got[0].Unseen) == 0 {
+		t.Error("novel candidate lists nothing as unseen")
+	}
+}
+
+// TestNoveltyWeightsGroupAboveQuality: an unseen release group outranks unseen
+// quality tags, because the group drives the episode offset — the thing that
+// decides whether the right episode is downloaded at all.
+func TestNoveltyWeightsGroupAboveQuality(t *testing.T) {
+	st := testStore(t)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	s, _ := NewSession(st, sh, 9)
+	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
+
+	// Known group, but a codec the model has no rule about.
+	qualityOnly := item("[ToonsHub] Tomb Raider King S01E10 1080p AV1")
+	// Unknown group, everything else familiar.
+	newGroup := item("[BrandNewGroup] Tomb Raider King S01E10 1080p CR WEB-DL")
+
+	got := s.Propose([]nyaa.Item{qualityOnly, newGroup}, 5)
+	if len(got) != 2 {
+		t.Fatalf("got %d, want 2", len(got))
+	}
+	if got[0].Item.Title != newGroup.Title {
+		t.Errorf("first = %q, want the unseen group %q", got[0].Item.Title, newGroup.Title)
 	}
 }
 

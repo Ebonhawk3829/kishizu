@@ -1,18 +1,24 @@
-// Package train implements the propose-and-confirm training loop.
+// Package train implements the training loop.
 //
-// The user gives one seed example ("this release is episode N"), then the tool
-// searches Nyaa, ranks candidates by UNCERTAINTY rather than confidence, and
-// proposes the ones it is least sure about. Each answer refits the model.
+// The tool searches Nyaa using the show's aliases and offers the results for
+// grading, most informative first. Each grade refits the model: episode offsets
+// per release group, hard filters, and soft preferences.
 //
-// Ranking by uncertainty is the whole trick: a release that matches the show but
-// whose episode number cannot be read is the most informative thing to ask
-// about, because it is exactly the case a human resolves instantly.
+// Candidates are ordered by NOVELTY — how much of a title the model has not
+// seen before — not by the model's own uncertainty. Novelty is a measurable
+// property of the data; uncertainty would ask the model to rate itself. Every
+// grade therefore teaches something new, and an empty list means there is
+// genuinely nothing left to learn.
+//
+// Nothing is filtered out for looking confidently resolved. A confidently wrong
+// model is the worst failure mode, and hiding those is how it goes unnoticed.
 package train
 
 import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/match"
@@ -56,6 +62,11 @@ type Candidate struct {
 	Episode     int // 0 when unreadable — the most informative case
 	Uncertainty float64
 	Why         string
+	// Novelty is how much of this title the model has NOT seen before, 0..1.
+	// Used to order the list so every grade teaches something new.
+	Novelty float64
+	// Unseen lists what is new about it, for display.
+	Unseen []string
 }
 
 // Session is one training run for one show.
@@ -144,12 +155,110 @@ func (s *Session) Teach(title string, ep int) error {
 	return nil
 }
 
-// Propose returns the candidates the tool is least certain about.
+// noveltyWeights say how much a newly-seen value is worth learning.
 //
-// Candidates the model can already resolve confidently are NOT proposed. Asking
-// "is this ep 7?" about a release the model reads as ep 9 is asking the user to
-// confirm something the tool claims to know is false, which is both annoying and
-// a waste of the only scarce resource here: the user's attention.
+// Weighted by consequence, not by count. An unseen release group matters most
+// because the group drives the episode offset — the thing that decides whether
+// the right episode gets downloaded at all. An unseen codec string is trivia by
+// comparison. Without this weighting a title with three novel quality tags
+// would outrank one with a brand-new group, which is backwards.
+const (
+	wUnseenGroup     = 1.0
+	wUnseenEpisode   = 0.6
+	wUnseenQuality   = 0.2
+	wUnseenStructure = 0.3
+)
+
+// novelty scores how much of a title the model has not seen before, 0..1, and
+// lists what is new about it.
+//
+// This replaces ordering by the model's own uncertainty. Uncertainty asks the
+// model to rate itself, which is a judgement we would have to trust blindly.
+// Novelty is a measurable property of the data: either this group is in the
+// known set or it is not. Every grade then teaches something, and when the
+// list goes quiet there is genuinely nothing left to learn — which is a
+// stopping signal the user can see rather than infer.
+func (s *Session) novelty(title string) (float64, []string) {
+	r := release.Parse(title)
+	score := 0.0
+	var unseen []string
+
+	group := r.Group
+	if group == "" {
+		group = "(none)"
+	}
+	if _, known := s.m.Offsets[group]; !known {
+		score += wUnseenGroup
+		unseen = append(unseen, "group "+group)
+	}
+
+	// An episode number outside the range already confirmed for this show.
+	if raw := r.RawEpisode(); raw > 0 {
+		novel := true
+		for _, off := range s.m.KnownOffsets() {
+			if ep := raw - off; ep >= 1 && (s.m.Max <= 0 || ep <= s.m.Max) {
+				novel = false
+				break
+			}
+		}
+		if novel {
+			score += wUnseenEpisode
+			unseen = append(unseen, "episode "+strconv.Itoa(raw))
+		}
+	}
+
+	// Quality tokens the model has no rule about yet.
+	for _, tok := range []string{r.Resolution, r.Codec, r.Source, r.Service, r.Audio} {
+		if tok == "" {
+			continue
+		}
+		if !s.seenValue(tok) {
+			score += wUnseenQuality
+			unseen = append(unseen, tok)
+			break // one is enough to make the title worth showing
+		}
+	}
+
+	// A title shape not matching anything already graded: different word order
+	// or punctuation usually means a different group's convention.
+	if len(s.m.Alias) > 0 && release.TitleScore(s.m.Aliases(), title) < match.Threshold {
+		score += wUnseenStructure
+		unseen = append(unseen, "unfamiliar title")
+	}
+
+	if score > 1 {
+		score = 1
+	}
+	return score, unseen
+}
+
+// seenValue reports whether a quality token appears in any rule or preference
+// already learned for this show.
+func (s *Session) seenValue(v string) bool {
+	for _, p := range s.pending {
+		if strings.EqualFold(p.v, v) {
+			return true
+		}
+	}
+	for _, f := range s.retracted {
+		if strings.EqualFold(f.Value, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// Propose returns the candidates worth grading, most informative first.
+//
+// Nothing is filtered out for being confidently resolved. A model that is
+// confidently wrong is the worst failure mode, and hiding those is exactly how
+// it goes unnoticed. Everything the alias search matched is offered; ordering
+// decides what gets attention first.
+//
+// Ordering is by NOVELTY — how much of the title the model has not seen — not
+// by the model's own uncertainty. Uncertainty asks the model to rate itself;
+// novelty is a measurable property of the data. See novelty() for why that
+// distinction matters.
 func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 	var out []Candidate
 	for _, it := range items {
@@ -165,29 +274,22 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 			continue
 		}
 
-		// Already resolved confidently: apply it silently.
-		if res.Confident() {
-			continue
-		}
-
-		// Uncertainty is the complement of the model's own confidence, so
-		// ranking follows the evidence rather than a fixed bucket. A release
-		// from a known group with a strong alias match is asked about last;
-		// one from an unseen group when the known offsets disagree is asked
-		// first. Previously these were constants, so the tool was exactly as
-		// uncertain after fifty examples as after one.
 		c := Candidate{Item: it, Episode: res.Episode, Why: res.Reason}
 		c.Uncertainty = 1.0 - res.Confidence
 		if res.Episode == 0 {
 			// No number at all: nothing to be confident about.
 			c.Uncertainty = 1.0
 		}
+		c.Novelty, c.Unseen = s.novelty(it.Title)
 		out = append(out, c)
 	}
 
+	// Most novel first. Seeders break ties so that, between two equally
+	// informative titles, the healthier one is offered — it is more likely to
+	// still be there if the user wants to check it.
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Uncertainty != out[j].Uncertainty {
-			return out[i].Uncertainty > out[j].Uncertainty
+		if out[i].Novelty != out[j].Novelty {
+			return out[i].Novelty > out[j].Novelty
 		}
 		return out[i].Item.Seeders > out[j].Item.Seeders
 	})

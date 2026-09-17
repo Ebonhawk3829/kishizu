@@ -23,6 +23,15 @@ const (
 	GradeAcceptable Grade = "acceptable" // fine, but not preferred
 	GradeWrong      Grade = "wrong"      // exclude it
 	GradeUnknown    Grade = "unknown"    // not graded; no signal
+	// GradeAbsent is "the title does not say this" — the parser inferred a
+	// value that is not there.
+	//
+	// Distinct from GradeWrong, which means "the title says X and I do not
+	// want X". Absent means there is nothing to want: the claim itself is
+	// invented. Without this the two look identical, so a hallucinated value
+	// could only be corrected, never rejected — and correcting it writes a
+	// rule about something the release never contained.
+	GradeAbsent Grade = "absent"
 )
 
 // Attribute is one gradable facet of a release.
@@ -181,6 +190,19 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 	for _, a := range g.Attrs {
 		grade, ok := grades[a.Key]
 		if !ok || grade == GradeUnknown {
+			continue
+		}
+		// "The title does not say this." The value was inferred, not read, so
+		// there is nothing to prefer or exclude — and any rule already written
+		// about it was written on the same bad premise, so retract it.
+		//
+		// This is the only grade that can remove knowledge. The others add or
+		// adjust it.
+		if grade == GradeAbsent {
+			if a.Value != "" {
+				s.retractAll(a.Key, a.Value)
+				notes = append(notes, fmt.Sprintf("%s %q not in title; dropped", a.Label, a.Value))
+			}
 			continue
 		}
 		switch a.Key {
@@ -439,6 +461,32 @@ func (s *Session) retract(kind, k, op, v string) {
 	}
 }
 
+// retractAll drops every pending rule about one attribute value, whatever kind
+// or operation it was written under.
+//
+// Used when the user says a value is not in the title. A value can have
+// accumulated several rules — a preference and a filter, say — and retracting
+// only the one we happen to think of would leave the rest standing on a premise
+// the user has just rejected.
+func (s *Session) retractAll(key Attribute, value string) {
+	kept := s.pending[:0]
+	for _, p := range s.pending {
+		if p.k == string(key) && p.v == value {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	s.pending = kept
+
+	// Also drop any already-persisted rule, so a value graded absent in a later
+	// session does not survive from an earlier one.
+	for _, op := range []string{"exclude", "min"} {
+		s.retracted = append(s.retracted, store.Filter{
+			Kind: string(key), Op: op, Value: value,
+		})
+	}
+}
+
 // reasonFor states why a rule exists, in terms the user would recognise.
 //
 // Stored alongside the rule so it can be revisited: "resolution min 1080p"
@@ -525,6 +573,8 @@ func ParseGrade(s string) (Grade, error) {
 		return GradeAcceptable, nil
 	case "wrong", "w", "no", "n", "bad", "exclude":
 		return GradeWrong, nil
+	case "absent", "none", "not present", "hallucinated", "invented":
+		return GradeAbsent, nil
 	case "", "unknown", "?", "skip":
 		return GradeUnknown, nil
 	}

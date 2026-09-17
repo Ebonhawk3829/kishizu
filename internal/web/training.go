@@ -29,11 +29,24 @@ var session struct {
 }
 
 type startRequest struct {
-	ShowID    int64 `json:"show_id"`
-	Episode   int   `json:"episode"`
-	SeedIndex int   `json:"seed_index"`
+	ShowID int64 `json:"show_id"`
 }
 
+// handleTrainStart opens a training session scoped to a show.
+//
+// There is no seed example and no episode picker. The session opens on the raw
+// results of an alias search and the user picks one to grade; the episode comes
+// from the release they choose.
+//
+// No seeding, deliberately. Seeding from a "known good" release teaches only
+// what to accept — it can never show what to reject, and rejection is most of
+// what the matcher does. A raw alias search is an unbiased sample: some right,
+// some wrong, some unreadable. Grading across that gives both signals.
+//
+// There is also no paste-a-link path. If a release does not appear in the
+// alias-derived results, the alias set does not match it — and if it does not
+// match during training it will not match during hunting either. The fix is to
+// correct the alias, not to route around it.
 func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 	var req startRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -51,59 +64,28 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 	// plain substring match, so a long specific name misses groups that write
 	// the title differently — and training is exactly where you need to see
 	// those groups, since learning their offsets is the point.
-	//
-	// This mirrors what the listener does. Previously training used a single
-	// canonical-name query, so it could offer fewer candidates than the
-	// listener would later consider, and a group that only ever appears under
-	// an alias could never be trained.
 	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("fetch feed: %w", err))
 		return
 	}
 	if len(items) == 0 {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("no releases found for %q", sh.CanonicalName))
+		// Not an error to paper over: it means the alias set matches nothing,
+		// which is a real defect worth saying out loud.
+		writeErr(w, http.StatusNotFound, fmt.Errorf(
+			"no releases found for %q — its aliases match nothing on Nyaa, so it could never be downloaded either",
+			sh.CanonicalName))
 		return
 	}
 
-	ep := req.Episode
-	if ep == 0 {
-		ep = nextUnwatched(s.st, sh)
-	}
+	// The episode is not chosen up front. NewSession wants a target, so use the
+	// next unwatched as a starting hint; it is overridden by whatever release
+	// the user actually grades.
+	ep := nextUnwatched(s.st, sh)
 
 	sess, err := train.NewSession(s.st, sh, ep)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	// Seed from the chosen release.
-	//
-	// When no index is given, do NOT blindly take items[0]: the newest release
-	// is often the PREVIOUS episode (the target has not aired yet), and seeding
-	// from it teaches a wrong offset. Prefer a release whose raw number equals
-	// the target, and fall back to asking the user.
-	idx := req.SeedIndex
-	if idx < 0 || idx >= len(items) {
-		idx = -1
-		for i, it := range items {
-			if release.Parse(it.Title).RawEpisode() == ep {
-				idx = i
-				break
-			}
-		}
-	}
-	if idx < 0 {
-		writeJSON(w, map[string]any{
-			"needs_seed": true,
-			"show":       sh.CanonicalName,
-			"episode":    ep,
-			"releases":   releaseSummaries(items, 12),
-		})
-		return
-	}
-	if err := sess.Seed(items[idx].Title); err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("seed: %w", err))
 		return
 	}
 
@@ -131,16 +113,22 @@ type trainStateJSON struct {
 }
 
 type candidateJSON struct {
-	Index       int     `json:"index"`
-	Title       string  `json:"title"`
-	Episode     int     `json:"episode"`
-	Seeders     int     `json:"seeders"`
-	Size        string  `json:"size"`
-	Resolution  string  `json:"resolution"`
-	Codec       string  `json:"codec"`
-	Group       string  `json:"group"`
-	Why         string  `json:"why"`
-	Uncertainty float64 `json:"uncertainty"`
+	Index       int      `json:"index"`
+	Title       string   `json:"title"`
+	Episode     int      `json:"episode"`
+	Seeders     int      `json:"seeders"`
+	Size        string   `json:"size"`
+	Resolution  string   `json:"resolution"`
+	Codec       string   `json:"codec"`
+	Group       string   `json:"group"`
+	Why         string   `json:"why"`
+	Uncertainty float64  `json:"uncertainty"`
+	// Novelty is how much of this title the model has not seen, 0..1. Drives
+	// ordering: the most informative candidate is offered first.
+	Novelty     float64  `json:"novelty"`
+	// Unseen names what is new about it, so the user can see why it is at the
+	// top rather than taking the ordering on faith.
+	Unseen      []string `json:"unseen"`
 }
 
 func (s *Server) trainState() trainStateJSON {
@@ -155,7 +143,9 @@ func (s *Server) trainState() trainStateJSON {
 		st.Show = session.show.CanonicalName
 	}
 
-	for i, c := range session.sess.Propose(session.items, 3) {
+	// A generous list: nothing is filtered for looking confident, so the user
+	// can work down it as far as they like.
+	for i, c := range session.sess.Propose(session.items, 25) {
 		st.Candidates = append(st.Candidates, s.candidateJSON(i, c))
 	}
 	for i, c := range session.sess.Resolved(session.items, 5) {
@@ -177,6 +167,8 @@ func (s *Server) candidateJSON(i int, c train.Candidate) candidateJSON {
 		Group:       r.Group,
 		Why:         c.Why,
 		Uncertainty: c.Uncertainty,
+		Novelty:     c.Novelty,
+		Unseen:      c.Unseen,
 	}
 }
 
@@ -402,6 +394,84 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 	if grades[train.AttrEpisode] == train.GradeGood {
 		session.sess.MarkAsked(req.Title)
 	}
+
+	writeJSON(w, map[string]any{
+		"notes": notes,
+		"state": s.trainState(),
+	})
+}
+
+// handleTrainAcceptAll grades every present attribute of a release in one
+// request, so an obviously-correct release costs one click instead of one per
+// attribute.
+//
+// Two modes, because "the parse is right" and "I want this" are different
+// claims and must not be collapsed:
+//
+//	parse      — mark every present attribute good. Confirms extraction only.
+//	preferred  — the same, plus mark the quality attributes preferred.
+//
+// The second is the true one-click for a release that is both correctly parsed
+// and wanted. The first exists so confirming a parse never silently records a
+// preference the user did not choose.
+//
+// Absent attributes are skipped either way: there is nothing to confirm about a
+// value the title does not contain.
+func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
+	if !session.active {
+		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
+		return
+	}
+	var req struct {
+		Title  string `json:"title"`
+		Mode   string `json:"mode"` // "parse" (default) or "preferred"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("title is required"))
+		return
+	}
+
+	res := match.Match(session.sess.Show(), req.Title)
+	resolved := 0
+	if res.Matched {
+		resolved = res.Episode
+	}
+	g := train.InspectWithConfidence(req.Title, resolved, res.Confidence)
+
+	prefer := strings.EqualFold(req.Mode, "preferred")
+	grades := make(map[train.Attribute]train.Grade, len(g.Attrs))
+	for _, a := range g.Attrs {
+		if !a.Present {
+			continue
+		}
+		switch a.Key {
+		case train.AttrEpisode, train.AttrGroup:
+			// The episode teaches the offset; the group is what the offset is
+			// keyed on. Both are always "good" here — a quick accept is a
+			// statement that the parse is right.
+			grades[a.Key] = train.GradeGood
+		default:
+			if prefer {
+				grades[a.Key] = train.GradeGood
+			} else {
+				// Acceptable rather than good: the parse is confirmed, but no
+				// preference is claimed.
+				grades[a.Key] = train.GradeAcceptable
+			}
+		}
+	}
+
+	notes, err := session.sess.ApplyGrades(g, grades, resolved)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	session.sess.MarkAsked(req.Title)
 
 	writeJSON(w, map[string]any{
 		"notes": notes,
