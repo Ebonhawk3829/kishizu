@@ -159,12 +159,24 @@ func Find(entries []Entry, name string) *Entry {
 // FindWithAliases tries every alias and keeps the best match. Aliases matter
 // here for the same reason they matter to the matcher: the schedule's romaji
 // title is often the only thing that overlaps.
+//
+// Short aliases are skipped. Recall scoring rewards an alias whose tokens are
+// all present in the candidate, so a two-token alias like "シャンフロ３" scores
+// a perfect 1.0 against any title containing those tokens — it matched
+// "PetitCure: Precure Fairies 3rd Season" and projected 26 episodes onto an
+// unrelated show. A short alias carries too little identity to be trusted here.
+//
+// This is the fallback path only. A show with a slug never reaches it.
 func FindWithAliases(entries []Entry, aliases []string) *Entry {
+	const minTokens = 3
 	best := 0.0
 	var found *Entry
 	for _, a := range aliases {
 		want := normalise(a)
 		if want == "" {
+			continue
+		}
+		if len(strings.Fields(want)) < minTokens {
 			continue
 		}
 		for i := range entries {

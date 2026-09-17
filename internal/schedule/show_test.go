@@ -186,6 +186,36 @@ func TestSeasonLengthKeepsMovieCount(t *testing.T) {
 	}
 }
 
+// TestFindWithAliasesSkipsShortAliases: recall scoring rewards an alias whose
+// tokens are all present in the candidate, so a very short alias scores a
+// perfect 1.0 against almost anything.
+//
+// This is not hypothetical. "シャンフロ３" (two tokens) matched "PetitCure:
+// Precure Fairies 3rd Season" at ep 26, and the daily refresh then projected 26
+// episode rows onto Shangri-La Frontier — a different show entirely. Short
+// aliases carry too little identity to be trusted on the fallback path.
+func TestFindWithAliasesSkipsShortAliases(t *testing.T) {
+	entries := []Entry{
+		{Title: "PetitCure: Precure Fairies 3rd Season", NextEp: 26, Slug: "petitcure"},
+		{Title: "Re:Zero kara Hajimeru Isekai Seikatsu 4", NextEp: 18, Slug: "rezero"},
+	}
+
+	// A two-token alias must not match, however well it scores.
+	if e := FindWithAliases(entries, []string{"シャンフロ３"}); e != nil {
+		t.Errorf("short alias matched %q; it must be skipped", e.Title)
+	}
+	// A long alias still matches normally.
+	if e := FindWithAliases(entries, []string{"Re:Zero kara Hajimeru Isekai Seikatsu 4"}); e == nil {
+		t.Error("long alias should still match")
+	} else if e.Slug != "rezero" {
+		t.Errorf("matched %q, want rezero", e.Slug)
+	}
+	// A short alias alongside a long one must not win by scoring higher.
+	if e := FindWithAliases(entries, []string{"シャンフロ３", "Re:Zero kara Hajimeru Isekai Seikatsu 4"}); e == nil || e.Slug != "rezero" {
+		t.Errorf("mixed aliases matched %v, want rezero", e)
+	}
+}
+
 func TestSlugFromURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4",
