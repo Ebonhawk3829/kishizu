@@ -157,27 +157,27 @@ type trainStateJSON struct {
 }
 
 type candidateJSON struct {
-	Index       int      `json:"index"`
-	Title       string   `json:"title"`
-	Episode     int      `json:"episode"`
-	Seeders     int      `json:"seeders"`
-	Size        string   `json:"size"`
-	Resolution  string   `json:"resolution"`
-	Codec       string   `json:"codec"`
-	Group       string   `json:"group"`
-	Why         string   `json:"why"`
-	Uncertainty float64  `json:"uncertainty"`
+	Index       int     `json:"index"`
+	Title       string  `json:"title"`
+	Episode     int     `json:"episode"`
+	Seeders     int     `json:"seeders"`
+	Size        string  `json:"size"`
+	Resolution  string  `json:"resolution"`
+	Codec       string  `json:"codec"`
+	Group       string  `json:"group"`
+	Why         string  `json:"why"`
+	Uncertainty float64 `json:"uncertainty"`
 	// Novelty is how much of this title the model has not seen, 0..1. Drives
 	// ordering: the most informative candidate is offered first.
-	Novelty     float64  `json:"novelty"`
+	Novelty float64 `json:"novelty"`
 	// Unseen names what is new about it, so the user can see why it is at the
 	// top rather than taking the ordering on faith.
-	Unseen      []string `json:"unseen"`
+	Unseen []string `json:"unseen"`
 	// Attrs is the full parse — every attribute the parser reads, present or
 	// not. Quick accept confirms all of these, so all of them must be shown:
 	// asking the user to confirm a source and service they were never shown is
 	// not confirmation.
-	Attrs       []train.AttrValue `json:"attrs"`
+	Attrs []train.AttrValue `json:"attrs"`
 }
 
 func (s *Server) trainStateLocked() trainStateJSON {
@@ -252,9 +252,9 @@ func (s *Server) handleTrainCommit(w http.ResponseWriter, r *http.Request) {
 	s.session.active = false
 	writeJSON(w, map[string]any{
 		"committed": true,
-		"accepted":   s.session.sess.Accepted,
-		"rejected":   s.session.sess.Rejected,
-		"verified":   verified,
+		"accepted":  s.session.sess.Accepted,
+		"rejected":  s.session.sess.Rejected,
+		"verified":  verified,
 	})
 }
 
@@ -420,6 +420,13 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 	}
 	if grades[train.AttrEpisode] == train.GradeGood {
 		s.session.sess.MarkAsked(req.Title)
+		// Mark the feed item too, so Propose stops offering it.
+		for _, it := range s.session.items {
+			if it.Title == req.Title {
+				s.session.sess.MarkAskedItem(it)
+				break
+			}
+		}
 	}
 
 	writeJSON(w, map[string]any{
@@ -452,8 +459,8 @@ func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Title  string `json:"title"`
-		Mode   string `json:"mode"` // "parse" (default) or "preferred"
+		Title string `json:"title"`
+		Mode  string `json:"mode"` // "parse" (default) or "preferred"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -511,6 +518,15 @@ func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.session.sess.MarkAsked(req.Title)
+	// Also mark the feed item by infohash, so Propose stops offering it: the
+	// candidate list is filtered on infohash, and a title-only mark never
+	// matches. Without this a confirmed release stays on the list.
+	for _, it := range s.session.items {
+		if it.Title == req.Title {
+			s.session.sess.MarkAskedItem(it)
+			break
+		}
+	}
 
 	writeJSON(w, map[string]any{
 		"notes": notes,
@@ -555,4 +571,3 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
-

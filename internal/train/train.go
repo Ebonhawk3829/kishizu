@@ -353,9 +353,25 @@ func (s *Session) confidenceFor(title string) float64 {
 }
 
 // MarkAsked records a release as seen, so it is not proposed again.
+//
+// Keyed by BOTH infohash and title: Propose filters on the infohash, but the
+// quick-accept path (which parses a pasted title rather than a feed item)
+// only has the title. Recording both means a confirmed release disappears
+// from the candidate list however it was confirmed.
 func (s *Session) MarkAsked(title string) {
 	if title != "" {
 		s.Asked[title] = true
+	}
+}
+
+// MarkAskedItem records a feed item as seen, keyed the way Propose looks it
+// up: by infohash, with the title as a fallback for items that have none.
+func (s *Session) MarkAskedItem(item nyaa.Item) {
+	if item.InfoHash != "" {
+		s.Asked[item.InfoHash] = true
+	}
+	if item.Title != "" {
+		s.Asked[item.Title] = true
 	}
 }
 

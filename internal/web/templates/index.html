@@ -158,6 +158,10 @@
     font-variant-numeric: tabular-nums;
   }
   .chip b { color: var(--t1); font-weight: 500; }
+  /* An absent attribute is part of the parse too — confirming says "the
+     title does not contain this" — so it is shown, but quieter. */
+  .chip.absent { color: var(--t3); }
+  .chip.absent b { color: var(--t3); font-weight: 400; font-style: italic; }
 
   /* ── disclosure panels ──────────────────────────────────────────────── */
   .disc { margin-top: 48px; border-top: 1px solid var(--line-soft); padding-top: 4px; }
@@ -635,9 +639,10 @@ function renderTrain() {
       <div class="w">${escapeHtml(c.why)} &middot; ${c.seeders} seeders</div>
       ${noveltyNote(c)}
       <div class="chips open">
-        ${(c.attrs || []).filter(a => a.present).map(a =>
-          `<span class="chip">${escapeHtml(a.label)} <b>${escapeHtml(a.value)}</b></span>`).join('')}
+        ${(c.attrs || []).map(a =>
+          `<span class="chip ${a.present ? '' : 'absent'}">${escapeHtml(a.label)} <b>${a.present ? escapeHtml(a.value) : 'absent'}</b></span>`).join('')}
       </div>
+      <div class="w" style="margin-top:6px">Confirming the parse validates every attribute above — absent ones are confirmed as absent.</div>
       ${c.episode
         ? ''
         : '<div class="w" style="color:var(--warn)">no episode number readable — use Grade in detail and supply one</div>'}
@@ -828,7 +833,9 @@ async function commit() {
     const r = await api('/api/train/commit', {});
     toast(`Saved. ${r.accepted} accepted, ${r.rejected} rejected.`);
     state = { active: false };
-    renderTrain();
+    // Training is done: the session is committed and inactive, so close the
+    // modal rather than leaving an empty panel to dismiss separately.
+    cancelTrain();
     loadShows();
   } catch (e) { fieldError('train-error', e.message); }
 }
