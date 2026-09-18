@@ -25,7 +25,7 @@ type Client struct {
 }
 
 // New builds a client. url is the RPC endpoint, e.g.
-// http://100.64.0.1:9091/transmission/rpc
+// http://<tailnet-ip>:9091/transmission/rpc
 func New(url string) *Client {
 	return &Client{url: url, hc: &http.Client{Timeout: 30 * time.Second}}
 }

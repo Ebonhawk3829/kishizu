@@ -16,3 +16,25 @@ testdata/search_cache/
 
 # Design mockups — scratch, not part of the shipped app
 concepts/
+
+# ── Personal data ──────────────────────────────────────────────────────────
+# These are the user's own, not part of the project. They are tracked in
+# examples/ where present, so a fresh clone still has something to copy.
+
+# The watch list: which shows are tracked and how many episodes have been
+# seen. Publishing it tells the internet exactly what you watch and where
+# you are in each season.
+shows.yaml
+
+# Canonical name -> animeschedule slug. Same exposure as shows.yaml.
+slugs.yaml
+
+# Review briefs and notes. Working documents, not project documentation.
+REVIEW.md
+review*.md
+*.review.md
+
+# Scraped Nyaa pages kept as parser fixtures. Harmless in themselves, but
+# they are someone's browsing history and are regenerable from the site.
+testdata/*.html
+testdata/refs.json

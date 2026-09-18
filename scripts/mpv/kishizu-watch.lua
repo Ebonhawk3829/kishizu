@@ -21,8 +21,9 @@ local utils = require 'mp.utils'
 local options = require 'mp.options'
 
 local o = {
-    -- kishizu endpoint on the tailnet.
-    endpoint = 'http://100.64.0.1:8098/api/watched',
+    -- kishizu endpoint on the tailnet. Replace TAILNET_IP with your server's
+    -- tailnet address (e.g. 100.x.y.z).
+    endpoint = 'http://TAILNET_IP:8098/api/watched',
     -- Only files under this directory are reported. mpv is used for all media
     -- on this machine, so without the gate every film and TV episode would be
     -- posted to kishizu and come back as a 422. Subdirectories count.
@@ -32,7 +33,7 @@ local o = {
     -- skips the ED, so "reached the end" alone would miss most episodes.
     mark_window = 120,
     -- ntfy topic for failure alerts. Empty disables.
-    ntfy = 'http://100.64.0.1:8085/kishizu',
+    ntfy = 'http://TAILNET_IP:8085/kishizu',
     -- Where failed posts are spooled for retry.
     spool = mp.command_native({'expand-path', '~~state/kishizu-spool.txt'}),
 }

@@ -1,0 +1,14 @@
+# animeschedule.net slugs — EXAMPLE.
+#
+# Copy to slugs.yaml and edit. slugs.yaml is gitignored: it maps your show
+# names to schedule pages, which is the same exposure as your watch list.
+#
+# Key   = kishizu canonical_name (must match the database exactly).
+# Value = animeschedule slug, the trailing part of
+#         https://animeschedule.net/anime/<slug>
+#
+# Used by -backfill-slugs to attach slugs to shows that predate them, and to
+# enrich each show from its page. Adding a show by URL in the web UI records
+# the slug automatically, so this file is only needed for a bulk backfill.
+
+Example Show: example-show

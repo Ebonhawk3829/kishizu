@@ -207,7 +207,7 @@ done once by hand rather than guessed every day.
 | `-db` | `kishizu.db` | SQLite database path |
 | `-config` | `shows.yaml` | Show seed file |
 | `-serve` | — | Address for the web UI, e.g. `:8098` |
-| `-transmission` | `http://100.64.0.1:9091/transmission/rpc` | Transmission RPC endpoint |
+| `-transmission` | `http://<tailnet-ip>:9091/transmission/rpc` | Transmission RPC endpoint |
 | `-library` | `/downloads/anime` | Library root, as Transmission sees it |
 | `-keep` | `2` | Recently watched episodes to keep on disk |
 | `-interval` | `5m` | RSS poll interval |

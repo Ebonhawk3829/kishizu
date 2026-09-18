@@ -21,7 +21,7 @@ type Client struct {
 }
 
 // New builds a client. url is the full topic URL, e.g.
-// http://100.64.0.1:8085/kishizu
+// http://<tailnet-ip>:8085/kishizu
 func New(url string) *Client {
 	return &Client{url: url, hc: &http.Client{Timeout: 10 * time.Second}}
 }
