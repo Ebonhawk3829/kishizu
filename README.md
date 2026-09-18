@@ -46,7 +46,7 @@ which is the entire reason it exists.
 |---|---|
 | **Declare** | Shows live in `shows.yaml`, or are added from the web UI by pasting an animeschedule.net URL |
 | **Hunt** | Polls Nyaa RSS per show, parses each release, matches it to a show and episode |
-| **Grab** | Hands the best matching release to Transmission, per your group preferences |
+| **Grab** | Hands the best matching release to Transmission, ranked by the global group order |
 | **File** | Renames to `<Show> - E<NN>.mkv` in your library, ready for your player |
 | **Watch** | An mpv script tells kishizu when you finish an episode |
 | **Clean** | Deletes watched episodes, keeping the last few |
@@ -172,9 +172,9 @@ https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 ```
 
 The trailing part is the show's **slug** — an exact identity on the schedule.
-kishizu stores it and looks the show up by it. There is no title matching
-anywhere in the schedule lookup: either the show is on the timetable this week,
-or it isn't.
+kishizu stores it and reads the show's own page by it. There is no title
+matching anywhere in the schedule lookup: the slug is the key, and the page
+carries everything kishizu needs.
 
 From the page it also fills in:
 
@@ -182,9 +182,12 @@ From the page it also fills in:
 - every **alternative name** (romaji, English, synonyms) as an alias
 - the **release time**, a full timestamp with a UTC offset, which is episode 1's
   broadcast slot. For a show that hasn't premiered it is the only air
-  information that exists, since the timetable only covers about a week. It is
-  the *raw* airing — the earliest native broadcast — so the hunt may open a few
-  hours before a subbed upload appears, which is harmless
+  information that exists. It is the *raw* airing — the earliest native
+  broadcast — so the hunt may open a few hours before a subbed upload appears,
+  which is harmless
+- the **next episode** and when it airs, from the page's countdown. This is what
+  the daily refresh reads; a page with no countdown means the season has
+  finished
 - the **cover art**, from the page's canonical `og:image`
 
 Japanese names and abbreviations are deliberately not imported. Nyaa release
@@ -222,9 +225,16 @@ show, one group posts `E01` while another posts `E41` — both are the same
 episode. kishizu stores an **offset per release group**, so `[VARYG] Show - 47`
 and `[Erai-raws] Show - 07` can both resolve to episode 7.
 
-Offsets are learned either by training (propose-and-confirm, a few examples per
-numbering convention) or by `-infer`, which derives them from the structure of
-each group's numbering. Both are reviewable and resettable per show in the UI.
+Offsets are learned either by training (confirm the parse of a few releases, one
+per numbering convention) or by `-infer`, which derives them from the structure
+of each group's numbering. Both are reviewable and resettable per show in the UI.
+
+**Training calibrates the parser — it does not set preferences.** Quality policy
+(resolution floor, codec ranking, batch rejection, dub demotion, group order) is
+global and set in advance; it is never written by training. A training run
+teaches exactly two things: the per-group episode offset, and the vocabulary —
+that a token in a title means a canonical value, so every future release using
+that spelling is readable.
 
 **A show is not hunted until it has been trained.** Without at least one known
 group offset there is nothing to reason with, so polling would only burn
@@ -252,7 +262,7 @@ similar.
 So: any alias that clears the threshold makes the release a candidate, and how
 well it cleared is discarded. Choosing *which* candidate to download is left to
 the criteria that genuinely distinguish releases — group, resolution, codec,
-source — which is what the preference ranker already does.
+source — which the global rules and the group order already rank.
 
 Abbreviations are still stored, but tagged and excluded from matching. They are
 used as Nyaa feed queries, where a broad net is what you want.
@@ -326,8 +336,9 @@ enough.
 
 Yes, in practice. Adding a show means pasting its animeschedule.net URL — that
 is how kishizu knows which show you mean. The slug in the URL is an exact
-identity, so there is no title matching anywhere in the schedule lookup: either
-the show is on the timetable this week, or it isn't.
+identity, so there is no title matching anywhere in the schedule lookup: the
+show's own page is read directly, and it carries the season length, every
+alternative name, the cover art and the next episode's air time.
 
 A plain name still works, but such a show has no slug, so it never gets an air
 date from the schedule. It will sit until you train it and it picks up a
