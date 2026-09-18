@@ -64,9 +64,7 @@ type Show struct {
 	Names map[string][]string
 	// ImageURL is the season's cover art on their CDN.
 	ImageURL string
-	// AniListID and MyAnimeListID are the cross-references the page links to.
-	// 0 when absent.
-	AniListID     int
+	// MyAnimeListID is the cross-reference the page links to. 0 when absent.
 	MyAnimeListID int
 }
 
@@ -197,8 +195,7 @@ var (
 	reAltTag = regexp.MustCompile(
 		`(?s)<span class="alternative-name-heading">([^<]+)</span>` +
 			`|<div class="alternative-name"[^>]*>([^<]+)</div>`)
-	reAniList = regexp.MustCompile(`anilist\.co/anime/(\d+)`)
-	reMAL     = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
+	reMAL = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
 	reShowImg = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
 
 	// The page's data blob carries the countdown's episode:
@@ -258,9 +255,6 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 	}
 	if m := reSeason.FindStringSubmatch(s); m != nil {
 		sh.Season = strings.TrimSpace(html.UnescapeString(m[1]))
-	}
-	if m := reAniList.FindStringSubmatch(s); m != nil {
-		sh.AniListID, _ = strconv.Atoi(m[1])
 	}
 	if m := reMAL.FindStringSubmatch(s); m != nil {
 		sh.MyAnimeListID, _ = strconv.Atoi(m[1])

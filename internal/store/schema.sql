@@ -21,10 +21,7 @@ CREATE TABLE IF NOT EXISTS show (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_name TEXT    NOT NULL UNIQUE,
     max_episode    INTEGER NOT NULL DEFAULT 0,   -- 0 = unknown, no upper bound
-    -- anilist_id makes a re-import idempotent: the import is a bootstrap and
-    -- AniList is flaky, so it may need more than one run to complete.
-    anilist_id     INTEGER,
-    source         TEXT    NOT NULL DEFAULT 'manual',  -- anilist | schedule | manual
+    source         TEXT    NOT NULL DEFAULT 'manual',  -- schedule | manual
     cadence_weekday INTEGER,                     -- 0-6, NULL when unknown
     cadence_source TEXT,                         -- where cadence came from
     cadence_fetched_at TEXT,                     -- when, for staleness
@@ -44,7 +41,6 @@ CREATE TABLE IF NOT EXISTS show (
     slug            TEXT,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_show_anilist ON show(anilist_id) WHERE anilist_id IS NOT NULL;
 -- Two shows must never claim the same schedule page. Partial: films and
 -- unlisted shows have no slug and are simply not indexed.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL;

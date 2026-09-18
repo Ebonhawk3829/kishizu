@@ -182,7 +182,6 @@ type Show struct {
 	ID             int64
 	CanonicalName  string
 	MaxEpisode     int
-	AniListID      *int
 	Source         string
 	CadenceWeekday *int
 	CadenceSource  string
@@ -234,13 +233,13 @@ func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (
 
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
-	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, anilist_id, source,
+	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, source,
 		cadence_weekday, cadence_source, cadence_fetched_at, image_url, slug, created_at FROM show WHERE id = ?`, id)
 
 	var sh Show
-	var weekday, anilistID sql.NullInt64
+	var weekday sql.NullInt64
 	var src, source, fetched, created, image, slug sql.NullString
-	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &anilistID, &source,
+	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &source,
 		&weekday, &src, &fetched, &image, &slug, &created); err != nil {
 		return nil, err
 	}
@@ -248,10 +247,6 @@ func (s *Store) GetShow(id int64) (*Show, error) {
 	if weekday.Valid {
 		w := int(weekday.Int64)
 		sh.CadenceWeekday = &w
-	}
-	if anilistID.Valid {
-		a := int(anilistID.Int64)
-		sh.AniListID = &a
 	}
 	sh.Source = source.String
 	sh.CadenceSource = src.String
@@ -390,13 +385,7 @@ func (s *Store) ShowBySlug(slug string) (*Show, error) {
 	return s.GetShow(id)
 }
 
-// SetAniListID records the AniList media id, making a re-import idempotent.
-func (s *Store) SetAniListID(showID int64, anilistID int) error {
-	_, err := s.db.Exec(`UPDATE show SET anilist_id = ? WHERE id = ?`, anilistID, showID)
-	return err
-}
-
-// SetSource records where a show came from: anilist | schedule | manual.
+// SetSource records where a show came from: schedule | manual.
 func (s *Store) SetSource(showID int64, source string) error {
 	_, err := s.db.Exec(`UPDATE show SET source = ? WHERE id = ?`, source, showID)
 	return err
@@ -406,20 +395,6 @@ func (s *Store) SetSource(showID int64, source string) error {
 func (s *Store) SetMaxEpisode(showID int64, max int) error {
 	_, err := s.db.Exec(`UPDATE show SET max_episode = ? WHERE id = ?`, max, showID)
 	return err
-}
-
-// GetShowByAniListID finds a previously imported show. Returns (nil, nil) when
-// there is none, which is the normal case on a first import.
-func (s *Store) GetShowByAniListID(anilistID int) (*Show, error) {
-	var id int64
-	err := s.db.QueryRow(`SELECT id FROM show WHERE anilist_id = ?`, anilistID).Scan(&id)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return s.GetShow(id)
 }
 
 // GetShowByName finds a show by canonical name. Returns (nil, nil) when absent.

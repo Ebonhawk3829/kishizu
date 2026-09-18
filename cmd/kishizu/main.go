@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Ebonhawk3829/kishizu/internal/anilist"
 	"github.com/Ebonhawk3829/kishizu/internal/art"
 	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
@@ -35,8 +34,6 @@ func main() {
 	seed := flag.Bool("seed", false, "insert the shows from the seed file")
 	configPath := flag.String("config", "shows.yaml", "show seed file used by -seed")
 	list := flag.Bool("list", false, "list tracked shows with next episode and air dates")
-	importUser := flag.String("import-anilist", "", "bootstrap from an AniList username (one-time)")
-	statuses := flag.String("statuses", "CURRENT,PLANNING", "comma-separated AniList statuses to import")
 	trainName := flag.String("train", "", "train a show (substring match on canonical name)")
 	ep := flag.Int("ep", 0, "episode number to train against (0 = next unwatched)")
 	serve := flag.String("serve", "", "start the web UI on this address (e.g. 127.0.0.1:8098)")
@@ -127,16 +124,6 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("seeded")
-		return
-	}
-
-	// One-time bootstrap. This is the ONLY place AniList is contacted; nothing
-	// at runtime depends on it.
-	if *importUser != "" {
-		if err := importFromAniList(st, *importUser, *statuses); err != nil {
-			fmt.Fprintf(os.Stderr, "import: %v\n", err)
-			os.Exit(1)
-		}
 		return
 	}
 
@@ -248,40 +235,6 @@ func run(st *store.Store, sh *store.Show) {
 			fmt.Printf("      %-70s %s\n", truncate(d.Item.Title, 70), d.Reason)
 		}
 	}
-}
-
-// importFromAniList bootstraps the database from a user's AniList list.
-//
-// It is safe to re-run: shows are matched on anilist_id, so a partial import
-// (AniList is flaky) completes rather than duplicating.
-func importFromAniList(st *store.Store, username, statusList string) error {
-	var statuses []string
-	for _, s := range strings.Split(statusList, ",") {
-		if s = strings.TrimSpace(s); s != "" {
-			statuses = append(statuses, s)
-		}
-	}
-
-	fmt.Printf("fetching %v for %q from AniList...\n", statuses, username)
-	entries, err := anilist.NewClient().FetchList(username, statuses)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("got %d entries\n", len(entries))
-
-	res, err := anilist.NewImporter(st).Import(entries)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("created %d shows, updated %d, skipped %d\n", res.Created, res.Updated, res.Skipped)
-	fmt.Printf("marked %d episodes as watched (terminal: never re-grabbed)\n", res.Episodes)
-	for _, e := range res.Errors {
-		fmt.Printf("  error: %s\n", e)
-	}
-	fmt.Println("\nnote: imported shows have no release-group offsets yet.")
-	fmt.Println("run the trainer for each show before the listener will match anything.")
-	return nil
 }
 
 func truncate(s string, n int) string {

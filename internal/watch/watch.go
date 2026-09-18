@@ -1,8 +1,7 @@
 // Package watch handles the watch signal and the deletion that follows it.
 //
 // The signal comes from a bespoke mpv script that POSTs when an episode
-// finishes. AniList is out of the loop entirely: mpv -> kishizu, one hop on the
-// tailnet, no third party.
+// finishes. One hop on the tailnet, no third party involved.
 //
 // Failure direction: if the signal never arrives, nothing is deleted. A missed
 // watch signal leaves files on disk; a false one would remove something the

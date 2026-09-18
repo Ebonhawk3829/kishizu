@@ -89,9 +89,6 @@ func TestParseShow(t *testing.T) {
 	if sh.Season != "Spring 2026" {
 		t.Errorf("Season = %q, want Spring 2026", sh.Season)
 	}
-	if sh.AniListID != 189046 {
-		t.Errorf("AniListID = %d, want 189046", sh.AniListID)
-	}
 	if sh.MyAnimeListID != 61316 {
 		t.Errorf("MyAnimeListID = %d, want 61316", sh.MyAnimeListID)
 	}
