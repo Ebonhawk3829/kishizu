@@ -38,9 +38,13 @@ func TestResolutionPreferenceDiffersFromQuality(t *testing.T) {
 	if !ResolutionRejected("720p") {
 		t.Error("720p must be rejected; it is below the floor")
 	}
-	if ResolutionRejected("") {
-		t.Error("an unknown resolution must not be rejected")
-	}
+        // An unreadable resolution is below the floor by default: after the
+        // learned vocabulary has had its chance, a title that does not carry
+        // its quality in a readable form does not get the benefit of the
+        // doubt. The fix for a genuinely-good release is to teach the token.
+        if !ResolutionRejected("") {
+                t.Error("an unreadable resolution must be rejected on the grab path")
+        }
 }
 
 // TestCodecRankPrefersSourceEncode: the ranking runs from closest to the

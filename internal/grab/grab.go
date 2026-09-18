@@ -26,14 +26,12 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
 // Reconciler matches finished downloads to episodes and finalises them.
 type Reconciler struct {
 	st *store.Store
-	tc *transmission.Client
 	// Staging is where Transmission drops completed files, as kishizu sees it.
 	// One directory per show, so a file's show is known from its location and
 	// only its episode number has to be read from the name.
@@ -46,9 +44,11 @@ type Reconciler struct {
 // New builds a Reconciler.
 //
 // staging and library are both required: staging is scanned for completed
-// files, library is where they are moved to.
-func New(st *store.Store, tc *transmission.Client, staging, library string) *Reconciler {
-	return &Reconciler{st: st, tc: tc, Staging: staging, Library: library}
+// files, library is where they are moved to. No Transmission client is
+// needed — the done-script removes torrents on completion, so the staging
+// directory is the durable record, not the torrent list.
+func New(st *store.Store, staging, library string) *Reconciler {
+	return &Reconciler{st: st, Staging: staging, Library: library}
 }
 
 // Reconcile finalises every completed download that corresponds to a
@@ -75,6 +75,9 @@ func (r *Reconciler) Reconcile() error {
 		if err != nil {
 			return err
 		}
+		// Self-heal first: an episode whose file is already in the library
+		// but whose database write never landed is stuck forever otherwise.
+		r.healLibrary(sh, eps)
 		// Index the episodes actually in flight. A file is only moved if it
 		// resolves to one of these, so an unrecognised file is left alone
 		// rather than guessed at.
@@ -195,8 +198,12 @@ func mediaFiles(dir string) ([]string, error) {
 // episode downloaded.
 //
 // The target is <library>/<Show>/<Show> - E<NN>.<ext>. The extension comes
-// from the largest file in the torrent, since a release may carry more than
-// one file.
+// from the source file.
+//
+// The two database writes are a transaction, so the episode can never be
+// marked downloaded without its path (or vice versa) — a half-finalised
+// episode would be invisible to both the reconciler and the missing-file
+// check forever.
 func (r *Reconciler) finalise(sh *store.Show, ep *store.Episode, src string) error {
 	ext := strings.ToLower(filepath.Ext(src))
 	if ext == "" {
@@ -220,14 +227,42 @@ func (r *Reconciler) finalise(sh *store.Show, ep *store.Episode, src string) err
 		return fmt.Errorf("move %s -> %s: %w", src, finalPath, err)
 	}
 
-	if err := r.st.SetFilePath(sh.ID, ep.Number, finalPath); err != nil {
-		return err
-	}
-	if err := r.st.UpsertEpisode(sh.ID, ep.Number, episode.Downloaded, "", ""); err != nil {
+	if err := r.st.FinaliseEpisode(sh.ID, ep.Number, finalPath); err != nil {
 		return err
 	}
 	log.Printf("grab: %s ep%d ready at %s", sh.CanonicalName, ep.Number, finalPath)
 	return nil
+}
+
+// healLibrary finds episodes stuck in "downloading" whose final-form file is
+// already in the library — the residue of a crash between the rename and the
+// database write — and completes them. Without this, such an episode is
+// invisible forever: the reconciler only scans staging, and the file is no
+// longer there.
+func (r *Reconciler) healLibrary(sh *store.Show, eps []*store.Episode) {
+	for _, ep := range eps {
+		if ep.State != episode.Downloading {
+			continue
+		}
+		show := watch.Sanitise(sh.CanonicalName)
+		ext := ""
+		for _, e := range []string{".mkv", ".mp4", ".m4v", ".avi", ".ts", ".mov", ".webm"} {
+			candidate := filepath.Join(r.Library, show, fmt.Sprintf("%s - E%02d%s", show, ep.Number, e))
+			if _, err := os.Stat(candidate); err == nil {
+				ext = e
+				break
+			}
+		}
+		if ext == "" {
+			continue
+		}
+		finalPath := filepath.Join(r.Library, show, fmt.Sprintf("%s - E%02d%s", show, ep.Number, ext))
+		if err := r.st.FinaliseEpisode(sh.ID, ep.Number, finalPath); err != nil {
+			log.Printf("grab: heal %s ep%d: %v", sh.CanonicalName, ep.Number, err)
+			continue
+		}
+		log.Printf("grab: healed %s ep%d (found %s)", sh.CanonicalName, ep.Number, finalPath)
+	}
 }
 
 // isMedia reports whether a filename looks like a video file.
@@ -239,10 +274,6 @@ func isMedia(name string) bool {
 	return false
 }
 
-// fileSizeGuess is a placeholder ordering: prefer the file whose name is
+
 // longest, since batch extras are usually small. Real sizes would need the
 // "files" length field from Transmission; the name ordering is sufficient to
-// pick the video among a handful of files.
-func fileSizeGuess(name string) int {
-	return len(name)
-}

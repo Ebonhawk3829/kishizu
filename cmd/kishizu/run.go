@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -23,8 +24,6 @@ func magnetFor(infohash, title string) string {
 	return "magnet:?xt=urn:btih:" + infohash + "&dn=" + title
 }
 
-// itoa avoids importing strconv for one call site.
-func itoa(n int) string { return fmt.Sprint(n) }
 
 // runLoop polls Nyaa on a schedule and hands grabs to Transmission.
 //
@@ -32,11 +31,14 @@ func itoa(n int) string { return fmt.Sprint(n) }
 // it is switched on, and the user decides when. In dry-run the loop logs every
 // decision with its reason, so the behaviour can be reviewed before anything
 // downloads.
-func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
+//
+// The loop exits when ctx is cancelled, so SIGINT/SIGTERM stop the pollers,
+// the sweepers and the schedule refresh together with the HTTP server.
+func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, staging, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
 	l := listen.New(st)
 	tc := transmission.New(rpcURL)
 	w := watch.New(st, library, keep)
-	rec := grab.New(st, tc, staging, library)
+	rec := grab.New(st, staging, library)
 	n := ntfy.New(ntfyURL)
 
 	log.Printf("listener: polling every %s (dry-run=%v, transmission=%s)",
@@ -129,55 +131,60 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 	defer sweep.Stop()
 
 	// The schedule is re-checked daily: it is the source of the air times that
-	// drive the windows, and delays move them. One request for the whole
-	// timetable, so the cost is trivial.
+	// drive the windows, and delays move them. One request per show, straight
+	// from each show's own page — the site publishes the same facts on a
+	// weekly timetable, but consulting a second view of the same data would
+	// mean matching tiles to shows, an exact-identity problem the slug
+	// otherwise makes unnecessary.
 	daily := time.NewTicker(24 * time.Hour)
 	defer daily.Stop()
 
 	refreshSchedule := func() {
-		sched, err := schedule.Fetch(nil)
-		if err != nil {
-			log.Printf("schedule refresh: %v", err)
-			return
-		}
 		shows, err := st.ListShows()
 		if err != nil {
 			return
 		}
-		updated := 0
+		updated, finished := 0, 0
 		for _, sh := range shows {
-			// Matched by slug alone. Every show is added from an animeschedule
-			// URL, so every show has one; there is nothing to guess. A show
-			// absent from the timetable is simply not airing this week.
-			e := schedule.FindBySlug(sched, sh.Slug)
-			if e != nil && !e.AirsAt.IsZero() {
-				if err := st.SetNextEpisode(sh.ID, e.NextEp, e.AirsAt); err != nil {
+			if sh.Slug == "" {
+				continue
+			}
+			info, err := schedule.FetchShow(nil, sh.Slug)
+			if err != nil {
+				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+				continue
+			}
+			if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
+				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
+					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 					continue
 				}
 				if err := st.ProjectAirDates(sh.ID); err != nil {
+					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 					continue
 				}
-				if e.ImageURL != sh.ImageURL {
-					_ = st.SetImageURL(sh.ID, e.ImageURL)
-				}
-				// Cache the art now, so the first page load after a refresh is
-				// served from disk rather than reaching out to the CDN.
-				if artCache != nil {
-					if _, err := artCache.Ensure(e.ImageURL); err != nil {
-						log.Printf("art: cache %s: %v", sh.CanonicalName, err)
-					}
-				}
 				updated++
+			} else {
+				// No countdown on the page: the season has finished. This is
+				// the page saying so directly, rather than absence from a
+				// weekly timetable — which was also true of breaks, premieres
+				// and hiatuses, and stripping art for those was wrong.
+				finished++
+			}
+			if info.ImageURL != "" && info.ImageURL != sh.ImageURL {
+				_ = st.SetImageURL(sh.ID, info.ImageURL)
+			}
+			// Cache the art now, so the first page load after a refresh is
+			// served from disk rather than reaching out to the CDN.
+			if artCache != nil {
+				if _, err := artCache.Ensure(info.ImageURL); err != nil {
+					log.Printf("art: cache %s: %v", sh.CanonicalName, err)
+				}
 			}
 		}
-		// Release art for finished seasons.
-		//
-		// The signal is "the next episode is past the season length", NOT
-		// "absent from the timetable". The timetable covers about a week, so
-		// a show that is on a break, between cours, or has not premiered yet
-		// is also absent — and stripping its art would be wrong. Inferring
-		// "season over" from absence is what silently deleted the art for
-		// every show not airing this week.
+		// Release art for finished seasons. The signal is the page's own
+		// countdown being absent AND the next episode being past the season
+		// length — either alone can be a hiatus or a late slot.
 		if artCache != nil {
 			for _, sh := range shows {
 				if sh.ImageURL == "" || sh.MaxEpisode <= 0 {
@@ -195,7 +202,8 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 				}
 			}
 		}
-		log.Printf("schedule: refreshed, %d/%d shows have air dates", updated, len(shows))
+		log.Printf("schedule: refreshed, %d/%d shows have air dates, %d finished",
+			updated, len(shows), finished)
 	}
 
 	// Refresh once at startup so the windows are current.
@@ -203,6 +211,9 @@ func runLoop(st *store.Store, artCache *art.Cache, rpcURL, staging, library stri
 
 	for {
 		select {
+		case <-ctx.Done():
+			log.Printf("listener: shutting down")
+			return
 		case <-tick.C:
 			poll()
 		case <-daily.C:

@@ -31,7 +31,7 @@ func TestDedupesOnInfohash(t *testing.T) {
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	l := New(st)
-	d := l.evaluate(sh, mustMatcher(t, st, sh), nil,
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH1", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL"))
 
 	if !d.Grab {
@@ -42,7 +42,7 @@ func TestDedupesOnInfohash(t *testing.T) {
 	}
 
 	// Second sighting of the same release.
-	d2 := l.evaluate(sh, mustMatcher(t, st, sh), nil,
+	d2 := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH1", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL"))
 	if d2.Grab {
 		t.Errorf("same infohash grabbed twice: %+v", d2)
@@ -69,7 +69,7 @@ func TestTerminalEpisodeIsNeverRegrabbed(t *testing.T) {
 	}
 
 	l := New(st)
-	d := l.evaluate(sh, mustMatcher(t, st, sh), nil,
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH2", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL REPACK"))
 
 	if d.Grab {
@@ -90,48 +90,87 @@ func TestDownloadedEpisodeIsNotRegrabbed(t *testing.T) {
 	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "OLD", "old")
 
 	l := New(st)
-	d := l.evaluate(sh, mustMatcher(t, st, sh), nil,
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH2", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL REPACK"))
 	if d.Grab {
 		t.Errorf("downloaded episode re-grabbed: %+v", d)
 	}
 }
 
-// TestResolutionFloor: resolution is a floor, not a ladder. 720p is rejected
-// when the floor is 1080p; 2160p passes.
+// TestResolutionFloor: the global floor. 720p is rejected; 2160p passes. The
+// floor is hardcoded in rules.go — training cannot change it.
 func TestResolutionFloor(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
-	_ = st.AddFilter(sh.ID, store.Filter{Kind: "resolution", Op: "min", Value: "1080p"})
 
 	l := New(st)
 	m := mustMatcher(t, st, sh)
 
-	low := l.evaluate(sh, m, mustFilters(t, st, sh.ID),
+	low := l.evaluate(sh, m,
 		item("H1", "[ToonsHub] Tomb Raider King S01E09 720p WEB-DL"))
 	if low.Grab {
-		t.Errorf("720p grabbed with a 1080p floor: %+v", low)
+		t.Errorf("720p grabbed below the global floor: %+v", low)
 	}
-	high := l.evaluate(sh, m, mustFilters(t, st, sh.ID),
+	high := l.evaluate(sh, m,
 		item("H2", "[ToonsHub] Tomb Raider King S01E09 2160p WEB-DL"))
 	if !high.Grab {
-		t.Errorf("2160p rejected with a 1080p floor: %+v", high)
+		t.Errorf("2160p rejected above the floor: %+v", high)
 	}
 }
 
-// TestGroupExclusion: an excluded group is never grabbed.
-func TestGroupExclusion(t *testing.T) {
+// TestUnreadableResolutionIsRejected: a title whose resolution the parser
+// cannot read is below the floor by default. If it is genuinely 1080p written
+// unusually, the fix is to teach the vocabulary, not to lower the guard.
+func TestUnreadableResolutionIsRejected(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
-	_ = st.AddFilter(sh.ID, store.Filter{Kind: "group", Op: "exclude", Value: "BadGroup"})
 
 	l := New(st)
-	d := l.evaluate(sh, mustMatcher(t, st, sh), mustFilters(t, st, sh.ID),
-		item("H1", "[BadGroup] Tomb Raider King S01E09 1080p WEB-DL"))
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
+		item("H1", "[ToonsHub] Tomb Raider King S01E09 FHD WEB-DL"))
 	if d.Grab {
-		t.Errorf("excluded group grabbed: %+v", d)
+		t.Errorf("unreadable resolution grabbed: %+v", d)
+	}
+	if want := "no readable resolution"; d.Reason != want {
+		t.Errorf("reason = %q, want %q", d.Reason, want)
+	}
+}
+
+// TestVocabularyReadsUnusualResolution: once a token is learned, the same
+// title parses and clears the floor. The vocabulary must be applied at the
+// point of enforcement, not only in the training panel.
+func TestVocabularyReadsUnusualResolution(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+	if err := st.LearnVocabulary("resolution", "FHD", "1080p"); err != nil {
+		t.Fatal(err)
+	}
+
+	l := New(st)
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
+		item("H1", "[ToonsHub] Tomb Raider King S01E09 FHD WEB-DL"))
+	if !d.Grab {
+		t.Errorf("learned vocabulary not applied at enforcement: %+v", d)
+	}
+}
+
+// TestBatchIsRejected: batches are out of scope globally.
+func TestBatchIsRejected(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+
+	l := New(st)
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
+		item("H1", "[ToonsHub] Tomb Raider King (01-12) 1080p WEB-DL"))
+	if d.Grab {
+		t.Errorf("batch grabbed: %+v", d)
+	}
+	if d.Reason != "batch" {
+		t.Errorf("reason = %q, want %q", d.Reason, "batch")
 	}
 }
 
@@ -145,48 +184,45 @@ func TestLowConfidenceIsNotGrabbed(t *testing.T) {
 	_ = st.SetGroupOffset(sh.ID, "B", 40, "training")
 
 	l := New(st)
-	d := l.evaluate(sh, mustMatcher(t, st, sh), nil,
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("H1", "[BrandNewGroup] Tomb Raider King S01E09 1080p WEB-DL"))
 	if d.Grab {
 		t.Errorf("low-confidence grab: %+v", d)
 	}
 }
 
-// TestBestPicksPreferredGroup: when two releases for the same episode are
-// candidates, the one matching more preferences wins.
+// TestBestPicksPreferredGroup: the global group order decides between two
+// candidates for the same episode. ToonsHub is in the default order;
+// OtherGroup is not.
 func TestBestPicksPreferredGroup(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
-
-	prefs := []store.Preference{
-		{Kind: "group", Value: "ToonsHub", Rank: 0},
-		{Kind: "codec", Value: "h.264", Rank: 0},
-		{Kind: "codec", Value: "hevc", Rank: 99},
-	}
+	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+	_ = st.SetGroupOffset(sh.ID, "OtherGroup", 0, "training")
 
 	decisions := []Decision{
 		{Grab: true, ShowID: sh.ID, Episode: 9,
-			Item: item("H1", "[OtherGroup] Tomb Raider King S01E09 1080p HEVC")},
+			Item: item("H1", "[OtherGroup] Tomb Raider King S01E09 1080p H.264")},
 		{Grab: true, ShowID: sh.ID, Episode: 9,
-			Item: item("H2", "[ToonsHub] Tomb Raider King S01E09 1080p H.264")},
+			Item: item("H2", "[ToonsHub] Tomb Raider King S01E09 1080p HEVC")},
 	}
-	best := Best(decisions, prefs)
+	best := Best(decisions)
 	if len(best) != 1 {
 		t.Fatalf("got %d best, want 1", len(best))
 	}
 	if best[0].Item.InfoHash != "H2" {
-		t.Errorf("best = %s, want H2 (preferred group and codec)", best[0].Item.InfoHash)
+		t.Errorf("best = %s, want H2 (preferred group)", best[0].Item.InfoHash)
 	}
 }
 
-// TestBestBreaksTiesOnSeeders: equal preference, more seeders wins.
+// TestBestBreaksTiesOnSeeders: equal rank, more seeders wins.
 func TestBestBreaksTiesOnSeeders(t *testing.T) {
-	a := Decision{Grab: true, ShowID: 1, Episode: 5, Item: item("HA", "[G] Show S01E05")}
+	a := Decision{Grab: true, ShowID: 1, Episode: 5, Item: item("HA", "[ToonsHub] Show S01E05 1080p")}
 	a.Item.Seeders = 3
-	b := Decision{Grab: true, ShowID: 1, Episode: 5, Item: item("HB", "[G] Show S01E05")}
+	b := Decision{Grab: true, ShowID: 1, Episode: 5, Item: item("HB", "[ToonsHub] Show S01E05 1080p")}
 	b.Item.Seeders = 30
 
-	best := Best([]Decision{a, b}, nil)
+	best := Best([]Decision{a, b})
 	if len(best) != 1 || best[0].Item.InfoHash != "HB" {
 		t.Errorf("best = %+v, want HB (more seeders)", best)
 	}
@@ -199,13 +235,4 @@ func mustMatcher(t *testing.T, st *store.Store, sh *store.Show) *store.Matcher {
 		t.Fatal(err)
 	}
 	return m
-}
-
-func mustFilters(t *testing.T, st *store.Store, showID int64) []store.Filter {
-	t.Helper()
-	f, err := st.Filters(showID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
 }

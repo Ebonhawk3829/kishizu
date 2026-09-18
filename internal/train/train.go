@@ -79,12 +79,9 @@ type Session struct {
 	Asked    map[string]bool
 	Accepted int
 	Rejected int
-
-	// pending holds filters/preferences learned this session, written on Commit
-	// so that cancelling discards them.
-	pending []pendingWrite
-	// retracted are rules this session contradicted, deleted on Commit.
-	retracted []store.Filter
+	// gradedTokens remembers quality tokens already confirmed this session,
+	// so novelty stops re-offering a title for a token the user has seen.
+	gradedTokens map[string]bool
 }
 
 // NewSession starts training for a show at a given episode.
@@ -96,11 +93,12 @@ func NewSession(st *store.Store, sh *store.Show, targetEp int) (*Session, error)
 	known := distinct(offsets)
 
 	return &Session{
-		st:       st,
-		show:     sh,
-		m:        &match.MemShow{Name: sh.CanonicalName, Alias: sh.Aliases, Max: sh.MaxEpisode, Offsets: offsets, Defaults: known},
-		TargetEp: targetEp,
-		Asked:    map[string]bool{},
+		st:           st,
+		show:         sh,
+		m:            &match.MemShow{Name: sh.CanonicalName, Alias: sh.Aliases, Max: sh.MaxEpisode, Offsets: offsets, Defaults: known},
+		TargetEp:     targetEp,
+		Asked:        map[string]bool{},
+		gradedTokens: map[string]bool{},
 	}, nil
 }
 
@@ -232,20 +230,9 @@ func (s *Session) novelty(title string) (float64, []string) {
 	return score, unseen
 }
 
-// seenValue reports whether a quality token appears in any rule or preference
-// already learned for this show.
+// seenValue reports whether a quality token has been graded this session.
 func (s *Session) seenValue(v string) bool {
-	for _, p := range s.pending {
-		if strings.EqualFold(p.v, v) {
-			return true
-		}
-	}
-	for _, f := range s.retracted {
-		if strings.EqualFold(f.Value, v) {
-			return true
-		}
-	}
-	return false
+	return s.gradedTokens[strings.ToLower(v)]
 }
 
 // Propose returns the candidates worth grading, most informative first.
@@ -345,33 +332,14 @@ func (s *Session) Accept(c Candidate) error {
 	return nil
 }
 
-// Reject records a negative answer. Only matcher-related reasons change the
-// model; quality reasons are recorded as filters/preferences instead.
+// Reject records that a candidate is not this episode, so it is not proposed
+// again this session. Quality verdicts are global rules set in advance —
+// training never writes them — so the only thing a rejection teaches is
+// "stop asking about this release".
 func (s *Session) Reject(c Candidate, reason Reason) error {
 	s.Asked[c.Item.InfoHash] = true
 	s.Rejected++
-
-	if err := s.st.AddRejected(s.show.ID, c.Item.Title, string(reason)); err != nil {
-		return err
-	}
-
-	switch reason {
-	case ReasonBatch:
-		return s.st.AddFilter(s.show.ID, store.Filter{Kind: "batch", Op: "exclude", Value: "true"})
-	case ReasonDub:
-		return s.st.AddFilter(s.show.ID, store.Filter{Kind: "source", Op: "exclude", Value: "dub"})
-	case ReasonCodec:
-		// Ranking only: never accept/reject on codec.
-		r := release.Parse(c.Item.Title)
-		if r.Codec != "" {
-			return s.st.AddPreference(s.show.ID, store.Preference{Kind: "codec", Value: r.Codec, Rank: 99})
-		}
-		return nil
-	case ReasonWrongShow, ReasonWrongEpisode:
-		// The matcher got this wrong. Do not add the title's tokens as aliases,
-		// since they led us astray.
-		return nil
-	}
+	_ = reason
 	return nil
 }
 
@@ -412,10 +380,7 @@ func (s *Session) Commit() error {
 			return err
 		}
 	}
-	if err := s.flushRetracted(); err != nil {
-		return err
-	}
-	return s.flushPending()
+	return nil
 }
 
 func (s *Session) addAliases(title string) {

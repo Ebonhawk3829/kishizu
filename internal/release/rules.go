@@ -39,9 +39,16 @@ var ResolutionPenalty = map[string]int{
 }
 
 // ResolutionRejected reports whether a resolution is below the floor.
+//
+// A resolution the parser could not read is ALSO rejected: after the learned
+// vocabulary has had its chance to fill the gap, an empty resolution is a
+// title that does not carry its quality in a readable form, and a release
+// that cannot be quality-checked does not get the benefit of the doubt.
+// Callers that merely DISPLAY a parse (the training panel) should use the
+// parse directly instead, so the user can teach the missing token.
 func ResolutionRejected(res string) bool {
 	if res == "" {
-		return false // unknown is not rejected; it just earns no preference
+		return true
 	}
 	rank, ok := ResolutionPenalty[strings.ToLower(res)]
 	if !ok {
@@ -131,14 +138,43 @@ func RuleRank(r *Release) int {
 
 // RuleReject reports whether a release is excluded by a global rule, and why.
 //
-// Only two things are hard rejects: a batch (out of scope entirely) and a
-// resolution below the floor. Everything else is a demotion.
+// Only three things are hard rejects: a batch (out of scope entirely), a
+// resolution below the floor, and a resolution the parser could not read.
+// Everything else is a demotion.
 func RuleReject(r *Release) (bool, string) {
 	if r.IsBatch {
 		return true, "batch"
 	}
 	if ResolutionRejected(r.Resolution) {
+		if r.Resolution == "" {
+			return true, "no readable resolution"
+		}
 		return true, "resolution " + r.Resolution + " below floor"
 	}
 	return false, ""
+}
+
+// DefaultGroupOrder is the release-group preference, best first. It is global
+// and set in advance: which group posted a release says more about its
+// quality than any attribute of the file does. Unlisted groups are still
+// eligible — this is a ranking, not an allowlist.
+//
+// Overridable at startup by the caller (e.g. the -prefer flag); never written
+// by training.
+var DefaultGroupOrder = []string{"VARYG", "Erai-Raws", "SubsPlease", "ToonsHub"}
+
+// GroupRank returns where a release's group sits in DefaultGroupOrder.
+// Unlisted groups sort last (RankUnlisted) but are not excluded.
+const RankUnlisted = 1000
+
+func GroupRank(group string) int {
+	want := NormaliseGroup(group)
+	if want != "" {
+		for i, g := range DefaultGroupOrder {
+			if NormaliseGroup(g) == want {
+				return i
+			}
+		}
+	}
+	return RankUnlisted
 }

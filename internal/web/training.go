@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/match"
@@ -18,9 +18,13 @@ import (
 
 // ---------- training ----------
 
-// session is the in-flight training state. One at a time is fine: training is
-// a human-driven, single-user activity.
-var session struct {
+// trainSession is the in-flight training state. One at a time is a feature:
+// training is a human-driven, single-user activity, and the UI has a single
+// modal. The mutex makes that single-flight guarantee real under concurrent
+// requests (a double-click on Train, two tabs) rather than trusting the
+// client to be polite.
+type trainSession struct {
+	mu     sync.Mutex
 	active bool
 	sess   *train.Session
 	show   *store.Show
@@ -35,18 +39,24 @@ type startRequest struct {
 // handleTrainStart opens a training session scoped to a show.
 //
 // There is no seed example and no episode picker. The session opens on the raw
-// results of an alias search and the user picks one to grade; the episode comes
-// from the release they choose.
+// results of an alias search and the user confirms the parse of one; the
+// episode comes from the release they choose.
 //
 // No seeding, deliberately. Seeding from a "known good" release teaches only
 // what to accept — it can never show what to reject, and rejection is most of
 // what the matcher does. A raw alias search is an unbiased sample: some right,
-// some wrong, some unreadable. Grading across that gives both signals.
+// some wrong, some unreadable. Confirming across that gives both signals.
 //
 // There is also no paste-a-link path. If a release does not appear in the
 // alias-derived results, the alias set does not match it — and if it does not
 // match during training it will not match during hunting either. The fix is to
 // correct the alias, not to route around it.
+//
+// Candidates are filtered to releases published after this season's first
+// episode aired (minus a week's slack). A group that numbers this season with
+// a carry-over offset has "episode 1" uploads from months ago that parse as
+// perfectly plausible episodes of the NEW season; without the time filter a
+// training run can anchor an offset to last season's file.
 func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 	var req startRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -69,6 +79,7 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("fetch feed: %w", err))
 		return
 	}
+	items = filterToSeason(s.st, items, sh)
 	if len(items) == 0 {
 		// Not an error to paper over: it means the alias set matches nothing,
 		// which is a real defect worth saying out loud.
@@ -80,8 +91,8 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 
 	// The episode is not chosen up front. NewSession wants a target, so use the
 	// next unwatched as a starting hint; it is overridden by whatever release
-	// the user actually grades.
-	ep := nextUnwatched(s.st, sh)
+	// the user actually confirms.
+	ep := s.st.NextUnwatched(sh.ID)
 
 	sess, err := train.NewSession(s.st, sh, ep)
 	if err != nil {
@@ -89,17 +100,50 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session.active = true
-	session.sess = sess
-	session.show = sh
-	session.items = items
-	session.ep = ep
+	s.session.mu.Lock()
+	defer s.session.mu.Unlock()
+	s.session.active = true
+	s.session.sess = sess
+	s.session.show = sh
+	s.session.items = items
+	s.session.ep = ep
 
-	writeJSON(w, s.trainState())
+	writeJSON(w, s.trainStateLocked())
+}
+
+// filterToSeason drops releases published before this season could have had
+// any episodes. The anchor is episode 1's projected air date minus a week's
+// slack for early uploads and timezone slop. Shows with no air date keep
+// everything: there is nothing to anchor to, and inventing a bound would be
+// guessing.
+func filterToSeason(st *store.Store, items []nyaa.Item, sh *store.Show) []nyaa.Item {
+	eps, err := st.EpisodesForShow(sh.ID)
+	if err != nil {
+		return items
+	}
+	var first *time.Time
+	for _, ep := range eps {
+		if ep.Number == 1 && ep.AirsAt != nil {
+			first = ep.AirsAt
+			break
+		}
+	}
+	if first == nil {
+		return items
+	}
+	cutoff := first.AddDate(0, 0, -7)
+	var out []nyaa.Item
+	for _, it := range items {
+		if it.PubDate.IsZero() || !it.PubDate.Before(cutoff) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 type trainStateJSON struct {
 	Active     bool            `json:"active"`
+	ShowID     int64           `json:"show_id"`
 	Show       string          `json:"show"`
 	Episode    int             `json:"episode"`
 	Accepted   int             `json:"accepted"`
@@ -136,24 +180,25 @@ type candidateJSON struct {
 	Attrs       []train.AttrValue `json:"attrs"`
 }
 
-func (s *Server) trainState() trainStateJSON {
+func (s *Server) trainStateLocked() trainStateJSON {
 	st := trainStateJSON{
-		Active:   session.active,
-		Episode:  session.ep,
-		Accepted: session.sess.Accepted,
-		Rejected: session.sess.Rejected,
-		Offsets:  session.sess.Offsets(),
+		Active:   s.session.active,
+		Episode:  s.session.ep,
+		Accepted: s.session.sess.Accepted,
+		Rejected: s.session.sess.Rejected,
+		Offsets:  s.session.sess.Offsets(),
 	}
-	if session.show != nil {
-		st.Show = session.show.CanonicalName
+	if s.session.show != nil {
+		st.Show = s.session.show.CanonicalName
+		st.ShowID = s.session.show.ID
 	}
 
 	// A generous list: nothing is filtered for looking confident, so the user
 	// can work down it as far as they like.
-	for i, c := range session.sess.Propose(session.items, 25) {
+	for i, c := range s.session.sess.Propose(s.session.items, 25) {
 		st.Candidates = append(st.Candidates, s.candidateJSON(i, c))
 	}
-	for i, c := range session.sess.Resolved(session.items, 5) {
+	for i, c := range s.session.sess.Resolved(s.session.items, 5) {
 		st.Resolved = append(st.Resolved, s.candidateJSON(i, c))
 	}
 	return st
@@ -179,77 +224,37 @@ func (s *Server) candidateJSON(i int, c train.Candidate) candidateJSON {
 }
 
 func (s *Server) handleTrainState(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
+	s.session.mu.Lock()
+	defer s.session.mu.Unlock()
+	if !s.session.active {
 		writeJSON(w, trainStateJSON{Active: false})
 		return
 	}
-	writeJSON(w, s.trainState())
-}
-
-type answerRequest struct {
-	Index  int    `json:"index"`
-	Accept bool   `json:"accept"`
-	Reason string `json:"reason"`
-}
-
-func (s *Server) handleTrainAnswer(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
-		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
-		return
-	}
-
-	var req answerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-
-	cands := session.sess.Propose(session.items, 3)
-	if req.Index < 0 || req.Index >= len(cands) {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("index %d out of range", req.Index))
-		return
-	}
-	c := cands[req.Index]
-
-	if req.Accept {
-		if err := session.sess.Accept(c); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-	} else {
-		reason := train.Reason(req.Reason)
-		if reason == "" {
-			reason = train.ReasonOther
-		}
-		if err := session.sess.Reject(c, reason); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
-
-	writeJSON(w, s.trainState())
+	writeJSON(w, s.trainStateLocked())
 }
 
 func (s *Server) handleTrainCommit(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
+	s.session.mu.Lock()
+	defer s.session.mu.Unlock()
+	if !s.session.active {
 		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
 		return
 	}
-	if err := session.sess.Commit(); err != nil {
+	if err := s.session.sess.Commit(); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	// Verify the learned model against the live feed, so the user can see
 	// whether training actually worked before moving on.
-	verified := s.verify(session.show, session.items)
+	verified := s.verify(s.session.show, s.session.items)
 
-	session.active = false
+	s.session.active = false
 	writeJSON(w, map[string]any{
 		"committed": true,
-		"accepted":  session.sess.Accepted,
-		"rejected":  session.sess.Rejected,
-		"verified":  verified,
+		"accepted":   s.session.sess.Accepted,
+		"rejected":   s.session.sess.Rejected,
+		"verified":   verified,
 	})
 }
 
@@ -268,44 +273,19 @@ func (s *Server) handleTrainReset(w http.ResponseWriter, r *http.Request) {
 	}
 	// Also drop any in-flight session for this show, or its stale in-memory
 	// offsets would be committed later and undo the reset.
-	if session.active && session.show != nil && session.show.ID == req.ShowID {
-		session.active = false
+	s.session.mu.Lock()
+	if s.session.active && s.session.show != nil && s.session.show.ID == req.ShowID {
+		s.session.active = false
 	}
+	s.session.mu.Unlock()
 	writeJSON(w, map[string]any{"reset": true, "show_id": req.ShowID})
-}
-
-// handleTrainTeach records a known-good example the user typed in directly.
-func (s *Server) handleTrainTeach(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
-		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
-		return
-	}
-	var req struct {
-		Title   string `json:"title"`
-		Episode int    `json:"episode"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	req.Title = strings.TrimSpace(req.Title)
-	if req.Title == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("title is required"))
-		return
-	}
-	if req.Episode == 0 {
-		req.Episode = session.ep
-	}
-	if err := session.sess.Teach(req.Title, req.Episode); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, s.trainState())
 }
 
 // handleTrainInspect resolves a pasted link or title into gradable attributes.
 func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
+	s.session.mu.Lock()
+	defer s.session.mu.Unlock()
+	if !s.session.active {
 		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
 		return
 	}
@@ -335,9 +315,9 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 
 	ep := req.Episode
 	if ep == 0 {
-		ep = session.ep
+		ep = s.session.ep
 	}
-	res := match.Match(session.sess.Show(), title)
+	res := match.Match(s.session.sess.Show(), title)
 	resolved := 0
 	if res.Matched {
 		resolved = res.Episode
@@ -392,7 +372,9 @@ func (s *Server) handleTrainVocab(w http.ResponseWriter, r *http.Request) {
 
 // handleTrainGrade applies per-attribute verdicts.
 func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
+	s.session.mu.Lock()
+	defer s.session.mu.Unlock()
+	if !s.session.active {
 		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
 		return
 	}
@@ -408,10 +390,10 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 	}
 	ep := req.Episode
 	if ep == 0 {
-		ep = session.ep
+		ep = s.session.ep
 	}
 
-	res := match.Match(session.sess.Show(), req.Title)
+	res := match.Match(s.session.sess.Show(), req.Title)
 	resolved := 0
 	if res.Matched {
 		resolved = res.Episode
@@ -431,18 +413,18 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 		grades[train.Attribute(k)] = gr
 	}
 
-	notes, err := session.sess.ApplyGrades(g, grades, ep)
+	notes, err := s.session.sess.ApplyGrades(g, grades, ep)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	if grades[train.AttrEpisode] == train.GradeGood {
-		session.sess.MarkAsked(req.Title)
+		s.session.sess.MarkAsked(req.Title)
 	}
 
 	writeJSON(w, map[string]any{
 		"notes": notes,
-		"state": s.trainState(),
+		"state": s.trainStateLocked(),
 	})
 }
 
@@ -463,7 +445,9 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 // Absent attributes are skipped either way: there is nothing to confirm about a
 // value the title does not contain.
 func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
-	if !session.active {
+	s.session.mu.Lock()
+	defer s.session.mu.Unlock()
+	if !s.session.active {
 		writeErr(w, http.StatusConflict, fmt.Errorf("no active training session"))
 		return
 	}
@@ -481,7 +465,7 @@ func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := match.Match(session.sess.Show(), req.Title)
+	res := match.Match(s.session.sess.Show(), req.Title)
 	resolved := 0
 	if res.Matched {
 		resolved = res.Episode
@@ -521,16 +505,16 @@ func (s *Server) handleTrainAcceptAll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	notes, err := session.sess.ApplyGrades(g, grades, resolved)
+	notes, err := s.session.sess.ApplyGrades(g, grades, resolved)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	session.sess.MarkAsked(req.Title)
+	s.session.sess.MarkAsked(req.Title)
 
 	writeJSON(w, map[string]any{
 		"notes": notes,
-		"state": s.trainState(),
+		"state": s.trainStateLocked(),
 	})
 }
 
@@ -538,29 +522,6 @@ type verifiedJSON struct {
 	Title   string `json:"title"`
 	Episode int    `json:"episode"`
 	Seeders int    `json:"seeders"`
-}
-
-// releaseSummaries describes feed items so the UI can ask the user to pick a
-// seed when we cannot determine one safely.
-func releaseSummaries(items []nyaa.Item, limit int) []candidateJSON {
-	var out []candidateJSON
-	for i, it := range items {
-		if i >= limit {
-			break
-		}
-		r := release.Parse(it.Title)
-		out = append(out, candidateJSON{
-			Index:      i,
-			Title:      it.Title,
-			Episode:    r.RawEpisode(),
-			Seeders:    it.Seeders,
-			Size:       it.Size,
-			Resolution: r.Resolution,
-			Codec:      r.Codec,
-			Group:      r.Group,
-		})
-	}
-	return out
 }
 
 // verify re-matches the feed with the committed model and returns what would
@@ -573,7 +534,7 @@ func (s *Server) verify(sh *store.Show, items []nyaa.Item) []verifiedJSON {
 	var out []verifiedJSON
 	for _, it := range items {
 		res := match.Match(m, it.Title)
-		if res.Matched && res.Episode == session.ep {
+		if res.Matched && res.Episode == s.session.ep {
 			out = append(out, verifiedJSON{Title: it.Title, Episode: res.Episode, Seeders: it.Seeders})
 		}
 	}
@@ -595,10 +556,3 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
 
-// humanSize is a small helper for templates.
-func humanSize(s string) string { return s }
-
-var _ = strconv.Itoa
-var _ = strings.TrimSpace
-var _ = time.Now
-var _ = humanSize

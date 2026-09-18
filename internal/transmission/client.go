@@ -83,17 +83,6 @@ func (c *Client) call(method string, args any, out any) error {
 	return fmt.Errorf("%s: could not obtain a session token", method)
 }
 
-// Add hands a magnet link to Transmission.
-//
-// paused is false for a normal grab. The download directory is Transmission's
-// own; kishizu does not override it, since the existing stack already routes
-// /downloads correctly.
-func (c *Client) Add(magnet string) error {
-	return c.call("torrent-add", map[string]any{
-		"filename": magnet,
-	}, nil)
-}
-
 // AddWithDir is Add with an explicit download directory, for tests and for a
 // future per-show folder layout.
 func (c *Client) AddWithDir(magnet, dir string) error {
@@ -101,71 +90,4 @@ func (c *Client) AddWithDir(magnet, dir string) error {
 		"filename":     magnet,
 		"download-dir": dir,
 	}, nil)
-}
-
-// Torrent is the slice of a torrent's state kishizu cares about.
-type Torrent struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Hash       string `json:"hashString"`
-	Status     int    `json:"status"`
-	IsFinished bool   `json:"isFinished"`
-	// DownloadDir is where the torrent's files landed. Needed to rename into
-	// the library layout and to record file_path for the watch sweeper.
-	DownloadDir string   `json:"downloadDir"`
-	Files       []string `json:"-"`
-}
-
-// List returns every torrent Transmission knows about.
-func (c *Client) List() ([]Torrent, error) {
-	var out struct {
-		Torrents []struct {
-			ID          int64  `json:"id"`
-			Name        string `json:"name"`
-			Hash        string `json:"hashString"`
-			Status      int    `json:"status"`
-			IsFinished  bool   `json:"isFinished"`
-			DownloadDir string `json:"downloadDir"`
-			Files       []struct {
-				Name string `json:"name"`
-			} `json:"files"`
-		} `json:"torrents"`
-	}
-	err := c.call("torrent-get", map[string]any{
-		"fields": []string{"id", "name", "hashString", "status", "isFinished",
-			"downloadDir", "files"},
-	}, &out)
-	if err != nil {
-		return nil, err
-	}
-	torrents := make([]Torrent, 0, len(out.Torrents))
-	for _, t := range out.Torrents {
-		files := make([]string, 0, len(t.Files))
-		for _, f := range t.Files {
-			files = append(files, f.Name)
-		}
-		torrents = append(torrents, Torrent{
-			ID: t.ID, Name: t.Name, Hash: t.Hash,
-			Status: t.Status, IsFinished: t.IsFinished,
-			DownloadDir: t.DownloadDir, Files: files,
-		})
-	}
-	return torrents, nil
-}
-
-// RenamePath renames a path within a torrent. Used to move a completed
-// download into the library layout, so the watch signal can match on a
-// predictable name instead of parsing arbitrary release titles.
-func (c *Client) RenamePath(hash, oldPath, newName string) error {
-	return c.call("torrent-rename-path", map[string]any{
-		"ids":  []string{hash},
-		"path": oldPath,
-		"name": newName,
-	}, nil)
-}
-
-// Remove deletes a torrent. deleteLocal removes its files too.
-func (c *Client) Remove(hash string, deleteLocal bool) error {
-	args := map[string]any{"ids": []string{hash}, "delete-local-data": deleteLocal}
-	return c.call("torrent-remove", args, nil)
 }

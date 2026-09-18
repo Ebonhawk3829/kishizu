@@ -147,43 +147,6 @@ func TestGroupOffsets(t *testing.T) {
 	}
 }
 
-func TestFiltersAndPreferencesAreSeparate(t *testing.T) {
-	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 0)
-
-	// A codec preference (ranking) and a resolution filter (accept/reject) must
-	// not land in the same table — that separation is load-bearing.
-	if err := s.AddPreference(sh.ID, Preference{Kind: "codec", Value: "x264", Rank: 0}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddPreference(sh.ID, Preference{Kind: "codec", Value: "x265", Rank: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddFilter(sh.ID, Filter{Kind: "resolution", Op: "min", Value: "1080p"}); err != nil {
-		t.Fatal(err)
-	}
-
-	prefs, err := s.Preferences(sh.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prefs) != 2 {
-		t.Fatalf("got %d preferences, want 2", len(prefs))
-	}
-	// Ordered by rank: x264 before x265.
-	if prefs[0].Value != "x264" || prefs[1].Value != "x265" {
-		t.Errorf("preferences not rank-ordered: %+v", prefs)
-	}
-
-	filters, err := s.Filters(sh.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(filters) != 1 || filters[0].Kind != "resolution" {
-		t.Errorf("filters = %+v", filters)
-	}
-}
-
 func TestSeenInfohash(t *testing.T) {
 	s := testStore(t)
 

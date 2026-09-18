@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/train"
 )
@@ -13,11 +14,14 @@ import (
 // inferOffsets derives group offsets from the schedule and feed for every
 // show, and applies the user's preferred group order.
 //
-// This is the shortcut for a fresh season: instead of grading releases by
+// This is the shortcut for a fresh season: instead of confirming parses by
 // hand, the air times already in the database do the work. Results are
-// reviewable per show and resettable with the Reset button.
+// reviewable per show and resettable from the training panel.
 func inferOffsets(st *store.Store, preferred string) error {
 	groups := splitGroups(preferred)
+	// The group order is global and set in advance; the -prefer flag overrides
+	// the compiled-in default for this run.
+	release.DefaultGroupOrder = groups
 	shows, err := st.ListShows()
 	if err != nil {
 		return err
@@ -39,14 +43,6 @@ func inferOffsets(st *store.Store, preferred string) error {
 		}
 		for g, off := range offsets {
 			if err := st.SetGroupOffset(sh.ID, g, off, "inferred"); err != nil {
-				return err
-			}
-		}
-		// Preferred groups, best first. Lower rank wins.
-		for i, g := range groups {
-			if err := st.AddPreference(sh.ID, store.Preference{
-				Kind: "group", Value: g, Rank: i, Reason: "user preference order",
-			}); err != nil {
 				return err
 			}
 		}

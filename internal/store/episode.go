@@ -131,14 +131,9 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 
 // MarkWatchedUpTo latches episodes 1..n as watched.
 //
-// For first runs of a newly added show: the user has already seen earlier
+// For a first run of a newly added show: the user has already seen earlier
 // episodes, and without this the listener would grab everything from episode
 // 1. Watched is terminal, so those episodes are never grabbed.
-//
-// Only episodes with no state yet are touched: an episode already downloading
-// or downloaded is left alone, since deleting or re-latching it would be
-// surprising.
-// MarkWatchedUpTo marks episodes 1..n watched.
 //
 // By default it skips episodes that are downloading: re-latching something
 // genuinely in flight would be surprising. But a download can get stuck —
@@ -225,6 +220,44 @@ func (s *Store) SetEpisodeState(showID int64, number int, next episode.State) er
 	return err
 }
 
+// FinaliseEpisode records a completed download in one transaction: the state
+// advances to downloaded AND the file path is written together, so a crash
+// between the two can never leave an episode marked downloaded with no path
+// (invisible to the missing-file check) or a path with no state.
+func (s *Store) FinaliseEpisode(showID int64, number int, path string) error {
+	// Read before the transaction: the pool holds one connection, so a query
+	// inside the transaction would wait on itself forever.
+	existing, err := s.GetEpisode(showID, number)
+	if err != nil {
+		return err
+	}
+	// The latch still applies: a watched episode is not resurrected by a late
+	// finalise.
+	if existing != nil && existing.State.Terminal() {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if existing == nil {
+		if _, err := tx.Exec(`INSERT INTO episode (show_id, number, state, file_path, downloaded_at)
+			VALUES (?, ?, 'downloaded', ?, datetime('now'))`, showID, number, path); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.Exec(`UPDATE episode SET state = 'downloaded', file_path = ?,
+			downloaded_at = datetime('now') WHERE show_id = ? AND number = ?`,
+			path, showID, number); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // SetFilePath records where an episode landed on disk.
 func (s *Store) SetFilePath(showID int64, number int, path string) error {
 	_, err := s.db.Exec(`UPDATE episode SET file_path = ? WHERE show_id = ? AND number = ?`,
@@ -255,6 +288,25 @@ func (s *Store) Unlatch(showID int64, number int) error {
 		release_title = NULL, downloaded_at = NULL, watched_at = NULL
 		WHERE show_id = ? AND number = ?`, string(episode.Wanted), showID, number)
 	return err
+}
+
+// NextUnwatched returns the episode after the highest one the user has
+// consumed. Deliberately max-based rather than sequential: the listener has
+// always done it this way, and a gap in watched history is almost always a
+// failed watch signal rather than genuinely out-of-order viewing — hunting
+// the gap would grab an episode the user has already seen.
+func (s *Store) NextUnwatched(showID int64) int {
+	eps, err := s.EpisodesForShow(showID)
+	if err != nil {
+		return 1
+	}
+	next := 1
+	for _, ep := range eps {
+		if ep.Number >= next && (ep.State == episode.Watched || ep.State == episode.Deleted) {
+			next = ep.Number + 1
+		}
+	}
+	return next
 }
 
 // EpisodesForShow returns every episode row for a show, ordered by number.

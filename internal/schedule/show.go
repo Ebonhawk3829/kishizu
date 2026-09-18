@@ -39,8 +39,7 @@ type Show struct {
 	// full timestamp with a UTC offset, e.g. 2027-01-10T19:00+11:00.
 	//
 	// This is the show's first air time, and for a show that has not premiered
-	// it is the only air information available: the timetable covers about a
-	// week, so a show premiering months out is simply not on it.
+	// it is the only air information available.
 	//
 	// It is the RAW broadcast time — the earliest native airing. Subbed uploads
 	// follow it, so it is the right anchor for "when might a release appear".
@@ -50,6 +49,14 @@ type Show struct {
 	// Zero when the page has no Release Time block. A schedule site does not
 	// list a show without a slot, so in practice that means no usable page.
 	AirsAt time.Time
+	// LatestEpisode is the episode the page's countdown refers to: the next
+	// one to air. 0 when the page carries no countdown, which is how a
+	// finished season reads — cleaner than inferring "over" from absence
+	// on a weekly timetable.
+	LatestEpisode int
+	// NextAirsAt is when LatestEpisode airs, from the RAW countdown target
+	// (the earliest native airing). Zero when there is no countdown.
+	NextAirsAt time.Time
 	// Season is the broadcast season, e.g. "Spring 2026".
 	Season string
 	// Names are the alternative titles, keyed by kind: Romaji, English,
@@ -135,6 +142,8 @@ func hasJapanese(s string) bool {
 	return false
 }
 
+const URL = "https://animeschedule.net"
+
 // ShowURL is the canonical page for a slug.
 func ShowURL(slug string) string { return URL + "/anime/" + slug }
 
@@ -191,6 +200,16 @@ var (
 	reAniList = regexp.MustCompile(`anilist\.co/anime/(\d+)`)
 	reMAL     = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
 	reShowImg = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
+
+	// The page's data blob carries the countdown's episode:
+	// latestEpisode="18" latestEpisodeBaseline="17" ...
+	reLatestEp = regexp.MustCompile(`latestEpisode="(\d+)"`)
+	// The RAW countdown target is the earliest native airing of that
+	// episode. The Subs/Dub variants sit in their own <time> elements with
+	// their own targets; the raw one is in the element carrying the
+	// countdown-time-raw class.
+	reRawCountdown = regexp.MustCompile(
+		`(?s)<time[^>]*class="countdown-time countdown-time-raw"[^>]*data-countdown-target="([^"]+)"`)
 )
 
 // ParseShow extracts a Show from a show page.
@@ -227,6 +246,12 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 	}
 	if m := reRelease.FindStringSubmatch(s); m != nil {
 		sh.AirsAt = parseAirsAt(m[1])
+	}
+	if m := reLatestEp.FindStringSubmatch(s); m != nil {
+		sh.LatestEpisode, _ = strconv.Atoi(m[1])
+	}
+	if m := reRawCountdown.FindStringSubmatch(s); m != nil {
+		sh.NextAirsAt = parseAirsAt(m[1])
 	}
 	if m := reOGImage.FindStringSubmatch(s); m != nil {
 		sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m[1]), "&amp;", "&")
@@ -312,4 +337,28 @@ func SlugFromURL(raw string) string {
 		return ""
 	}
 	return s
+}
+
+// parseAirsAt handles the timestamp formats animeschedule.net emits.
+//
+// Two traps, both of which silently produce a zero time if missed:
+//  1. The offset is HTML-escaped: "2026-09-08T01:00&#43;10:00".
+//  2. There are no SECONDS: "01:00", not "01:00:00". Go's time.RFC3339
+//     requires seconds and rejects the value outright.
+func parseAirsAt(s string) time.Time {
+	s = html.UnescapeString(strings.TrimSpace(s))
+	if s == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02T15:04Z07:00", // no seconds
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }

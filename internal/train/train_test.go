@@ -265,59 +265,6 @@ func TestAcceptLearnsUnseenGroupOffset(t *testing.T) {
 	}
 }
 
-// TestRejectQualityDoesNotTouchMatcher is the guard against the bug found in
-// simulation: rejecting a release for quality must NOT change the matcher, or
-// the tool learns that a correct episode is a bad match.
-func TestRejectQualityDoesNotTouchMatcher(t *testing.T) {
-	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
-	s, _ := NewSession(st, sh, 9)
-	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
-
-	before := len(s.m.Alias)
-	offsetsBefore := len(s.m.Offsets)
-
-	// Correct episode, wrong quality (HEVC).
-	c := Candidate{Item: item("[ToonsHub] Tomb Raider King S01E09 1080p BILI WEB-DL AAC2.0 H.265")}
-	if err := s.Reject(c, ReasonCodec); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(s.m.Offsets) != offsetsBefore {
-		t.Error("quality rejection must not change offsets")
-	}
-	if len(s.m.Alias) != before {
-		t.Error("quality rejection must not add aliases")
-	}
-
-	// It SHOULD have recorded a preference (ranking) and a rejection.
-	prefs, err := st.Preferences(sh.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prefs) != 1 || prefs[0].Kind != "codec" {
-		t.Errorf("preferences = %+v, want one codec preference", prefs)
-	}
-}
-
-func TestRejectBatchAddsFilter(t *testing.T) {
-	st := testStore(t)
-	sh := newShow(t, st, "Show", nil, 12)
-	s, _ := NewSession(st, sh, 1)
-
-	c := Candidate{Item: item("[SubsPlease] Show (01-12) (1080p) [Batch]")}
-	if err := s.Reject(c, ReasonBatch); err != nil {
-		t.Fatal(err)
-	}
-	filters, err := st.Filters(sh.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(filters) != 1 || filters[0].Kind != "batch" {
-		t.Errorf("filters = %+v, want one batch filter", filters)
-	}
-}
-
 func TestReasonUpdatesMatcher(t *testing.T) {
 	cases := map[Reason]bool{
 		ReasonWrongEpisode: true,

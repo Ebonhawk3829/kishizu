@@ -6,22 +6,24 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/anilist"
 	"github.com/Ebonhawk3829/kishizu/internal/art"
 	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
-	"github.com/Ebonhawk3829/kishizu/internal/match"
+	"github.com/Ebonhawk3829/kishizu/internal/listen"
 	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
-	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
-	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
 	"github.com/Ebonhawk3829/kishizu/internal/web"
@@ -88,8 +90,10 @@ func main() {
 		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
-		go runLoop(st, artCache, *rpc, *staging, *library, *keep, *interval, *dryRun, *ntfyURL)
-		if err := srv.ListenAndServe(*serve); err != nil {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		go runLoop(ctx, st, artCache, *rpc, *staging, *library, *keep, *interval, *dryRun, *ntfyURL)
+		if err := srv.ListenAndServe(ctx, *serve); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 			os.Exit(1)
 		}
@@ -197,82 +201,51 @@ func main() {
 	}
 }
 
+// run prints what the listener WOULD grab for one show right now, with the
+// reason for every decision. It is the real pipeline — the same PollShow and
+// FilterPreferences the live loop runs — so the report cannot drift from
+// what -dry-run=false would actually do. Nothing is handed to Transmission.
+//
+// Kept deliberately as a simulation tool: it answers "what would kishizu do
+// and why" against live data without touching anything.
 func run(st *store.Store, sh *store.Show) {
-	m, err := st.NewMatcher(sh)
-	if err != nil {
-		fmt.Printf("\n=== %s\n    ERROR: %v\n", sh.CanonicalName, err)
-		return
-	}
+	l := listen.New(st)
 
 	fmt.Printf("\n=== %s\n", sh.CanonicalName)
-	fmt.Printf("    feed: %s\n", nyaa.FeedURL(sh.CanonicalName))
 
-	items, err := nyaa.Fetch(nil, nyaa.FeedURL(sh.CanonicalName))
+	decisions, err := l.PollShow(sh)
 	if err != nil {
 		fmt.Printf("    ERROR: %v\n", err)
 		return
 	}
-	fmt.Printf("    %d items\n", len(items))
+	fmt.Printf("    %d releases evaluated\n", len(decisions))
 
-	type candidate struct {
-		ep   int
-		item nyaa.Item
-		why  string
-	}
-	var grabbed, skipped []candidate
-
-	for _, it := range items {
-		// Guard 1: infohash identity. Same release seen before, whatever
-		// happened to its episode row since.
-		if seen, err := st.HasSeen(it.InfoHash); err == nil && seen {
-			continue
-		}
-
-		res := match.Match(m, it.Title)
-		if !res.Matched {
-			continue
-		}
-		if res.Episode == 0 {
-			// Matches the show but the number is unreadable. Not a download
-			// candidate; this is what the training loop surfaces.
-			continue
-		}
-
-		existing, err := st.GetEpisode(sh.ID, res.Episode)
-		if err != nil {
-			continue
-		}
-
-		c := candidate{ep: res.Episode, item: it, why: res.Reason}
-
-		// Guard 2: the episode latch. Terminal states (watched/deleted) are
-		// never re-grabbed, which is what stops a late release resurrecting
-		// something already watched and deleted.
-		if existing != nil && !existing.State.MayAutoGrab() {
-			c.why = fmt.Sprintf("episode %d is %s (terminal)", res.Episode, existing.State)
-			skipped = append(skipped, c)
-			continue
-		}
-		grabbed = append(grabbed, c)
-	}
-
-	sort.Slice(grabbed, func(i, j int) bool { return grabbed[i].ep < grabbed[j].ep })
-
-	if len(grabbed) == 0 {
+	grabs := l.FilterPreferences(decisions)
+	if len(grabs) == 0 {
 		fmt.Printf("    nothing to grab\n")
 	} else {
 		fmt.Printf("    WOULD DOWNLOAD:\n")
-		for _, c := range grabbed {
-			r := release.Parse(c.item.Title)
-			fmt.Printf("      ep%-3d seeders=%-5d %-9s %-6s %s\n",
-				c.ep, c.item.Seeders, r.Resolution, r.Codec, truncate(c.item.Title, 70))
+		for _, d := range grabs {
+			fmt.Printf("      ep%-3d seeders=%-5d %s\n      (%s)\n",
+				d.Episode, d.Item.Seeders, truncate(d.Item.Title, 70), d.Reason)
 		}
 	}
 
-	if len(skipped) > 0 {
-		fmt.Printf("    SKIPPED (already handled):\n")
-		for _, c := range skipped {
-			fmt.Printf("      ep%-3d %s\n", c.ep, truncate(c.item.Title, 70))
+	// The refusals are the interesting part: "why was this not grabbed" is the
+	// question a dry run exists to answer.
+	skipped := 0
+	for _, d := range decisions {
+		if !d.Grab {
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		fmt.Printf("    %d skipped:\n", skipped)
+		for _, d := range decisions {
+			if d.Grab {
+				continue
+			}
+			fmt.Printf("      %-70s %s\n", truncate(d.Item.Title, 70), d.Reason)
 		}
 	}
 }

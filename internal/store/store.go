@@ -75,42 +75,62 @@ func derefTime(t *time.Time) time.Time {
 	return *t
 }
 
+// migrate brings a database up to the current schema version.
+//
+// schema.sql creates everything for a fresh database. For an existing one it
+// runs verbatim (every statement is IF NOT EXISTS), then versioned migration
+// steps run in order — each step is idempotent and recorded in schema_version,
+// so a partially-migrated database resumes where it left off.
 func (s *Store) migrate() error {
 	b, err := schemaFS.ReadFile("schema.sql")
 	if err != nil {
 		return fmt.Errorf("read schema: %w", err)
 	}
 	if _, err := s.db.Exec(string(b)); err != nil {
-		// Older databases hold duplicate rows that the new unique indexes
-		// reject. Clean them and retry rather than failing to open.
-		if err := s.dedupe(); err != nil {
-			return err
-		}
-		if _, err := s.db.Exec(string(b)); err != nil {
-			return fmt.Errorf("apply schema: %w", err)
-		}
+		return fmt.Errorf("apply schema: %w", err)
 	}
 	// Runs after the schema so columns added since this database was created
 	// are present before anything selects them.
 	if err := s.addColumns(); err != nil {
 		return err
 	}
-	// Indexes on migrated columns are created here, not in schema.sql: the
-	// schema runs before addColumns, so an index referencing a column that
-	// does not exist yet on an older database would fail the whole open.
-	return s.addIndexes()
+	return s.migrateSteps()
 }
 
-// addIndexes creates indexes that depend on migrated columns.
-//
-// The slug index is partial and unique: most shows have a slug, the ones that
-// do not (films, unlisted shows) are simply not indexed, and two shows must
-// never claim the same schedule page.
-func (s *Store) addIndexes() error {
-	_, err := s.db.Exec(
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL`)
-	if err != nil {
-		return fmt.Errorf("create idx_show_slug: %w", err)
+// migrateSteps applies each recorded version step that has not run yet.
+func (s *Store) migrateSteps() error {
+	type step struct {
+		version int
+		what    string
+		run     func(*Store) error
+	}
+	steps := []step{
+		{1, "drop superseded filter/preference/rejected tables", func(s *Store) error {
+			// Release quality policy is global and hardcoded (rules.go);
+			// the per-show rule tables were superseded and nothing reads
+			// them. The rejected table was write-only.
+			for _, t := range []string{"filter", "preference", "rejected"} {
+				if _, err := s.db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
+					return fmt.Errorf("drop %s: %w", t, err)
+				}
+			}
+			return nil
+		}},
+	}
+	for _, st := range steps {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM schema_version WHERE version = ?`, st.version).Scan(&n); err != nil {
+			return fmt.Errorf("check schema version %d: %w", st.version, err)
+		}
+		if n > 0 {
+			continue
+		}
+		if err := st.run(s); err != nil {
+			return fmt.Errorf("migration %d (%s): %w", st.version, st.what, err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO schema_version (version) VALUES (?)`, st.version); err != nil {
+			return fmt.Errorf("record schema version %d: %w", st.version, err)
+		}
 	}
 	return nil
 }
@@ -123,8 +143,6 @@ func (s *Store) addIndexes() error {
 func (s *Store) addColumns() error {
 	type col struct{ table, name, def string }
 	cols := []col{
-		{"filter", "reason", "TEXT"},
-		{"preference", "reason", "TEXT"},
 		{"show", "next_ep", "INTEGER"},
 		{"show", "next_airs_at", "TEXT"},
 		{"show", "schedule_fetched_at", "TEXT"},
@@ -155,25 +173,7 @@ func (s *Store) addColumns() error {
 	return nil
 }
 
-// dedupe removes repeated filter/preference rows.
-//
-// Needed because these tables were originally plain INSERTs, so rejecting the
-// same thing twice produced duplicates. The unique indexes added later cannot
-// be created while duplicates exist, so old databases must be cleaned first.
-func (s *Store) dedupe() error {
-	stmts := []string{
-		`DELETE FROM filter WHERE id NOT IN (
-			SELECT MIN(id) FROM filter GROUP BY show_id, kind, op, value)`,
-		`DELETE FROM preference WHERE id NOT IN (
-			SELECT MIN(id) FROM preference GROUP BY show_id, kind, value)`,
-	}
-	for _, q := range stmts {
-		if _, err := s.db.Exec(q); err != nil {
-			return fmt.Errorf("dedupe: %w", err)
-		}
-	}
-	return nil
-}
+// ---------- seen infohashes ----------
 
 // ---------- shows ----------
 
@@ -435,20 +435,11 @@ func (s *Store) GetShowByName(name string) (*Show, error) {
 	return s.GetShow(id)
 }
 
-// SetCadence records the expected weekday and when we learned it. Used only for
-// the "on a break, or is my client broken?" diagnostic — never load-bearing.
-func (s *Store) SetCadence(showID int64, weekday int, source string, fetched time.Time) error {
-	_, err := s.db.Exec(`UPDATE show SET cadence_weekday = ?, cadence_source = ?,
-		cadence_fetched_at = ? WHERE id = ?`, weekday, source, fetched.UTC().Format("2006-01-02 15:04:05"), showID)
-	return err
-}
-
 // SetNextEpisode records the schedule's authoritative next-episode point:
 // episode n airs at t. This is the one fact animeschedule.net gives us, and it
 // is held until a download confirms the episode is real.
-// SetNextEpisode records the schedule's authoritative next-episode point.
 //
-// n is clamped to at least 1. The timetable renders "Ep 0" for a show that has
+// n is clamped to at least 1. The page renders "Ep 0" for a show that has
 // been announced but has not premiered, and storing that verbatim breaks
 // everything downstream: episode numbers are 1-based, plausible() rejects
 // anything below 1, and the season-complete check (next > max) can never fire
@@ -467,18 +458,20 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 
 // SetImageURL records the season's cover art, scraped from the schedule.
 // Empty string clears it, so a show that loses its art falls back cleanly.
+// nullIfEmpty keeps an absent value NULL rather than storing "", so "unknown"
+// stays distinguishable from "known to be empty".
+func nullIfEmpty(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+
+// SetImageURL records the season's cover art, scraped from the schedule.
+// Empty string clears it, so a show that loses its art falls back cleanly.
 func (s *Store) SetImageURL(showID int64, url string) error {
 	_, err := s.db.Exec(`UPDATE show SET image_url = ? WHERE id = ?`, nullIfEmpty(url), showID)
 	return err
-}
-
-// ImageURL returns the show's cover art URL, or "" when unknown.
-func (s *Store) ImageURL(showID int64) string {
-	var ns sql.NullString
-	if err := s.db.QueryRow(`SELECT image_url FROM show WHERE id = ?`, showID).Scan(&ns); err != nil {
-		return ""
-	}
-	return ns.String
 }
 
 // NextEpisode returns the schedule's next-episode point, if known.
@@ -651,104 +644,7 @@ func (s *Store) GroupOffsets(showID int64) (map[string]int, error) {
 	return out, rows.Err()
 }
 
-// ---------- filters and preferences ----------
-
-// Filter is a hard accept/reject predicate.
-type Filter struct {
-	Kind   string // group | resolution | size | source | codec
-	Op     string // in | min | max | exclude
-	Value  string
-	Reason string // why the rule exists
-}
-
-// Preference is a soft ranking signal. Lower rank is better.
-type Preference struct {
-	Kind   string // group | codec | uncensored | source
-	Value  string
-	Rank   int
-	Reason string // why this preference exists
-}
-
-func (s *Store) AddFilter(showID int64, f Filter) error {
-	_, err := s.db.Exec(`INSERT INTO filter (show_id, kind, op, value, reason) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (show_id, kind, op, value) DO UPDATE SET reason = excluded.reason`,
-		showID, f.Kind, f.Op, f.Value, nullIfEmpty(f.Reason))
-	return err
-}
-
-// nullIfEmpty keeps an absent reason NULL rather than storing "", so "no reason
-// given" stays distinguishable from "reason is empty".
-func nullIfEmpty(s string) any {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return s
-}
-
-// DeleteFilter removes a rule, so a later grade can retract an earlier one.
-func (s *Store) DeleteFilter(showID int64, f Filter) error {
-	_, err := s.db.Exec(
-		`DELETE FROM filter WHERE show_id = ? AND kind = ? AND op = ? AND value = ?`,
-		showID, f.Kind, f.Op, f.Value)
-	return err
-}
-
-func (s *Store) Filters(showID int64) ([]Filter, error) {
-	rows, err := s.db.Query(`SELECT kind, op, value, COALESCE(reason,'') FROM filter WHERE show_id = ? ORDER BY id`, showID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []Filter
-	for rows.Next() {
-		var f Filter
-		if err := rows.Scan(&f.Kind, &f.Op, &f.Value, &f.Reason); err != nil {
-			return nil, err
-		}
-		out = append(out, f)
-	}
-	return out, rows.Err()
-}
-
-// AddPreference records a soft ranking. Re-grading the same value updates the
-// rank in place rather than adding a second, conflicting row.
-func (s *Store) AddPreference(showID int64, p Preference) error {
-	_, err := s.db.Exec(`INSERT INTO preference (show_id, kind, value, rank, reason) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (show_id, kind, value) DO UPDATE SET rank = excluded.rank, reason = excluded.reason`,
-		showID, p.Kind, p.Value, p.Rank, nullIfEmpty(p.Reason))
-	return err
-}
-
-func (s *Store) Preferences(showID int64) ([]Preference, error) {
-	rows, err := s.db.Query(`SELECT kind, value, rank, COALESCE(reason,'') FROM preference WHERE show_id = ? ORDER BY rank, id`, showID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []Preference
-	for rows.Next() {
-		var p Preference
-		if err := rows.Scan(&p.Kind, &p.Value, &p.Rank, &p.Reason); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
-
-// ---------- rejected ----------
-
-// AddRejected records a negative training signal with the reason, which
-// determines whether the matcher or only the filters get updated.
-func (s *Store) AddRejected(showID int64, releaseTitle, reason string) error {
-	_, err := s.db.Exec(`INSERT INTO rejected (show_id, release_title, reason) VALUES (?, ?, ?)`,
-		showID, releaseTitle, reason)
-	return err
-}
-
-// ---------- seen infohashes ----------
+// ---------- group offsets ----------
 
 // MarkSeen records an infohash we have acted on. Persisted separately from
 // episode rows so a release that reappears after its episode is deleted is

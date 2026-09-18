@@ -350,7 +350,7 @@
       <div><label for="add-name">Name or URL</label><input id="add-name" type="text" placeholder="https://animeschedule.net/anime/... or show name"></div>
       <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
       <div><label for="add-max">Episodes</label><input id="add-max" type="number" min="0" value="0"></div>
-      <div><button class="btn" onclick="addShow()">Add</button></div>
+      <div><button class="btn" id="btn-add">Add</button></div>
     </div>
     <div class="field-error" id="add-error"></div>
   </div>
@@ -367,9 +367,9 @@
   <div class="modal">
     <div class="modal-head">
       <span id="train-heading">Train</span>
-      <button class="btn ghost" onclick="cancelTrain()">Close</button>
+      <button class="btn ghost" id="btn-train-close">Close</button>
     </div>
-    <p class="hint">Releases found by searching every alias, most informative first. Grade one and the list reorders — when nothing new remains, there is nothing left to teach.</p>
+    <p class="hint">Releases found by searching every alias, most informative first. Confirm a parse and the list reorders — when nothing new remains, there is nothing left to teach.</p>
     <div class="field-error" id="train-error"></div>
     <div class="modal-scroll">
       <div id="candidates"></div>
@@ -377,8 +377,9 @@
       <div class="offsets" id="offsets"></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn" onclick="commit()">Finish &amp; save</button>
-      <button class="btn ghost" onclick="cancelTrain()">Cancel</button>
+      <button class="btn" id="btn-commit">Finish &amp; save</button>
+      <button class="btn ghost" id="btn-train-cancel">Cancel</button>
+      <button class="btn danger" id="btn-train-reset">Reset training</button>
     </div>
   </div>
 </div>
@@ -493,6 +494,9 @@ async function addShow() {
 }
 
 // One show row. Status is the hero; everything else is quieter than it.
+// Actions carry data attributes, not inline JS: a show name with an
+// apostrophe would break out of a quoted onclick string, and a crafted name
+// could inject script. Handlers are bound by delegation in wireActions().
 function card(s) {
   const st = s.state || 'unknown';
   const cls = {
@@ -519,16 +523,14 @@ function card(s) {
     air = `Ep ${s.next}${s.max ? ' of ' + s.max : ''}`;
   }
 
-  const n = escapeHtml(s.name).replace(/'/g, "\\'");
-
   // One primary action, context-dependent. Offsets are diagnostic detail and
   // live in the training panel, not on the landing page.
-  let acts = `<button onclick="watchedUpTo(${s.id}, ${s.next}, '${n}')">Watched</button>`;
+  let acts = `<button data-act="watched" data-id="${s.id}" data-next="${s.next}">Watched</button>`;
   if (st === 'missing') {
-    acts = `<button onclick="unlatch(${s.id}, ${s.next}, '${n}')">Re-grab</button>` + acts;
+    acts = `<button data-act="unlatch" data-id="${s.id}" data-next="${s.next}">Re-grab</button>` + acts;
   }
-  acts += `<button onclick="openTrain(${s.id})">Train</button>`;
-  acts += `<button class="danger" onclick="removeShow(${s.id}, '${n}')">Remove</button>`;
+  acts += `<button data-act="train" data-id="${s.id}">Train</button>`;
+  acts += `<button class="danger" data-act="remove" data-id="${s.id}">Remove</button>`;
 
   // The server already says "needs training" or "upcoming" as the state, so
   // the badge is only needed when the state is something else and the show is
@@ -641,9 +643,8 @@ function renderTrain() {
         : '<div class="w" style="color:var(--warn)">no episode number readable — use Grade in detail and supply one</div>'}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${c.episode ? `
-          <button class="btn" onclick="acceptAll(${c.index}, 'preferred')">Correct &amp; preferred</button>
-          <button class="btn ghost" onclick="acceptAll(${c.index}, 'parse')">Parse correct</button>` : ''}
-        <button class="btn ghost" onclick="gradeDetail(${c.index})">Grade in detail</button>
+          <button class="btn" data-act="accept" data-index="${c.index}">Confirm parse</button>` : ''}
+        <button class="btn ghost" data-act="grade" data-index="${c.index}">Correct in detail</button>
       </div>
     </div>
   `).join('') || '<p class="hint">Nothing left to grade — every release found is already known.</p>';
@@ -662,23 +663,23 @@ function renderTrain() {
     : '';
 }
 
-// Quick accept: one click instead of one per attribute. "Parse correct"
-// confirms the extraction only; "Correct & preferred" also records that this is
-// what the user wants. The two are kept apart so confirming a parse never
-// silently records a preference.
-async function acceptAll(index, mode) {
+// Confirm parse: one click. The parse is confirmed and the offset learned;
+// quality attributes are global rules set in advance, so there is nothing
+// else to record.
+async function acceptAll(index) {
   const c = state.candidates[index];
   if (!c) return;
   try {
-    const r = await api('/api/train/accept-all', { title: c.title, mode });
+    const r = await api('/api/train/accept-all', { title: c.title });
     state = r.state;
     renderTrain();
     toast((r.notes || []).join('; ') || 'Saved.');
   } catch (e) { fieldError('train-error', e.message); }
 }
 
-// Per-attribute grading, for when the parse is partly wrong. Each attribute
-// takes one of three verdicts: correct, not in the title, or a different value.
+// Per-attribute correction, for when the parse is partly wrong. Each
+// attribute is either confirmed or corrected; a correction supplies both the
+// canonical value and the token that meant it, so the vocabulary is learned.
 async function gradeDetail(index) {
   const c = state.candidates[index];
   if (!c) return;
@@ -714,8 +715,8 @@ function renderGradePanel(g, title) {
       </p>
       ${g.attrs.map(a => attrRow(a)).join('')}
       <div style="display:flex;gap:8px;margin-top:16px">
-        <button class="btn" onclick="submitCorrections()">Confirm parse</button>
-        <button class="btn ghost" onclick="renderTrain()">Back</button>
+        <button class="btn" data-act="submit-corrections">Confirm parse</button>
+        <button class="btn ghost" data-act="back-to-train">Back</button>
       </div>
     </div>`;
   window._grading = { title, attrs: g.attrs, corrections: {} };
@@ -744,16 +745,16 @@ function attrRow(a) {
       <span class="attr-name">${escapeHtml(a.label)}</span>
       <span class="attr-val ${a.present ? '' : 'absent'}">${escapeHtml(val)}</span>
       <label class="tick">
-        <input type="checkbox" checked onchange="toggleCorrect('${a.key}')">
+        <input type="checkbox" checked data-act="toggle-correct" data-key="${escapeHtml(a.key)}">
         correct
       </label>
       <div class="fix hidden" id="fix-${a.key}">
-        <select id="sb-${a.key}" onchange="recordCorrection('${a.key}')">
+        <select id="sb-${a.key}" data-act="record-correction" data-key="${escapeHtml(a.key)}">
           <option value="">should be…</option>
           ${opts.map(o => `<option value="${escapeHtml(o)}"${o === val ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}
         </select>
         <input id="ts-${a.key}" placeholder="title says…"
-               oninput="recordCorrection('${a.key}')">
+               data-act="record-correction" data-key="${escapeHtml(a.key)}">
       </div>
     </div>`;
 }
@@ -770,9 +771,6 @@ function toggleCorrect(key) {
     recordCorrection(key);
   }
 }
-
-// A correction is only learnable once both halves are present: the canonical
-// value and the token that meant it.
 function recordCorrection(key) {
   const g = window._grading;
   if (!g) return;
@@ -841,42 +839,14 @@ function cancelTrain() {
   document.body.style.overflow = '';
 }
 
-// ── grading ───────────────────────────────────────────────────────────────
-// Season label in the header, derived from the current date. Purely cosmetic:
-// it tells the user which cour they are looking at.
-(function seasonLabel() {
-  const d = new Date();
-  const season = ['Winter', 'Spring', 'Summer', 'Autumn'][Math.floor(d.getMonth() / 3)];
-  el('season').textContent = `${season} ${d.getFullYear()}`;
-})();
+// ── actions ───────────────────────────────────────────────────────────────
+// All row and panel actions are wired by delegation on data-act attributes.
+// No handler is ever built as an HTML string: a show name containing an
+// apostrophe would break out of a quoted onclick attribute, and a crafted
+// name could inject script. The name is read from the row's dataset, which
+// the browser keeps as text.
 
-loadShows();
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function dayName(n) {
-  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][n] || '?';
-}
-
-// Inline confirmation, replacing window.confirm. The prompt appears in the
-// row itself, next to the action, so the user never loses their place — and
-// it is keyboard reachable, which a native dialog is not.
-
-// Re-download an episode: the only way out of a terminal state, and the
-// "that deletion was an accident" path for a missing file.
-
-// Mark episodes 1..n watched. This is the single way to record progress:
-// it covers both "I've seen up to ep 12" on a first run and "I just
-// finished ep 12" after watching, since both latch the same episodes.
-//
-// Only episodes with no state yet are touched, so an episode already
-// downloading or downloaded is left alone.
-
-// Remove a show entirely: the way to drop a finished season, or undo one
-// added by mistake. Files on disk are left alone — this stops kishizu
-// tracking the show, it does not delete episodes.
+function showById(id) { return shows.find(x => x.id === Number(id)); }
 
 function unlatch(showId, ep, name) {
   ep = parseInt(ep, 10);
@@ -926,19 +896,126 @@ function removeShow(showId, name) {
   });
 }
 
+// Reset training: clears the show's learned offsets so training can start
+// over. Confirmed inline on the modal's own button row — the show row is
+// behind the backdrop, so asking there would be invisible.
+function resetTraining(showId, name) {
+  const bar = el('btn-train-reset').parentElement;
+  const original = bar.innerHTML;
+  bar.innerHTML = `<span class="ask" style="color:var(--t2);font-size:13.5px">Clear everything ${escapeHtml(name)} has learned?</span>
+    <button class="btn danger" id="reset-yes" type="button">Yes, clear it</button>
+    <button class="btn ghost" id="reset-no" type="button">Cancel</button>`;
+  const restore = () => { bar.innerHTML = original; wireModalButtons(); };
+  el('reset-yes').onclick = async () => {
+    restore();
+    try {
+      await api('/api/train/reset', { show_id: showId });
+      toast(`${name}: training cleared. Open Train to start over.`);
+      cancelTrain();
+      loadShows();
+    } catch (e) { toast(e.message, true); }
+  };
+  el('reset-no').onclick = restore;
+  el('reset-yes').focus();
+}
+
+// wireModalButtons binds the modal's static buttons. Called at startup and
+// again after resetTraining restores the button row it replaced.
+function wireModalButtons() {
+  el('btn-train-close').onclick = cancelTrain;
+  el('btn-train-cancel').onclick = cancelTrain;
+  el('btn-commit').onclick = commit;
+  el('btn-train-reset').onclick = () => {
+    const s = showById(state.show_id);
+    if (s) resetTraining(s.id, s.name);
+  };
+}
+
 function askConfirm(rowId, question, onYes) {
   const row = el(rowId);
   const acts = row.querySelector('.acts');
   const original = acts.innerHTML;
   acts.classList.add('confirming');
   acts.innerHTML = `<span class="ask">${escapeHtml(question)}</span>
-    <button class="yes" onclick="void 0">Yes</button>
-    <button onclick="void 0">Cancel</button>`;
+    <button class="yes" type="button">Yes</button>
+    <button type="button">Cancel</button>`;
   const [yes, no] = acts.querySelectorAll('button');
   const restore = () => { acts.innerHTML = original; acts.classList.remove('confirming'); };
   yes.onclick = async () => { restore(); await onYes(); };
   no.onclick = restore;
   yes.focus();
+}
+
+// wireActions binds every data-act handler. Called once at startup; the
+// delegated listeners survive re-rendering because they live on the
+// document, not on the re-created rows.
+function wireActions() {
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-act]');
+    if (!t) return;
+    const act = t.dataset.act;
+    const row = t.closest('.row');
+    const s = row ? showById(row.id.replace('row-', '')) : null;
+
+    switch (act) {
+      case 'watched':
+        if (s) watchedUpTo(s.id, s.next, s.name);
+        break;
+      case 'unlatch':
+        if (s) unlatch(s.id, s.next, s.name);
+        break;
+      case 'train':
+        if (s) openTrain(s.id);
+        break;
+      case 'remove':
+        if (s) removeShow(s.id, s.name);
+        break;
+      case 'accept':
+        acceptAll(Number(t.dataset.index));
+        break;
+      case 'grade':
+        gradeDetail(Number(t.dataset.index));
+        break;
+      case 'submit-corrections':
+        submitCorrections();
+        break;
+      case 'back-to-train':
+        window._grading = null;
+        renderTrain();
+        break;
+    }
+  });
+
+  // The correction panel's controls fire on change/input, not click.
+  document.addEventListener('change', e => {
+    const t = e.target.closest('[data-act]');
+    if (!t) return;
+    if (t.dataset.act === 'toggle-correct') toggleCorrect(t.dataset.key);
+    if (t.dataset.act === 'record-correction') recordCorrection(t.dataset.key);
+  });
+  document.addEventListener('input', e => {
+    const t = e.target.closest('[data-act]');
+    if (t && t.dataset.act === 'record-correction') recordCorrection(t.dataset.key);
+  });
+
+  el('btn-add').onclick = addShow;
+  wireModalButtons();
+}
+
+// ── season label ──────────────────────────────────────────────────────────
+// Derived from the current date. Purely cosmetic: it tells the user which
+// cour they are looking at.
+(function seasonLabel() {
+  const d = new Date();
+  const season = ['Winter', 'Spring', 'Summer', 'Autumn'][Math.floor(d.getMonth() / 3)];
+  el('season').textContent = `${season} ${d.getFullYear()}`;
+})();
+
+wireActions();
+loadShows();
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 </script>
 </body>

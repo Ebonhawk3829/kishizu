@@ -8,9 +8,7 @@ package listen
 
 import (
 	"fmt"
-	"log"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
@@ -51,9 +49,7 @@ func New(st *store.Store) *Listener {
 // PollShow fetches one show's feed and evaluates each item.
 func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
 	return l.pollShow(sh)
-}
-
-// DueShows returns the shows whose RSS should be polled right now, with the
+}// DueShows returns the shows whose RSS should be polled right now, with the
 // interval each wants.
 //
 // A show is due when any of its episodes is hunting (aggressive rate) or
@@ -90,9 +86,9 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 		// A show whose next episode is past its season length has finished.
 		// Without this it would poll weekly forever, hunting an episode that
 		// will never exist.
-		if sh.MaxEpisode > 0 && l.nextEpisode(sh) > sh.MaxEpisode {
-			debug.Log("%s: season complete (next %d > max %d), not due",
-				sh.CanonicalName, l.nextEpisode(sh), sh.MaxEpisode)
+		if sh.MaxEpisode > 0 && l.st.NextUnwatched(sh.ID) > sh.MaxEpisode {
+			debug.Log("%s: season complete (next > max %d), not due",
+				sh.CanonicalName, sh.MaxEpisode)
 			continue
 		}
 
@@ -130,52 +126,12 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 	return len(offsets) > 0
 }
 
-// nextEpisode is the first episode not yet watched or deleted — the one the
-// listener would hunt for next.
-func (l *Listener) nextEpisode(sh *store.Show) int {
-	eps, err := l.st.EpisodesForShow(sh.ID)
-	if err != nil {
-		return 1
-	}
-	next := 1
-	for _, ep := range eps {
-		if ep.Number >= next &&
-			(ep.State == episode.Watched || ep.State == episode.Deleted) {
-			next = ep.Number + 1
-		}
-	}
-	return next
-}
-
-// Poll fetches every tracked show's feed and decides what to grab.
-//
-// It returns the decisions rather than performing the handoff, so the caller
-// (the web server or a CLI command) stays in control of what actually happens.
-func (l *Listener) Poll() ([]Decision, error) {
-	shows, err := l.st.ListShows()
-	if err != nil {
-		return nil, fmt.Errorf("list shows: %w", err)
-	}
-
-	var out []Decision
-	for _, sh := range shows {
-		ds, err := l.pollShow(sh)
-		if err != nil {
-			log.Printf("listen: %s: %v", sh.CanonicalName, err)
-			continue
-		}
-		out = append(out, ds...)
-	}
-	return out, nil
-}
-
 // pollShow fetches one show's feed and evaluates each item.
+//
+// Query on every alias, not just the canonical name: Nyaa's search is a plain
+// substring match, so a long specific name misses groups that write the title
+// differently. Results are merged and deduplicated on infohash.
 func (l *Listener) pollShow(sh *store.Show) ([]Decision, error) {
-	// Use the canonical name for the feed query. Aliases are matched by the
-	// matcher, not the feed: one query per show keeps the request count low.
-	// Query on every alias, not just the canonical name: Nyaa's search is a
-	// plain substring match, so a long specific name misses groups that write
-	// the title differently. Results are merged and deduplicated on infohash.
 	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
 	if err != nil {
 		return nil, err
@@ -185,14 +141,10 @@ func (l *Listener) pollShow(sh *store.Show) ([]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
-	filters, err := l.st.Filters(sh.ID)
-	if err != nil {
-		return nil, err
-	}
 
 	var out []Decision
 	for _, it := range items {
-		d := l.evaluate(sh, m, filters, it)
+		d := l.evaluate(sh, m, it)
 		// Every decision is logged in debug mode, including the rejections.
 		// "Why was this not grabbed" is the question a live run always asks,
 		// and the reason is already computed — it just needs surfacing.
@@ -212,8 +164,8 @@ func truncate(s string, n int) string {
 }
 
 // evaluate applies the full pipeline to one release: dedupe, match, episode
-// latch, hard filters.
-func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Filter, it nyaa.Item) Decision {
+// latch, global rules.
+func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, it nyaa.Item) Decision {
 	d := Decision{Item: it, ShowID: sh.ID, Show: sh.CanonicalName}
 
 	// 1. Dedupe on infohash. The identity of a release is its infohash, and it
@@ -249,26 +201,17 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		}
 	}
 
-	// 4. Global rules. These hold for every show, so they are checked before
-	// the per-show filters: a batch or a sub-1080p release is never wanted,
-	// and no per-show preference should be able to override that.
-	if r := release.Parse(it.Title); func() bool {
-		rejected, why := release.RuleReject(&r)
-		if rejected {
-			d.Reason = why
-		}
-		return rejected
-	}() {
-		return d
-	}
-
-	// 5. Hard filters.
-	if why := applyFilters(filters, it.Title); why != "" {
+	// 4. Global rules, parsed through the learned vocabulary so a token the
+	// parser does not know still reads. These hold for every show and are the
+	// whole quality policy: batch and unreadable/sub-floor resolutions are
+	// rejected; codec, dub and uncensored are ranked later.
+	r := m.Parse(it.Title)
+	if rejected, why := release.RuleReject(&r); rejected {
 		d.Reason = why
 		return d
 	}
 
-	// 6. Episode must be readable. A release whose episode number cannot be
+	// 5. Episode must be readable. A release whose episode number cannot be
 	// read cannot be grabbed: there is nothing to record it against, and it
 	// would bypass every per-episode guard above.
 	if res.Episode <= 0 {
@@ -276,7 +219,7 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		return d
 	}
 
-	// 7. Air-date guard. If the show's cadence is known, a release published
+	// 6. Air-date guard. If the show's cadence is known, a release published
 	// well before this week's air date is for an older episode — either a
 	// mis-numbered back-catalogue upload or a batch. Rejecting it prevents
 	// grabbing the wrong episode during a show's first run.
@@ -288,7 +231,7 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 		return d
 	}
 
-	// 8. Confidence gate. Below this the model is guessing, and a wrong guess
+	// 7. Confidence gate. Below this the model is guessing, and a wrong guess
 	// downloads the wrong episode — worse than downloading nothing.
 	if res.Confidence < match.ConfidentThreshold {
 		d.Reason = fmt.Sprintf("confidence %.2f below %.2f", res.Confidence, match.ConfidentThreshold)
@@ -303,90 +246,31 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, filters []store.Fi
 // airDateOK reports whether a release's publication date is consistent with
 // the episode being current.
 //
-// Two sources of truth, in order of preference:
-//
-//   - The schedule's exact next-episode air time (next_airs_at). Episodes
-//     before it are projected back a week at a time. Authoritative when the
-//     show is on the schedule.
-//   - The cadence weekday, as a fallback: the most recent occurrence of that
-//     weekday, minus a 24h margin for timezone and early-upload slop.
-//
-// Shows with neither are always accepted: the guard is diagnostic-quality data
-// and must never block a good grab. Lower bound only — v2 re-uploads land LATE
+// The schedule's next-episode point is the anchor: episodes before it project
+// back a week at a time, and a release claiming to be any episode up to n
+// cannot predate a week before the oldest such episode. Shows with no
+// schedule point are always accepted: the guard is diagnostic-quality data and
+// must never block a good grab. Lower bound only — v2 re-uploads land LATE
 // and are good candidates, so there is deliberately no upper bound.
 func (l *Listener) airDateOK(sh *store.Show, it nyaa.Item) bool {
 	if it.PubDate.IsZero() {
 		return true
 	}
-	now := l.Now()
-
-	// Authoritative: the schedule's next-episode point. Episode n airs at *at;
-	// earlier episodes project back a week each. A release claiming to be any
-	// episode up to n cannot predate a week before the oldest such episode.
-	if n, at, _ := l.st.NextEpisode(sh.ID); at != nil && n > 0 {
-		oldest := at.AddDate(0, 0, -7*(n-1))
-		return !it.PubDate.Before(oldest.Add(-24 * time.Hour))
-	}
-
-	// Fallback: cadence weekday only.
-	if sh.CadenceWeekday == nil {
+	n, at, _ := l.st.NextEpisode(sh.ID)
+	if at == nil || n <= 0 {
 		return true
 	}
-	daysSince := (int(now.Weekday()) - *sh.CadenceWeekday + 7) % 7
-	anchor := now.AddDate(0, 0, -daysSince)
-	anchor = time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, now.Location())
-	return !it.PubDate.Before(anchor.Add(-24 * time.Hour))
-}
-
-// applyFilters returns a rejection reason, or "" when the release passes.
-//
-// Resolution is a floor, not a ladder: >= the minimum passes, below fails, and
-// there is no fallback to a lower resolution.
-func applyFilters(filters []store.Filter, title string) string {
-	r := release.Parse(title)
-	for _, f := range filters {
-		switch f.Kind {
-		case "batch":
-			if f.Op == "exclude" && r.IsBatch {
-				return "batch excluded"
-			}
-		case "resolution":
-			switch f.Op {
-			case "min":
-				if r.Resolution == "" {
-					return "no resolution tag, floor is " + f.Value
-				}
-				if release.ResRank(r.Resolution) < release.ResRank(f.Value) {
-					return fmt.Sprintf("resolution %s below floor %s", r.Resolution, f.Value)
-				}
-			case "exclude":
-				if strings.EqualFold(r.Resolution, f.Value) {
-					return fmt.Sprintf("resolution %s excluded", r.Resolution)
-				}
-			}
-		case "group":
-			if f.Op == "exclude" && strings.EqualFold(r.Group, f.Value) {
-				return fmt.Sprintf("group %s excluded", r.Group)
-			}
-		case "source":
-			if f.Op == "exclude" && strings.EqualFold(r.Source, f.Value) {
-				return fmt.Sprintf("source %s excluded", f.Value)
-			}
-		case "codec":
-			// Codec is a preference, never a hard filter. A wrong codec is
-			// still watchable. It is handled by the ranker, not here.
-			continue
-		}
-	}
-	return ""
+	oldest := at.AddDate(0, 0, -7*(n-1))
+	return !it.PubDate.Before(oldest.Add(-24 * time.Hour))
 }
 
 // Best picks the highest-ranked candidate per episode from a set of grab
-// decisions, applying the preference order.
+// decisions.
 //
-// Lower rank wins. Ties break on seeders, then on more recent publication,
-// because a fresher upload is less likely to be dead.
-func Best(decisions []Decision, prefs []store.Preference) []Decision {
+// Ordering: group preference (global, set in advance), then the global rules,
+// then seeders, then recency. Group comes first because which group posted a
+// release says more about its quality than any attribute of the file does.
+func Best(decisions []Decision) []Decision {
 	// Only grabs, and only one per (show, episode).
 	byEp := map[string]Decision{}
 	for _, d := range decisions {
@@ -394,7 +278,7 @@ func Best(decisions []Decision, prefs []store.Preference) []Decision {
 			continue
 		}
 		key := fmt.Sprintf("%d:%d", d.ShowID, d.Episode)
-		if cur, ok := byEp[key]; !ok || better(d, cur, prefs) {
+		if cur, ok := byEp[key]; !ok || better(d, cur) {
 			byEp[key] = d
 		}
 	}
@@ -414,11 +298,12 @@ func Best(decisions []Decision, prefs []store.Preference) []Decision {
 
 // better reports whether candidate a beats the current pick.
 //
-// Ordering is: group preference, then the global rules, then seeders, then
-// recency. Group comes first because which group posted a release says more
-// about its quality than any attribute of the file does.
-func better(a, b Decision, prefs []store.Preference) bool {
-	ga, gb := groupRank(a, prefs), groupRank(b, prefs)
+// Ordering is: group preference (global order), then the global rules, then
+// seeders, then recency. The group order is hardcoded in release/rules.go;
+// training never writes it.
+func better(a, b Decision) bool {
+	ga := groupRankOf(a)
+	gb := groupRankOf(b)
 	if ga != gb {
 		return ga < gb
 	}
@@ -432,31 +317,12 @@ func better(a, b Decision, prefs []store.Preference) bool {
 	return a.Item.PubDate.After(b.Item.PubDate)
 }
 
-// groupRank is where a release's group sits in the preferred order.
-//
-// Promoted to the primary ordering: the user's group preference is the
-// strongest signal available, stronger than codec or resolution, because a
-// good group is consistently good and a bad one is consistently bad.
-// Unlisted groups sort last but are not excluded — the list is a ranking, not
-// an allowlist.
-func groupRank(d Decision, prefs []store.Preference) int {
+// groupRankOf is where a release's group sits in the global preferred order.
+// Unlisted groups sort last but are not excluded — the order is a ranking,
+// not an allowlist.
+func groupRankOf(d Decision) int {
 	r := release.Parse(d.Item.Title)
-	best := -1
-	for _, p := range prefs {
-		if p.Kind != "group" {
-			continue
-		}
-		if !strings.EqualFold(r.Group, p.Value) {
-			continue
-		}
-		if best < 0 || p.Rank < best {
-			best = p.Rank
-		}
-	}
-	if best < 0 {
-		return 1000 // unlisted group: last, but still eligible
-	}
-	return best
+	return release.GroupRank(r.Group)
 }
 
 // ruleRank scores a release against the global rules: codec, resolution, dub
@@ -470,26 +336,20 @@ func ruleRank(d Decision) int {
 }
 
 // FilterPreferences reduces grab decisions to one per (show, episode), keeping
-// the best-ranked candidate by the show's preferences.
+// the best-ranked candidate.
 //
 // Called by the run loop: without it, every release for an episode would be
 // handed off instead of the best one.
 func (l *Listener) FilterPreferences(decisions []Decision) []Decision {
-	// Group by show so each show's own preferences are applied to it.
+	var out []Decision
 	byShow := map[int64][]Decision{}
 	for _, d := range decisions {
 		if d.Grab {
 			byShow[d.ShowID] = append(byShow[d.ShowID], d)
 		}
 	}
-	var out []Decision
-	for showID, ds := range byShow {
-		prefs, err := l.st.Preferences(showID)
-		if err != nil {
-			log.Printf("listen: preferences for show %d: %v", showID, err)
-			continue
-		}
-		out = append(out, Best(ds, prefs)...)
+	for _, ds := range byShow {
+		out = append(out, Best(ds)...)
 	}
 	return out
 }

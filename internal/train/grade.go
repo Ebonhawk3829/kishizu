@@ -2,12 +2,10 @@ package train
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/release"
-	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
 // Grade is the user's verdict on ONE attribute of a release.
@@ -155,17 +153,20 @@ func episodeHint(resolved, raw int) string {
 	return fmt.Sprintf("title says %d, so offset is %d", raw, off)
 }
 
-// ApplyGrades turns per-attribute verdicts into matcher updates, filters and
-// preferences. It is the learning step: each grade moves exactly one part of
-// the model, so a wrong resolution never corrupts the episode offsets.
+// ApplyGrades applies a corrected parse to the working model. Training
+// calibrates the parser only: the episode and group attributes teach the
+// per-group offset, and corrections to other attributes are vocabulary
+// teaching, which the caller records via the vocab endpoint before calling
+// this. Quality verdicts (resolution, codec, batch, dub, uncensored) are
+// global rules set in advance and are never written here.
 //
 // Returns a summary of what changed, for display.
 func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep int) ([]string, error) {
 	var notes []string
 
 	// The episode attribute is editable, so a corrected value there wins over
-	// the caller's default. This is the BLEACH case: the title says 47, the user
-	// corrects it to 7, and the offset must be derived from 7.
+	// the caller's default. This is the BLEACH case: the title says 47, the
+	// user corrects it to 7, and the offset must be derived from 7.
 	for _, a := range g.Attrs {
 		if a.Key != AttrEpisode {
 			continue
@@ -176,9 +177,10 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 		break
 	}
 
-	// A corrected group must survive Teach, which re-parses the title and would
-	// otherwise recover the parser's (wrong) group. This is the VARYG case: the
-	// group sits at the end after a hyphen, and the user has to supply it.
+	// A corrected group must survive Teach, which re-parses the title and
+	// would otherwise recover the parser's (wrong) group. This is the VARYG
+	// case: the group sits at the end after a hyphen, and the user has to
+	// supply it.
 	correctedGroup := ""
 	for _, a := range g.Attrs {
 		if a.Key == AttrGroup {
@@ -187,329 +189,24 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 		}
 	}
 
-	for _, a := range g.Attrs {
-		grade, ok := grades[a.Key]
-		if !ok || grade == GradeUnknown {
-			continue
-		}
-		// "The title does not say this." The value was inferred, not read, so
-		// there is nothing to prefer or exclude — and any rule already written
-		// about it was written on the same bad premise, so retract it.
-		//
-		// This is the only grade that can remove knowledge. The others add or
-		// adjust it.
-		if grade == GradeAbsent {
-			if a.Value != "" {
-				s.retractAll(a.Key, a.Value)
-				notes = append(notes, fmt.Sprintf("%s %q not in title; dropped", a.Label, a.Value))
-			}
-			continue
-		}
-		switch a.Key {
-		case AttrEpisode:
-			// Only a "good" episode grade teaches the offset. "Wrong" here means
-			// the number is not this episode, which we cannot learn an offset
-			// from — the user should supply the right one instead.
-			if grade == GradeGood && g.RawEpisode != 0 {
-				// Teach derives the group by parsing. When the user corrected it,
-				// apply theirs instead: otherwise the offset lands on the
-				// parser's group (often "(none)"), which would then match every
-				// release with no group at all.
-				if correctedGroup != "" {
-					s.m.Offsets[correctedGroup] = g.RawEpisode - ep
-					s.m.Defaults = distinct(s.m.Offsets)
-					s.addAliases(g.Title)
-					s.Accepted++
-				} else if err := s.Teach(g.Title, ep); err != nil {
-					return notes, err
-				}
-				notes = append(notes, fmt.Sprintf("learned offset for %q", effectiveGroup(g.Title, correctedGroup)))
-			}
-		case AttrGroup:
-			if a.Value == "" {
-				continue
-			}
-			switch grade {
-			case GradeGood:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "group", v: a.Value, rank: 0,
-					reason: reasonFor("group", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("prefer group %q", a.Value))
-			case GradeAcceptable:
-				// Usable but not first choice. Ranked below a preferred group
-				// rather than excluded, since it still produces a watchable
-				// release when nothing better is available.
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "group", v: a.Value, rank: 50,
-					reason: reasonFor("group", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("accept group %q", a.Value))
-			case GradeWrong:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "filter", k: "group", op: "exclude", v: a.Value,
-					reason: reasonFor("group", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("exclude group %q", a.Value))
-			}
-		case AttrResolution:
-			if a.Value == "" {
-				continue
-			}
-			switch grade {
-			case GradeGood, GradeAcceptable:
-				// An acceptable resolution sets the FLOOR: anything below this
-				// is not wanted. Resolution is a floor, not a ladder.
-				if rank, ok := resolutionRank[a.Value]; ok {
-					// Accepting a resolution retracts any earlier exclusion of
-					// it. Otherwise grading 2160p wrong and later acceptable
-					// leaves both "exclude 2160p" and "min 2160p" standing,
-					// which contradict each other.
-					s.retract("filter", "resolution", "exclude", a.Value)
-					s.pending = append(s.pending, pendingWrite{
-						kind: "filter", k: "resolution", op: "min", v: a.Value, rank: rank,
-						reason: reasonFor("resolution", a.Value, grade),
-					})
-					notes = append(notes, fmt.Sprintf("resolution floor %s", a.Value))
-				}
-			case GradeWrong:
-				// Excluding a resolution retracts a floor at or below it, since
-				// "min 2160p" and "exclude 2160p" cannot both hold.
-				if rank, ok := resolutionRank[a.Value]; ok {
-					for v, r := range resolutionRank {
-						if r <= rank {
-							s.retract("filter", "resolution", "min", v)
-						}
-					}
-				}
-				s.pending = append(s.pending, pendingWrite{
-					kind: "filter", k: "resolution", op: "exclude", v: a.Value,
-					reason: reasonFor("resolution", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("exclude resolution %s", a.Value))
-			}
-		case AttrCodec:
-			if a.Value == "" {
-				continue
-			}
-			switch grade {
-			case GradeGood:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "codec", v: a.Value, rank: 0,
-					reason: reasonFor("codec", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("prefer codec %s", a.Value))
-			case GradeAcceptable:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "codec", v: a.Value, rank: 50,
-					reason: reasonFor("codec", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("accept codec %s", a.Value))
-			case GradeWrong:
-				// Codec is a preference, never a hard filter: a wrong codec is
-				// still watchable, so demote rather than exclude.
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "codec", v: a.Value, rank: 99,
-					reason: reasonFor("codec", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("demote codec %s", a.Value))
-			}
-		case AttrSource:
-			if a.Value == "" {
-				continue
-			}
-			switch grade {
-			case GradeGood:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "source", v: a.Value, rank: 0,
-					reason: reasonFor("source", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("prefer source %s", a.Value))
-			case GradeAcceptable:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "source", v: a.Value, rank: 50,
-					reason: reasonFor("source", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("accept source %s", a.Value))
-			case GradeWrong:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "filter", k: "source", op: "exclude", v: a.Value,
-					reason: reasonFor("source", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("exclude source %s", a.Value))
-			}
-		case AttrService:
-			if a.Value == "" {
-				continue
-			}
-			// Service is a preference, not a filter: the same episode from a
-			// different platform is still watchable, so rank rather than
-			// exclude. It matters because it is often the ONLY difference
-			// between two otherwise identical releases.
-			switch grade {
-			case GradeGood:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "service", v: a.Value, rank: 0,
-					reason: reasonFor("service", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("prefer service %s", a.Value))
-			case GradeAcceptable:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "service", v: a.Value, rank: 50,
-					reason: reasonFor("service", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("accept service %s", a.Value))
-			case GradeWrong:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "service", v: a.Value, rank: 99,
-					reason: reasonFor("service", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("demote service %s", a.Value))
-			}
-		case AttrAudio:
-			if a.Value == "" {
-				continue
-			}
-			// Audio is a preference too: DDP5.1 may not play on the user's
-			// setup, but that is a ranking concern, not a reason to refuse the
-			// release outright.
-			switch grade {
-			case GradeGood:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "audio", v: a.Value, rank: 0,
-					reason: reasonFor("audio", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("prefer audio %s", a.Value))
-			case GradeAcceptable:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "audio", v: a.Value, rank: 50,
-					reason: reasonFor("audio", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("accept audio %s", a.Value))
-			case GradeWrong:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "audio", v: a.Value, rank: 99,
-					reason: reasonFor("audio", a.Value, grade),
-				})
-				notes = append(notes, fmt.Sprintf("demote audio %s", a.Value))
-			}
-		case AttrBatch:
-			if grade == GradeWrong {
-				s.pending = append(s.pending, pendingWrite{
-					kind: "filter", k: "batch", op: "exclude", v: "true",
-				})
-				notes = append(notes, "exclude batches")
-			}
-		case AttrUncensored:
-			if a.Value == "" {
-				continue
-			}
-			switch grade {
-			case GradeGood:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "uncensored", v: a.Value, rank: 0,
-				})
-			case GradeWrong:
-				s.pending = append(s.pending, pendingWrite{
-					kind: "preference", k: "uncensored", v: a.Value, rank: 99,
-				})
-			}
-			notes = append(notes, fmt.Sprintf("uncensored=%s %s", a.Value, grade))
-		}
-	}
-
-	// A "wrong" episode grade is a rejection: record it so the same release is
-	// not proposed again.
-	if grades[AttrEpisode] == GradeWrong {
-		if err := s.st.AddRejected(s.show.ID, g.Title, "wrong_episode"); err != nil {
+	// Only the episode offset is learned here, and only from a confirmed
+	// parse with a readable raw number.
+	if grade := grades[AttrEpisode]; grade == GradeGood && g.RawEpisode != 0 {
+		if correctedGroup != "" {
+			s.m.Offsets[correctedGroup] = g.RawEpisode - ep
+			s.m.Defaults = distinct(s.m.Offsets)
+			s.addAliases(g.Title)
+			s.Accepted++
+		} else if err := s.Teach(g.Title, ep); err != nil {
 			return notes, err
 		}
+		notes = append(notes, fmt.Sprintf("learned offset for %q", effectiveGroup(g.Title, correctedGroup)))
+	}
+	if grade := grades[AttrEpisode]; grade == GradeWrong {
 		s.Rejected++
+		notes = append(notes, "not this episode; no offset learned")
 	}
 	return notes, nil
-}
-
-// pendingWrite is a filter/preference to persist on Commit.
-//
-// Writes are deferred so that cancelling a session discards them. Previously
-// rejections wrote straight to the database while offsets waited for Commit,
-// so cancelling kept half the session's learning.
-type pendingWrite struct {
-	kind   string // filter | preference
-	k      string
-	op     string
-	v      string
-	rank   int
-	reason string // why, in the user's terms
-}
-
-// retract drops a pending write, and deletes any matching row already in the
-// database. Both are needed: within one session the rule may still be pending,
-// but across sessions it will already have been committed.
-func (s *Session) retract(kind, k, op, v string) {
-	kept := s.pending[:0]
-	for _, p := range s.pending {
-		if p.kind == kind && p.k == k && p.op == op && p.v == v {
-			continue
-		}
-		kept = append(kept, p)
-	}
-	s.pending = kept
-
-	if kind == "filter" {
-		s.retracted = append(s.retracted, store.Filter{Kind: k, Op: op, Value: v})
-	}
-}
-
-// retractAll drops every pending rule about one attribute value, whatever kind
-// or operation it was written under.
-//
-// Used when the user says a value is not in the title. A value can have
-// accumulated several rules — a preference and a filter, say — and retracting
-// only the one we happen to think of would leave the rest standing on a premise
-// the user has just rejected.
-func (s *Session) retractAll(key Attribute, value string) {
-	kept := s.pending[:0]
-	for _, p := range s.pending {
-		if p.k == string(key) && p.v == value {
-			continue
-		}
-		kept = append(kept, p)
-	}
-	s.pending = kept
-
-	// Also drop any already-persisted rule, so a value graded absent in a later
-	// session does not survive from an earlier one.
-	for _, op := range []string{"exclude", "min"} {
-		s.retracted = append(s.retracted, store.Filter{
-			Kind: string(key), Op: op, Value: value,
-		})
-	}
-}
-
-// reasonFor states why a rule exists, in terms the user would recognise.
-//
-// Stored alongside the rule so it can be revisited: "resolution min 1080p"
-// alone does not say whether 1080p was merely acceptable or actively wanted,
-// and a codec demoted to 99 is indistinguishable from one never graded.
-func reasonFor(kind, value string, g Grade) string {
-	switch g {
-	case GradeGood:
-		return fmt.Sprintf("graded good: %s %s is wanted", kind, value)
-	case GradeAcceptable:
-		return fmt.Sprintf("graded acceptable: %s %s is the floor", kind, value)
-	case GradeWrong:
-		return fmt.Sprintf("graded wrong: %s %s is not wanted", kind, value)
-	}
-	return ""
-}
-
-func groupOf(title string) string {
-	g := release.Parse(title).Group
-	if g == "" {
-		return "(none)"
-	}
-	return g
 }
 
 // effectiveGroup prefers a user-corrected group over the parsed one.
@@ -517,51 +214,11 @@ func effectiveGroup(title, corrected string) string {
 	if corrected != "" {
 		return corrected
 	}
-	return groupOf(title)
-}
-
-// flushPending persists the deferred filters and preferences.
-func (s *Session) flushPending() error {
-	// Deduplicate: later grades on the same key/value win.
-	type key struct{ kind, k, v string }
-	seen := map[key]pendingWrite{}
-	var order []key
-	for _, p := range s.pending {
-		k := key{p.kind, p.k, p.v}
-		if _, ok := seen[k]; !ok {
-			order = append(order, k)
-		}
-		seen[k] = p
+	g := release.Parse(title).Group
+	if g == "" {
+		return "(none)"
 	}
-	sort.SliceStable(order, func(i, j int) bool {
-		return order[i].kind < order[j].kind
-	})
-
-	for _, k := range order {
-		p := seen[k]
-		if p.kind == "filter" {
-			if err := s.st.AddFilter(s.show.ID, store.Filter{Kind: p.k, Op: p.op, Value: p.v, Reason: p.reason}); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := s.st.AddPreference(s.show.ID, store.Preference{Kind: p.k, Value: p.v, Rank: p.rank, Reason: p.reason}); err != nil {
-			return err
-		}
-	}
-	s.pending = nil
-	return nil
-}
-
-// flushRetracted deletes rules this session contradicted.
-func (s *Session) flushRetracted() error {
-	for _, f := range s.retracted {
-		if err := s.st.DeleteFilter(s.show.ID, f); err != nil {
-			return err
-		}
-	}
-	s.retracted = nil
-	return nil
+	return g
 }
 
 // ParseGrade maps user input to a Grade, tolerating the obvious spellings.

@@ -5,8 +5,10 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -20,7 +22,6 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
-	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -55,6 +56,9 @@ type Server struct {
 	// vocab holds the learned title vocabulary, so a release written in an
 	// unexpected spelling still resolves. Never nil after New.
 	vocab *release.Vocabulary
+	// session is the in-flight training state. Single-flight by design; the
+	// mutex makes that real under concurrent requests.
+	session trainSession
 }
 
 // New builds the server and parses the embedded templates.
@@ -114,14 +118,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/shows", s.handleDeleteShow)
 	mux.HandleFunc("POST /api/train/start", s.handleTrainStart)
 	mux.HandleFunc("GET /api/train/state", s.handleTrainState)
-	mux.HandleFunc("POST /api/train/answer", s.handleTrainAnswer)
 	mux.HandleFunc("POST /api/train/commit", s.handleTrainCommit)
 	mux.HandleFunc("POST /api/train/reset", s.handleTrainReset)
-	mux.HandleFunc("POST /api/train/teach", s.handleTrainTeach)
-	mux.HandleFunc("POST /api/train/accept-all", s.handleTrainAcceptAll)
 	mux.HandleFunc("POST /api/train/vocab", s.handleTrainVocab)
 	mux.HandleFunc("POST /api/train/inspect", s.handleTrainInspect)
 	mux.HandleFunc("POST /api/train/grade", s.handleTrainGrade)
+	mux.HandleFunc("POST /api/train/accept-all", s.handleTrainAcceptAll)
 
 	// Watch signal from the mpv script, and manual marking from the UI.
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
@@ -385,7 +387,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		p := perShow{Name: sh.CanonicalName, Next: nextUnwatched(s.st, sh)}
+		p := perShow{Name: sh.CanonicalName, Next: s.st.NextUnwatched(sh.ID)}
 		for _, ep := range eps {
 			switch episode.ParseState(string(ep.State)) {
 			case episode.Downloading:
@@ -446,7 +448,7 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]showInfo, 0, len(shows))
 	for _, sh := range shows {
-		si := showInfo{Name: sh.CanonicalName, NextEp: nextUnwatched(s.st, sh)}
+		si := showInfo{Name: sh.CanonicalName, NextEp: s.st.NextUnwatched(sh.ID)}
 		if n, at, _ := s.st.NextEpisode(sh.ID); at != nil && n > 0 {
 			si.NextEp = n
 			formatted := at.Format(time.RFC3339)
@@ -589,10 +591,6 @@ func baseName(path string) string {
 	return path
 }
 
-// matchFile matches a filename to a tracked show and episode.
-//
-// The episode latch makes this idempotent: a duplicate signal cannot rewind a
-// watched episode.
 // matchFile resolves a filename to a show and episode.
 //
 // The primary path is exact: kishizu named this file itself when the download
@@ -644,18 +642,30 @@ func isLibraryForm(name string) bool {
 	return release.ReLibrary.MatchString(name)
 }
 
-// resolveTitle turns a pasted link or title into a release title.
-func resolveTitle(input string) (string, error) {
-	if !nyaa.IsLink(input) {
-		return input, nil
+// ListenAndServe starts the server and blocks until ctx is cancelled.
+//
+// Timeouts are set explicitly: without them a slow or stuck client holds a
+// connection open indefinitely, and the goroutine with it.
+func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
 	}
-	return nyaa.ResolveLink(nil, input)
-}
-
-// ListenAndServe starts the server.
-func (s *Server) ListenAndServe(addr string) error {
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 	log.Printf("kishizu listening on %s", addr)
-	return http.ListenAndServe(addr, s.Handler())
+	err := srv.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 // ---------- pages ----------
@@ -672,10 +682,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // an alias of itself, so matching needs no special case. Max episode 0 means
 // the season length is unknown; the cycle then uses a generous window.
 //
-// The name field accepts EITHER a plain name or an animeschedule.net URL. A URL
-// is the better input: the slug is an exact identity for the show, and the page
-// it points at carries the season length and every name the season is known by.
-// Those are otherwise typed by hand and go stale.
+// The name field accepts EITHER a plain name or an animeschedule.net URL. A
+// URL is the better input: the slug is an exact identity for the show, and
+// the page it points at carries the title, the season length and every name
+// the season is known by. Those are otherwise typed by hand and go stale.
+//
+// When the input is a URL, the show's NAME comes from the fetched page — the
+// URL itself is never stored as a name. A bare slug is accepted too and
+// treated the same way.
 func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string   `json:"name"`
@@ -696,30 +710,60 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A URL (or bare slug) is the identity-bearing input. Resolve it FIRST so
+	// the show is created under its real title, and so enrichment fills in
+	// what the user would otherwise have to type.
+	slug := schedule.SlugFromURL(req.Name)
+	if slug != "" {
+		sh, err := s.createShowFromSlug(slug, req.Aliases, req.MaxEpisode)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		log.Printf("add-show: %s (max %d, %d aliases, slug %q)",
+			sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases), sh.Slug)
+		writeJSON(w, map[string]any{
+			"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "max_episode": sh.MaxEpisode,
+		})
+		return
+	}
+
 	sh, err := s.st.CreateShow(req.Name, req.Aliases, req.MaxEpisode)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-
-	// A URL (or bare slug) is the identity-bearing input. Resolving it fills in
-	// what the user would otherwise have to type, and records the slug so the
-	// daily refresh can match exactly instead of guessing from the title.
-	slug := schedule.SlugFromURL(req.Name)
-	if slug != "" {
-		if err := s.st.SetSlug(sh.ID, slug); err != nil {
-			log.Printf("add-show: set slug %s: %v", slug, err)
-		} else {
-			sh.Slug = slug
-			s.enrichFromSchedule(sh)
-		}
-	}
-
-	log.Printf("add-show: %s (max %d, %d aliases, slug %q)",
-		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases), sh.Slug)
+	log.Printf("add-show: %s (max %d, %d aliases)",
+		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases))
 	writeJSON(w, map[string]any{
-		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "max_episode": sh.MaxEpisode,
+		"id": sh.ID, "name": sh.CanonicalName, "max_episode": sh.MaxEpisode,
 	})
+}
+
+// createShowFromSlug adds a show by its animeschedule identity. The page's
+// own title becomes the canonical name; the slug is recorded so the daily
+// refresh matches exactly; enrichment fills in season length, aliases and
+// art. Best-effort throughout — a partial record is still a usable show.
+func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode int) (*store.Show, error) {
+	info, err := schedule.FetchShow(nil, slug)
+	if err != nil {
+		return nil, fmt.Errorf("could not read that show's page: %w", err)
+	}
+	name := info.Title
+	if name == "" {
+		name = slug
+	}
+	sh, err := s.st.CreateShow(name, aliases, maxEpisode)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.st.SetSlug(sh.ID, slug); err != nil {
+		log.Printf("add-show: set slug %s: %v", slug, err)
+	} else {
+		sh.Slug = slug
+	}
+	s.enrichFromSchedule(sh)
+	return sh, nil
 }
 
 // enrichFromSchedule fills a show in from its animeschedule page: the season
@@ -863,7 +907,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]showJSON, 0, len(shows))
 	for _, sh := range shows {
-		next := nextUnwatched(s.st, sh)
+		next := s.st.NextUnwatched(sh.ID)
 		offsets, _ := s.st.GroupOffsets(sh.ID)
 		j := showJSON{
 			ID:       sh.ID,
@@ -1008,16 +1052,4 @@ func showState(states []cycle.State, trained, aired bool) (string, bool) {
 	return string(cycle.UpToDate), attention
 }
 
-func nextUnwatched(st *store.Store, sh *store.Show) int {
-	eps, err := st.EpisodesForShow(sh.ID)
-	if err != nil {
-		return 1
-	}
-	next := 1
-	for _, e := range eps {
-		if e.Number == next && (e.State == episode.Watched || e.State == episode.Deleted) {
-			next++
-		}
-	}
-	return next
-}
+
