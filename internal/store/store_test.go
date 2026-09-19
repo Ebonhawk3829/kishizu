@@ -239,7 +239,14 @@ func TestUnlatchAllowsRedownload(t *testing.T) {
 	}
 }
 
-func TestUnlatchOnNonTerminalIsNoOp(t *testing.T) {
+// TestUnlatchResetsDownloaded: a downloaded episode CAN be unlatched, which is
+// the "wrong release" path. The user has the file and wants a different one,
+// so the episode goes back to wanted and the next grab skips the release
+// already seen.
+//
+// This is not a terminal rewind: downloaded is not terminal, and the file is
+// cleared so nothing is left pointing at a release being replaced.
+func TestUnlatchResetsDownloaded(t *testing.T) {
 	s := testStore(t)
 	sh, _ := s.CreateShow("Show", nil, 12)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloaded, "hash", "title")
@@ -248,8 +255,28 @@ func TestUnlatchOnNonTerminalIsNoOp(t *testing.T) {
 		t.Fatalf("Unlatch: %v", err)
 	}
 	e, _ := s.GetEpisode(sh.ID, 1)
-	if e.State != episode.Downloaded {
-		t.Errorf("state = %s, want downloaded (unchanged)", e.State)
+	if e.State != episode.Wanted {
+		t.Errorf("state = %s, want wanted", e.State)
+	}
+	if e.FilePath != "" || e.InfoHash != "" {
+		t.Errorf("unlatch left release data behind: path=%q hash=%q", e.FilePath, e.InfoHash)
+	}
+}
+
+// TestUnlatchOnInFlightIsNoOp: wanted and downloading are genuinely already
+// grabbable or in flight, so unlatching them would be a no-op at best and
+// disruptive at worst.
+func TestUnlatchOnInFlightIsNoOp(t *testing.T) {
+	s := testStore(t)
+	sh, _ := s.CreateShow("Show", nil, 12)
+	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloading, "hash", "title")
+
+	if err := s.Unlatch(sh.ID, 1); err != nil {
+		t.Fatalf("Unlatch: %v", err)
+	}
+	e, _ := s.GetEpisode(sh.ID, 1)
+	if e.State != episode.Downloading {
+		t.Errorf("state = %s, want downloading (unchanged)", e.State)
 	}
 }
 

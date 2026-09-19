@@ -385,7 +385,21 @@ func (s *Store) ShowBySlug(slug string) (*Show, error) {
 	return s.GetShow(id)
 }
 
-// SetSource records where a show came from: schedule | manual.
+// Where a show came from. Recorded on the show row and used to decide which
+// questions apply to it.
+const (
+	// SourceManual is a show added by name, with no schedule identity.
+	SourceManual = "manual"
+	// SourceSchedule is a show added from an animeschedule.net URL. It has a
+	// slug and air dates, so the airing pipeline applies to it.
+	SourceSchedule = "schedule"
+	// SourceSeaDex is a finished season adopted from releases.moe. It has no
+	// air dates and is never trained, so the airing pipeline must skip it and
+	// the UI must not ask whether it has aired or needs training.
+	SourceSeaDex = "seadex"
+)
+
+// SetSource records where a show came from.
 func (s *Store) SetSource(showID int64, source string) error {
 	_, err := s.db.Exec(`UPDATE show SET source = ? WHERE id = ?`, source, showID)
 	return err

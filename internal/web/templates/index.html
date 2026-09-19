@@ -119,6 +119,9 @@
   .st .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .st-ok   .dot { background: var(--ok); }             .st-ok   { color: var(--ok); }
   .st-hunt .dot { background: var(--warn); }           .st-hunt { color: var(--warn); }
+  /* Downloading: in flight, not yet watchable. Accent rather than warn,
+     because nothing needs the user's attention. */
+  .st-dl   .dot { background: var(--accent); }         .st-dl   { color: var(--accent); }
   .st-miss .dot { background: var(--bad); }            .st-miss { color: var(--bad); }
   .st-idle .dot { background: oklch(0.42 0.012 285); } .st-idle { color: var(--t3); }
   /* Needs training: setup state, not an incident. Distinct from idle because
@@ -505,6 +508,7 @@ function card(s) {
   const st = s.state || 'unknown';
   const cls = {
     'ready to watch':   'st-ok',
+    'downloading':      'st-dl',
     'hunting':          'st-hunt',
     'missing':          'st-miss',
     'no release found': 'st-miss',
@@ -530,7 +534,12 @@ function card(s) {
   // One primary action, context-dependent. Offsets are diagnostic detail and
   // live in the training panel, not on the landing page.
   let acts = `<button data-act="watched" data-id="${s.id}" data-next="${s.next}">Watched</button>`;
-  if (st === 'missing') {
+  // Re-grab is offered whenever there is something on disk or expected to be:
+  // a missing file, or an episode already downloaded that turned out to be the
+  // wrong release. Unlatching resets it to wanted, and the seen-infohash check
+  // means the next grab skips the release we already have and takes the next
+  // best one.
+  if (st === 'missing' || st === 'ready to watch') {
     acts = `<button data-act="unlatch" data-id="${s.id}" data-next="${s.next}">Re-grab</button>` + acts;
   }
   acts += `<button data-act="train" data-id="${s.id}">Train</button>`;

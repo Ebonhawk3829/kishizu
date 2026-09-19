@@ -195,7 +195,7 @@ var (
 	reAltTag = regexp.MustCompile(
 		`(?s)<span class="alternative-name-heading">([^<]+)</span>` +
 			`|<div class="alternative-name"[^>]*>([^<]+)</div>`)
-	reMAL = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
+	reMAL     = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
 	reShowImg = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
 
 	// The page's data blob carries the countdown's episode:

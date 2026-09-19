@@ -38,20 +38,23 @@ func TestResolutionPreferenceDiffersFromQuality(t *testing.T) {
 	if !ResolutionRejected("720p") {
 		t.Error("720p must be rejected; it is below the floor")
 	}
-        // An unreadable resolution is below the floor by default: after the
-        // learned vocabulary has had its chance, a title that does not carry
-        // its quality in a readable form does not get the benefit of the
-        // doubt. The fix for a genuinely-good release is to teach the token.
-        if !ResolutionRejected("") {
-                t.Error("an unreadable resolution must be rejected on the grab path")
-        }
+	// An unreadable resolution is below the floor by default: after the
+	// learned vocabulary has had its chance, a title that does not carry
+	// its quality in a readable form does not get the benefit of the
+	// doubt. The fix for a genuinely-good release is to teach the token.
+	if !ResolutionRejected("") {
+		t.Error("an unreadable resolution must be rejected on the grab path")
+	}
 }
 
 // TestCodecRankPrefersSourceEncode: the ranking runs from closest to the
 // original encode downwards. x265 and AV1 are re-compressions of an existing
 // x264 release, so they are worse, not better.
 func TestCodecRankPrefersSourceEncode(t *testing.T) {
-	cases := []struct{ codec string; want int }{
+	cases := []struct {
+		codec string
+		want  int
+	}{
 		{"x264", 0}, {"h.264", 0}, {"h264", 0}, {"avc", 0},
 		{"x265", 20}, {"hevc", 20},
 		{"av1", 30},
@@ -77,8 +80,8 @@ func TestIsDubIgnoresDualAudio(t *testing.T) {
 	cases := map[string]bool{
 		"[Group] Show - 01 [1080p] (Dual Audio)": false, // dual: not a dub
 		"[Group] Show - 01 [1080p] [MultiSub]":   false, // multi: not a dub
-		"[Group] Show - 01 [1080p DUB]":         true,  // dub
-		"[Group] Show - 01 [1080p]":             false, // neither
+		"[Group] Show - 01 [1080p DUB]":          true,  // dub
+		"[Group] Show - 01 [1080p]":              false, // neither
 	}
 	for title, want := range cases {
 		if got := IsDub(title); got != want {

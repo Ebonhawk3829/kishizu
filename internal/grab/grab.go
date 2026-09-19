@@ -274,6 +274,5 @@ func isMedia(name string) bool {
 	return false
 }
 
-
 // longest, since batch extras are usually small. Real sizes would need the
 // "files" length field from Transmission; the name ordering is sufficient to

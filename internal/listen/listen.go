@@ -49,7 +49,7 @@ func New(st *store.Store) *Listener {
 // PollShow fetches one show's feed and evaluates each item.
 func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
 	return l.pollShow(sh)
-}// DueShows returns the shows whose RSS should be polled right now, with the
+} // DueShows returns the shows whose RSS should be polled right now, with the
 // interval each wants.
 //
 // A show is due when any of its episodes is hunting (aggressive rate) or
@@ -75,6 +75,16 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 		if err != nil {
 			continue
 		}
+		// A finished season adopted from SeaDex is never polled. It has no air
+		// dates and no offsets, so every guard below would either skip it by
+		// accident or, worse, poll it aggressively with nothing to anchor the
+		// air-date check. Say so explicitly instead of relying on the absence
+		// of offsets.
+		if sh.Source == store.SourceSeaDex {
+			debug.Log("%s: adopted from SeaDex, not polled", sh.CanonicalName)
+			continue
+		}
+
 		var states []cycle.State
 		hasAirDate := false
 		for _, ep := range eps {

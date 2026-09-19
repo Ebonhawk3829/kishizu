@@ -281,8 +281,15 @@ func (s *Store) Unlatch(showID int64, number int) error {
 	if e == nil {
 		return fmt.Errorf("episode %d not found for show %d", number, showID)
 	}
-	if !e.State.Terminal() && e.State != episode.Missing {
-		return nil // already grabbable; nothing to do
+	// Downloaded counts as needing a reset, not "already grabbable": the
+	// listener only grabs episodes in `wanted` (see MayAutoGrab), so leaving a
+	// downloaded episode alone means a re-grab does nothing. This is the
+	// "wrong release" path — the user has the file and wants a different one.
+	//
+	// Wanted and downloading are genuinely already grabbable or in flight, so
+	// those are left alone.
+	if e.State != episode.Downloaded && !e.State.Terminal() && e.State != episode.Missing {
+		return nil
 	}
 	_, err = s.db.Exec(`UPDATE episode SET state = ?, file_path = NULL, infohash = NULL,
 		release_title = NULL, downloaded_at = NULL, watched_at = NULL

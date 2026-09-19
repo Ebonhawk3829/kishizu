@@ -294,7 +294,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	ready, hunting, missing := 0, 0, 0
+	ready, downloading, hunting, missing := 0, 0, 0, 0
 	var next struct {
 		Name   string
 		Ep     int
@@ -310,6 +310,8 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			switch cycle.StateOf(ep, now) {
 			case cycle.ReadyToWatch:
 				ready++
+			case cycle.Downloading:
+				downloading++
 			case cycle.Hunting:
 				hunting++
 			case cycle.Missing, cycle.NoReleaseFound:
@@ -335,16 +337,19 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		status = fmt.Sprintf("%d need attention", missing)
 	} else if ready > 0 {
 		status = fmt.Sprintf("%d to watch", ready)
+	} else if downloading > 0 {
+		status = fmt.Sprintf("%d downloading", downloading)
 	} else if hunting > 0 {
 		status = "Hunting for releases"
 	}
 
 	out := map[string]any{
-		"status":   status,
-		"ready":    ready,
-		"hunting":  hunting,
-		"missing":  missing,
-		"upToDate": ready == 0 && hunting == 0 && missing == 0,
+		"status":      status,
+		"ready":       ready,
+		"downloading": downloading,
+		"hunting":     hunting,
+		"missing":     missing,
+		"upToDate":    ready == 0 && downloading == 0 && hunting == 0 && missing == 0,
 	}
 	if next.Name != "" {
 		out["next"] = map[string]any{
@@ -957,7 +962,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			// through a season the next episode is always in the future, which
 			// made every airing show read as unaired.
 			aired := firstAirs != nil && !firstAirs.After(time.Now())
-			j.State, j.NeedsAttention = showState(states, j.Trained, aired)
+			j.State, j.NeedsAttention = showState(states, j.Trained, aired, sh.Source == store.SourceSeaDex)
 			if nextAirs != nil {
 				status := "upcoming"
 				if nextAirs.Before(time.Now()) {
@@ -1014,7 +1019,11 @@ const Upcoming = "upcoming"
 // show, not of any episode, and the caller already has it. aired reports
 // whether episode 1 has happened yet; until it has, there is nothing to train
 // on and nothing to hunt for.
-func showState(states []cycle.State, trained, aired bool) (string, bool) {
+// adopted reports that the show came from a finished-season adoption
+// rather than the airing schedule. Such a show has no air dates and is never
+// trained, so the usual "has it aired yet" and "is it trained" questions do
+// not apply: it is already on disk or on its way.
+func showState(states []cycle.State, trained, aired, adopted bool) (string, bool) {
 	attention := false
 	for _, s := range states {
 		if s == cycle.NoReleaseFound {
@@ -1024,6 +1033,29 @@ func showState(states []cycle.State, trained, aired bool) (string, bool) {
 	// Nothing to train on until the first episode exists. Saying "needs
 	// training" about a show premiering in four months is asking for something
 	// that cannot be done.
+	// An adopted season has no air dates and is never trained, so both of the
+	// usual gates would mislabel it: "upcoming" claims it has not started, and
+	// "needs training" claims it cannot be downloaded. Neither is true — the
+	// release was chosen by hand and is already in flight or on disk.
+	if adopted {
+		for _, s := range states {
+			if s == cycle.Missing {
+				return string(cycle.Missing), true
+			}
+		}
+		for _, s := range states {
+			if s == cycle.Downloading {
+				return string(cycle.Downloading), false
+			}
+		}
+		for _, s := range states {
+			if s == cycle.ReadyToWatch {
+				return string(cycle.ReadyToWatch), false
+			}
+		}
+		return string(cycle.UpToDate), false
+	}
+
 	if !aired {
 		return Upcoming, false
 	}
@@ -1039,6 +1071,13 @@ func showState(states []cycle.State, trained, aired bool) (string, bool) {
 			return string(cycle.Missing), true
 		}
 	}
+	// Downloading outranks hunting: the episode is already in flight, so
+	// saying "hunting" would claim the listener is still looking for it.
+	for _, s := range states {
+		if s == cycle.Downloading {
+			return string(cycle.Downloading), attention
+		}
+	}
 	for _, s := range states {
 		if s == cycle.Hunting {
 			return string(cycle.Hunting), attention
@@ -1051,5 +1090,3 @@ func showState(states []cycle.State, trained, aired bool) (string, bool) {
 	}
 	return string(cycle.UpToDate), attention
 }
-
-
