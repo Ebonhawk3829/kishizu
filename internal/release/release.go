@@ -40,7 +40,10 @@ type Release struct {
 var (
 	reGroup = regexp.MustCompile(`^\s*\[([^\]]+)\]`)
 	reSxE   = regexp.MustCompile(`(?i)\bs(\d{1,2})[ ._-]?e(\d{1,4})\b`)
-	reBare  = regexp.MustCompile(`[-–]\s*(\d{1,4})(?:\s|$|[\[(.])`)
+	// The optional vN suffix matters: BD packs name files "01v2", and without
+	// it the number is not read at all, so a batch resolves to no episode and
+	// sits in staging untouched.
+	reBare = regexp.MustCompile(`[-–]\s*(\d{1,4})(?:v\d+)?(?:\s|$|[\[(.])`)
 	// The form kishizu itself writes on completion: "<Show> - E09.mkv".
 	// Without this the tool cannot read the episode number from its own
 	// renamed files, which is exactly what the mpv watch signal sends back.

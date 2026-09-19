@@ -51,6 +51,7 @@ func main() {
 	preferred := flag.String("prefer", "VARYG,Erai-Raws,SubsPlease,ToonsHub", "preferred release groups, best first")
 	adopt := flag.String("adopt", "", "adopt a finished season from a releases.moe entry URL (dry-run: prints the plan)")
 	adoptEps := flag.String("adopt-episodes", "", "episode numbers to adopt, comma separated (default: every file the classifier proposed)")
+	adoptConfirm := flag.Bool("adopt-confirm", false, "with -adopt: perform the adoption instead of printing the plan")
 	flag.Parse()
 
 	// Debug can also be set with KISHIZU_DEBUG=1, which the package reads at
@@ -102,10 +103,9 @@ func main() {
 	// Adopting a finished season is a separate entry point from the airing
 	// pipeline: it reads one SeaDex entry, proposes which files are which
 	// episode, and hands the result to the same download-and-file machinery.
-	// It is dry-run only for now — nothing reaches Transmission until the
-	// review step exists to confirm the proposals.
+	// Dry run unless -adopt-confirm is given.
 	if *adopt != "" {
-		if err := adoptSeason(st, *adopt, *adoptEps, *staging, *library); err != nil {
+		if err := adoptSeason(st, *adopt, *adoptEps, *staging, *library, *rpc, *adoptConfirm); err != nil {
 			fmt.Fprintf(os.Stderr, "adopt: %v\n", err)
 			os.Exit(1)
 		}

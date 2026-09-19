@@ -138,3 +138,23 @@ func TestTitleScore(t *testing.T) {
 		t.Errorf("unrelated title should score low, got %.2f", got)
 	}
 }
+
+// TestBareNumberAllowsVersionSuffix: BD packs name files "01v2". Without the
+// optional version suffix in the pattern the number is not read at all, so a
+// batch resolves to no episode and sits in staging untouched.
+func TestBareNumberAllowsVersionSuffix(t *testing.T) {
+	cases := []struct {
+		title string
+		want  int
+	}{
+		{"[sam] Show - 01v2 [BD 1080p FLAC]", 1},
+		{"[sam] Show - 01 [BD 1080p FLAC]", 1},
+		{"[sam] Show - 12v3 [BD].mkv", 12},
+		{"[sam] Show - 01.mkv", 1},
+	}
+	for _, c := range cases {
+		if got := Parse(c.title).RawEpisode(); got != c.want {
+			t.Errorf("Parse(%q).RawEpisode() = %d, want %d", c.title, got, c.want)
+		}
+	}
+}

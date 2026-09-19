@@ -43,9 +43,10 @@ working with the air times it already has.
 kishizu handles currently-airing seasons for one person. It assumes a specific
 stack and a specific filesystem layout:
 
-- **Currently-airing seasons only.** Back-catalogue and batch downloads are out
-  of scope.
-- **One episode at a time.** No season packs, no bulk backfill.
+- **The airing pipeline is for currently-airing seasons.** It does not hunt
+  back-catalogue or batch downloads. A finished season can be adopted instead,
+  see [Adopting a finished season](#adopting-a-finished-season).
+- **One episode at a time while airing.** No season packs, no bulk backfill.
 - **A specific stack.** Transmission for downloads, Syncthing to reach the
   desktop, mpv for playback, ntfy for notifications.
 - **A specific filesystem layout.** Library paths and naming are fixed, because
@@ -191,8 +192,9 @@ done once by hand.
 | `-list` | — | List tracked shows with next episode and air dates |
 | `-train` | — | Train a show (substring match on canonical name) |
 | `-ep` | `0` | Episode number to train against (0 = next unwatched) |
-| `-adopt` | — | Adopt a finished season from a releases.moe URL (dry run: prints the plan) |
+| `-adopt` | — | Adopt a finished season from a releases.moe URL (dry run unless `-adopt-confirm`) |
 | `-adopt-episodes` | — | Episode numbers to adopt, one per file (0 = download but do not track) |
+| `-adopt-confirm` | `false` | With `-adopt`: perform the adoption instead of printing the plan |
 
 ## How matching works
 
@@ -262,11 +264,16 @@ hand, so there is nothing to hunt for and nothing to learn. They go straight to
 *downloading*, then *ready to watch*, and are deleted after watching like any
 other episode.
 
-This is currently a dry run: it prints the plan and hands nothing to
-Transmission. The review step for confirming each file's episode is not built
-yet.
+Without `-adopt-confirm` this is a dry run: it prints the plan and changes
+nothing. With it, kishizu creates the show, marks the confirmed episodes
+*downloading*, and hands the magnet to Transmission. From there the usual
+pipeline takes over: files are renamed into the library as they complete, and
+deleted after you watch them.
 
-### Aliases are a gate, not a score
+The classifier's proposals are defaults, not decisions. Check them before
+confirming, and use `-adopt-episodes` to correct any that are wrong.
+
+### Aliases
 
 An alias decides whether a release is eligible for a show. It does not contribute
 to how good a match looks.
@@ -313,18 +320,17 @@ handled as a first-class problem. Those are narrow goals.
 
 </details>
 
-<details>
-<summary><strong>Does it seed?</strong></summary>
-
-No. Torrents are removed on completion. This is a personal tool on a small
-server; seeding was never a goal.
-
-</details>
 
 <details>
 <summary><strong>Does it handle batch or back-catalogue downloads?</strong></summary>
 
-No. Currently-airing seasons only.
+Yes, for a finished season. `-adopt` takes a releases.moe entry and downloads
+its release as a pack, filing each file as its episode. See
+[Adopting a finished season](#adopting-a-finished-season).
+
+What it does not do is hunt a back catalogue: there is no browsing, no search,
+and no bulk backfill of everything a group has posted. Adoption is one entry,
+one release, chosen by hand.
 
 </details>
 

@@ -7,25 +7,30 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/seadex"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
+	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 )
 
 // adoptSeason prepares an adoption of a finished season from a SeaDex entry
-// and prints the plan.
+// and either prints the plan or performs it.
 //
-// This is the MVP skeleton: it resolves the entry, classifies every file,
-// and reports exactly what would be handed to Transmission and what episode
-// rows would be created. Nothing is downloaded and nothing is written to the
-// database yet — the review step (confirming or correcting each file's
-// episode) belongs in the UI, and until that exists the proposals must not
-// be trusted silently.
+// Without -adopt-confirm it is a dry run: it resolves the entry, classifies
+// every file, and reports exactly what would be handed to Transmission and
+// what episode rows would be created. Nothing is written.
+//
+// With -adopt-confirm it performs the adoption: creates the show, marks the
+// confirmed episodes downloading, and hands the magnet to Transmission into
+// the show's staging directory. From there the existing Reconcile takes
+// over — it finds the files, renames them into the library, and the sweeper
+// deletes them after watching.
 //
 // -adopt-episodes overrides the classifier's proposal, which is how the
-// override is exercised before the UI exists: a comma-separated list of the
-// numbers to adopt, in the same order as the listed files.
-func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string) error {
+// review step is exercised before the UI exists: a comma-separated list of
+// the numbers to adopt, in the same order as the listed files.
+func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, rpcURL string, confirm bool) error {
 	id := seadex.AniListIDFromURL(rawURL)
 	if id == 0 {
 		return fmt.Errorf("could not read a SeaDex entry id from %q", rawURL)
@@ -87,19 +92,72 @@ func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string) 
 	fmt.Println()
 
 	eps := seadex.Episodes(sel)
-	fmt.Printf("Would adopt %d episode(s): %s\n", len(eps), joinInts(eps))
+	title := plan.Title
+	if title == "" {
+		return fmt.Errorf("could not derive a title from the filenames; refusing to adopt")
+	}
+	show := release.Sanitise(title)
+	stagingDir := filepath.Join(staging, show)
+	libraryDir := filepath.Join(library, show)
+
+	fmt.Printf("Adopting %d episode(s): %s\n", len(eps), joinInts(eps))
 	// The magnet's display name is the torrent's own name, not the group:
 	// Transmission shows it in its list, and "sam" alone says nothing.
-	fmt.Printf("Would hand to Transmission: %s\n",
-		magnetFor(plan.Torrent.InfoHash, plan.Title))
-	fmt.Printf("Staging dir: %s\n", filepath.Join(staging, release.Sanitise(plan.Title)))
-	fmt.Printf("Library dir: %s\n", filepath.Join(library, release.Sanitise(plan.Title)))
+	fmt.Printf("Magnet:      %s\n", magnetFor(plan.Torrent.InfoHash, title))
+	fmt.Printf("Staging dir: %s\n", stagingDir)
+	fmt.Printf("Library dir: %s\n", libraryDir)
 	fmt.Println()
-	fmt.Println("Dry run only: nothing was downloaded and no episode rows were created.")
-	fmt.Println("The review step (confirming each file's episode) is not built yet.")
 
-	_ = st
+	if !confirm {
+		fmt.Println("Dry run. Re-run with -adopt-confirm to hand this to Transmission.")
+		return nil
+	}
+
+	// Create the show. Source is seadex so the airing pipeline skips it and
+	// the UI does not ask whether it has aired or needs training.
+	sh, err := st.CreateShow(title, nil, maxOf(eps))
+	if err != nil {
+		return fmt.Errorf("create show: %w", err)
+	}
+	if err := st.SetSource(sh.ID, store.SourceSeaDex); err != nil {
+		return fmt.Errorf("set source: %w", err)
+	}
+
+	// Mark the confirmed episodes downloading. This is what makes Reconcile
+	// pick the files up: it only finalises episodes already in flight.
+	for _, n := range eps {
+		if err := st.UpsertEpisode(sh.ID, n, episode.Downloading, plan.Torrent.InfoHash, plan.Torrent.ReleaseGroup); err != nil {
+			return fmt.Errorf("mark episode %d: %w", n, err)
+		}
+	}
+	// Record the infohash so a later re-grab skips this release.
+	if err := st.MarkSeen(plan.Torrent.InfoHash, sh.ID, 0); err != nil {
+		return fmt.Errorf("mark seen: %w", err)
+	}
+
+	// One staging directory per show, created here so it is owned by our uid
+	// rather than Transmission's.
+	if err := os.MkdirAll(stagingDir, 0o775); err != nil {
+		return fmt.Errorf("staging mkdir %s: %w", stagingDir, err)
+	}
+	tc := transmission.New(rpcURL)
+	if err := tc.AddWithDir(magnetFor(plan.Torrent.InfoHash, title), stagingDir); err != nil {
+		return fmt.Errorf("transmission add: %w", err)
+	}
+
+	fmt.Printf("Adopted %q: %d episodes downloading.\n", title, len(eps))
+	fmt.Printf("Reconcile will file them into %s as they complete.\n", libraryDir)
 	return nil
+}
+
+func maxOf(ns []int) int {
+	best := 0
+	for _, n := range ns {
+		if n > best {
+			best = n
+		}
+	}
+	return best
 }
 
 // selectionFor builds the confirmed rows: either the classifier's proposal,
