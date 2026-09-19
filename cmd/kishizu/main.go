@@ -49,6 +49,8 @@ func main() {
 	backfill := flag.Bool("backfill-slugs", false, "attach animeschedule slugs from the mapping file and enrich from the schedule")
 	slugFile := flag.String("slugs", "slugs.yaml", "name -> animeschedule slug mapping used by -backfill-slugs")
 	preferred := flag.String("prefer", "VARYG,Erai-Raws,SubsPlease,ToonsHub", "preferred release groups, best first")
+	adopt := flag.String("adopt", "", "adopt a finished season from a releases.moe entry URL (dry-run: prints the plan)")
+	adoptEps := flag.String("adopt-episodes", "", "episode numbers to adopt, comma separated (default: every file the classifier proposed)")
 	flag.Parse()
 
 	// Debug can also be set with KISHIZU_DEBUG=1, which the package reads at
@@ -92,6 +94,19 @@ func main() {
 		go runLoop(ctx, st, artCache, *rpc, *staging, *library, *keep, *interval, *dryRun, *ntfyURL)
 		if err := srv.ListenAndServe(ctx, *serve); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Adopting a finished season is a separate entry point from the airing
+	// pipeline: it reads one SeaDex entry, proposes which files are which
+	// episode, and hands the result to the same download-and-file machinery.
+	// It is dry-run only for now — nothing reaches Transmission until the
+	// review step exists to confirm the proposals.
+	if *adopt != "" {
+		if err := adoptSeason(st, *adopt, *adoptEps, *staging, *library); err != nil {
+			fmt.Fprintf(os.Stderr, "adopt: %v\n", err)
 			os.Exit(1)
 		}
 		return

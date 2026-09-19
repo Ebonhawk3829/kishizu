@@ -24,7 +24,6 @@ func magnetFor(infohash, title string) string {
 	return "magnet:?xt=urn:btih:" + infohash + "&dn=" + title
 }
 
-
 // runLoop polls Nyaa on a schedule and hands grabs to Transmission.
 //
 // dry-run is the default and matters: the machine is built and trained before

@@ -101,4 +101,3 @@ func listShowsWithSchedule(st *store.Store) error {
 	}
 	return nil
 }
-
