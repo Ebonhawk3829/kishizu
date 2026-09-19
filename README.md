@@ -247,8 +247,12 @@ The airing pipeline handles shows week by week. For a season that has already
 finished, kishizu can adopt a release from [releases.moe](https://releases.moe)
 (SeaDex), a community index of the highest-quality release for a given anime.
 
-Paste the entry URL and kishizu reads the release, lists every file in it, and
-proposes which are episodes:
+Open **Adopt a finished season** above the show list and paste the entry URL.
+kishizu reads the release, lists every file in it, and proposes which are
+episodes. Each file gets a checkbox and an episode dropdown, so you confirm or
+correct the proposals in the same screen before anything downloads.
+
+The same thing is available from the command line:
 
 ```sh
 ./kishizu -db kishizu.db -adopt "https://releases.moe/112124/"
@@ -264,14 +268,17 @@ hand, so there is nothing to hunt for and nothing to learn. They go straight to
 *downloading*, then *ready to watch*, and are deleted after watching like any
 other episode.
 
-Without `-adopt-confirm` this is a dry run: it prints the plan and changes
-nothing. With it, kishizu creates the show, marks the confirmed episodes
-*downloading*, and hands the magnet to Transmission. From there the usual
-pipeline takes over: files are renamed into the library as they complete, and
-deleted after you watch them.
+Confirming creates the show, marks the confirmed episodes *downloading*, and
+hands the magnet to Transmission. From there the usual pipeline takes over:
+files are renamed into the library as they complete, and deleted after you
+watch them.
+
+From the command line, `-adopt` is a dry run that prints the plan and changes
+nothing; add `-adopt-confirm` to perform it.
 
 The classifier's proposals are defaults, not decisions. Check them before
-confirming, and use `-adopt-episodes` to correct any that are wrong.
+confirming. In the UI each row is editable; on the command line use
+`-adopt-episodes` to correct any that are wrong.
 
 ### Aliases
 
