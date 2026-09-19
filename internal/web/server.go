@@ -59,6 +59,26 @@ type Server struct {
 	// session is the in-flight training state. Single-flight by design; the
 	// mutex makes that real under concurrent requests.
 	session trainSession
+	// adopt holds what an adoption needs that the store does not have: where
+	// Transmission should put the download, where the library is, and how to
+	// reach Transmission. Set by SetAdopt; adoption is disabled until then.
+	adopt adoptConfig
+}
+
+// adoptConfig is the deployment-specific half of an adoption.
+type adoptConfig struct {
+	staging string
+	library string
+	rpcURL  string
+}
+
+// SetAdopt enables adopting finished seasons from the web UI.
+//
+// Without it the endpoints return an error rather than half-working: an
+// adoption that cannot reach Transmission or does not know the library root
+// would create episode rows that never resolve.
+func (s *Server) SetAdopt(staging, library, rpcURL string) {
+	s.adopt = adoptConfig{staging: staging, library: library, rpcURL: rpcURL}
 }
 
 // New builds the server and parses the embedded templates.
@@ -129,6 +149,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
 	mux.HandleFunc("POST /api/watched-up-to", s.handleWatchedUpTo)
 	// Manual state override, for episodes obtained outside kishizu.
+	// Adopting a finished season from releases.moe. Preview returns the
+	// proposed plan; adopt performs a confirmed one.
+	mux.HandleFunc("POST /api/adopt/preview", s.handleAdoptPreview)
+	mux.HandleFunc("POST /api/adopt", s.handleAdopt)
+
 	mux.HandleFunc("POST /api/set-state", s.handleSetState)
 	// Deliberate re-download: the only way out of a terminal state.
 	mux.HandleFunc("POST /api/unlatch", s.handleUnlatch)

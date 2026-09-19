@@ -86,8 +86,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "art cache: %v\n", err)
 			os.Exit(1)
 		}
-		srv.SetArt(artCache)
-		// The listener runs alongside the UI. It is dry-run by default: it
+		srv.SetArt(artCache)			// Adopting a finished season needs the same paths and endpoint the
+			// listener uses. Without this the endpoints report that adoption is
+			// not configured rather than half-working.
+			srv.SetAdopt(*staging, *library, *rpc)		// The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

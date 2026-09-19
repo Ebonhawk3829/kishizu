@@ -363,6 +363,17 @@
   </div>
 </details>
 
+<details class="disc" id="disc-adopt">
+  <summary><span class="chev">&rsaquo;</span> Adopt a finished season</summary>
+  <div class="body">
+    <p class="hint">For a season that has already finished, adopt a release from
+    releases.moe (SeaDex) instead of tracking it week by week. You pick which
+    file is which episode, then kishizu downloads and files it like any other
+    episode.</p>
+    <div><button class="btn" id="btn-adopt-open">Open adoption</button></div>
+  </div>
+</details>
+
 <!-- Training is scoped to a show and opened from that show's row. There is no
      separate "grade a release" path: grading one release and training the show
      are the same activity, so they share one panel.
@@ -387,6 +398,44 @@
       <button class="btn" id="btn-commit">Finish &amp; save</button>
       <button class="btn ghost" id="btn-train-cancel">Cancel</button>
       <button class="btn danger" id="btn-train-reset">Reset training</button>
+    </div>
+  </div>
+</div>
+
+<!-- Adopting a finished season. Separate from the airing pipeline: paste a
+     releases.moe entry URL, confirm which file is which episode, and hand it
+     to Transmission. -->
+<div class="modal-backdrop hidden" id="adopt-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span>Adopt a finished season</span>
+      <button class="btn ghost" id="btn-adopt-close">Close</button>
+    </div>
+
+    <div id="adopt-entry">
+      <p class="hint">Paste a releases.moe (SeaDex) entry URL. kishizu reads the
+      release, lists every file in it, and proposes which are episodes.</p>
+      <div class="fields" style="grid-template-columns: 1fr auto">
+        <div>
+          <label for="adopt-url">SeaDex URL</label>
+          <input id="adopt-url" type="text"
+                 placeholder="https://releases.moe/112124/">
+        </div>
+        <div><button class="btn" id="btn-adopt-lookup">Look up</button></div>
+      </div>
+      <div class="field-error" id="adopt-error"></div>
+    </div>
+
+    <div id="adopt-review" class="hidden">
+      <p class="hint" id="adopt-summary"></p>
+      <div id="adopt-warnings"></div>
+      <div class="modal-scroll">
+        <div id="adopt-files"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn" id="btn-adopt-confirm">Adopt</button>
+        <button class="btn ghost" id="btn-adopt-back">Back</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1014,8 +1063,130 @@ function wireActions() {
     if (t && t.dataset.act === 'record-correction') recordCorrection(t.dataset.key);
   });
 
+  // Ticking a file's checkbox selects the proposed episode if the dropdown is
+  // still unset, so "include this" does the obvious thing.
+  document.addEventListener('change', e => {
+    const t = e.target.closest('[data-act]');
+    if (!t) return;
+    if (t.dataset.act === 'adopt-include' && t.checked) {
+      const sel = el('adopt-files').querySelector(`[data-act="adopt-ep"][data-i="${t.dataset.i}"]`);
+      if (sel && sel.value === '0') {
+        const proposed = adoptPlan.files[Number(t.dataset.i)].episode;
+        if (proposed > 0) sel.value = String(proposed);
+      }
+    }
+  });
+
   el('btn-add').onclick = addShow;
+  el('btn-adopt-open').onclick = openAdopt;
+  el('btn-adopt-close').onclick = closeAdopt;
+  el('btn-adopt-lookup').onclick = adoptLookup;
+  el('btn-adopt-back').onclick = adoptBack;
+  el('btn-adopt-confirm').onclick = adoptConfirm;
   wireModalButtons();
+}
+
+// ── adopting a finished season ────────────────────────────────────────────
+// Paste a SeaDex URL, then confirm which file is which episode. The
+// classifier's proposals are defaults, not decisions: every row is editable
+// so a misread can be fixed in the same screen rather than blocking.
+
+let adoptPlan = null;
+
+function openAdopt() {
+  adoptPlan = null;
+  el('adopt-url').value = '';
+  fieldError('adopt-error', '');
+  el('adopt-entry').classList.remove('hidden');
+  el('adopt-review').classList.add('hidden');
+  el('adopt-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  el('adopt-url').focus();
+}
+
+function closeAdopt() {
+  el('adopt-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+async function adoptLookup() {
+  const url = el('adopt-url').value.trim();
+  if (!url) { fieldError('adopt-error', 'Paste a releases.moe URL first.'); return; }
+  fieldError('adopt-error', '');
+  try {
+    adoptPlan = await api('/api/adopt/preview', { url });
+    renderAdoptReview();
+  } catch (e) { fieldError('adopt-error', e.message); }
+}
+
+function renderAdoptReview() {
+  const p = adoptPlan;
+  el('adopt-summary').textContent =
+    `${p.title || '(no title)'} · ${p.release} · ${p.files.length} files`;
+
+  let warn = '';
+  if (p.incomplete) warn += '<p class="hint" style="color:var(--warn)">This entry is marked incomplete: the release does not contain every episode.</p>';
+  if (p.theoretical_best) warn += `<p class="hint" style="color:var(--warn)">Best release does not exist yet: ${escapeHtml(p.theoretical_best)}</p>`;
+  if (p.notes) warn += `<p class="hint">${escapeHtml(p.notes)}</p>`;
+  el('adopt-warnings').innerHTML = warn;
+
+  // One row per file: include checkbox, episode dropdown, filename.
+  // The dropdown range is the media file count, so a pack with 274 files
+  // (mostly scans) offers a usable range rather than 1..274.
+  el('adopt-files').innerHTML = p.files.map((f, i) => {
+    let opts = '<option value="0">--</option>';
+    for (let n = 1; n <= p.max_episode; n++) {
+      const sel = (f.include && f.episode === n) ? ' selected' : '';
+      opts += `<option value="${n}"${sel}>${n}</option>`;
+    }
+    return `
+      <div class="attr">
+        <input type="checkbox" data-act="adopt-include" data-i="${i}"
+               ${f.include ? 'checked' : ''}>
+        <select data-act="adopt-ep" data-i="${i}">${opts}</select>
+        <span class="attr-val">${escapeHtml(f.name)}</span>
+      </div>`;
+  }).join('');
+
+  el('adopt-entry').classList.add('hidden');
+  el('adopt-review').classList.remove('hidden');
+}
+
+function adoptBack() {
+  el('adopt-review').classList.add('hidden');
+  el('adopt-entry').classList.remove('hidden');
+}
+
+// Read the current state of the review rows, so the confirm sends exactly
+// what the user sees rather than the original proposal.
+function adoptSelection() {
+  const rows = el('adopt-files').querySelectorAll('[data-act="adopt-include"]');
+  const out = [];
+  rows.forEach(cb => {
+    const i = Number(cb.dataset.i);
+    const sel = el('adopt-files').querySelector(`[data-act="adopt-ep"][data-i="${i}"]`);
+    out.push({
+      name: adoptPlan.files[i].name,
+      include: cb.checked,
+      episode: Number(sel.value),
+    });
+  });
+  return out;
+}
+
+async function adoptConfirm() {
+  const files = adoptSelection();
+  try {
+    const r = await api('/api/adopt', {
+      url: el('adopt-url').value.trim(),
+      title: adoptPlan.title,
+      info_hash: adoptPlan.info_hash,
+      files,
+    });
+    toast(`Adopted ${r.name}: ${r.episodes.length} episodes downloading.`);
+    closeAdopt();
+    loadShows();
+  } catch (e) { fieldError('adopt-error', e.message); }
 }
 
 // ── season label ──────────────────────────────────────────────────────────
