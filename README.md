@@ -191,6 +191,8 @@ done once by hand.
 | `-list` | — | List tracked shows with next episode and air dates |
 | `-train` | — | Train a show (substring match on canonical name) |
 | `-ep` | `0` | Episode number to train against (0 = next unwatched) |
+| `-adopt` | — | Adopt a finished season from a releases.moe URL (dry run: prints the plan) |
+| `-adopt-episodes` | — | Episode numbers to adopt, one per file (0 = download but do not track) |
 
 ## How matching works
 
@@ -217,6 +219,52 @@ Untrained shows show as *needs training* in the UI.
 Training also needs a release to train on, so a show whose first episode is
 still in the future shows as *upcoming*. Some shows are announced without a
 scheduled slot; those stay *upcoming* until the site publishes a time.
+
+### Episode states
+
+Each episode is in one of these, derived from what has happened to it and when
+it is due:
+
+| State | Meaning |
+|---|---|
+| *upcoming* | The season has not started. Nothing to do. |
+| *hunting* | Aired, within 72 hours, no release grabbed yet. Polled every 3 minutes. |
+| *downloading* | Handed to Transmission, not on disk yet. |
+| *ready to watch* | On disk, waiting for you. |
+| *missing* | Was on disk and is not now. Needs a decision: re-grab or mark watched. |
+| *no release found* | The 72 hour window closed with nothing grabbed. |
+| *up to date* | Watched or deleted. |
+
+An episode in *downloading* is not polled. It cannot be re-grabbed, so polling
+would evaluate releases nothing can act on. Quality is settled before the grab
+instead, by the global rules and the group order.
+
+### Adopting a finished season
+
+The airing pipeline handles shows week by week. For a season that has already
+finished, kishizu can adopt a release from [releases.moe](https://releases.moe)
+(SeaDex), a community index of the highest-quality release for a given anime.
+
+Paste the entry URL and kishizu reads the release, lists every file in it, and
+proposes which are episodes:
+
+```sh
+./kishizu -db kishizu.db -adopt "https://releases.moe/112124/"
+```
+
+The URL's path is the AniList id, so no lookup is needed. The title and episode
+numbers are derived from the filenames, and extras (NCOP, NCED, OVA, specials)
+are excluded by default. `-adopt-episodes` overrides the proposal, one number
+per file, where `0` means download it but do not track it as an episode.
+
+Adopted seasons are not polled and are never trained: the release was chosen by
+hand, so there is nothing to hunt for and nothing to learn. They go straight to
+*downloading*, then *ready to watch*, and are deleted after watching like any
+other episode.
+
+This is currently a dry run: it prints the plan and hands nothing to
+Transmission. The review step for confirming each file's episode is not built
+yet.
 
 ### Aliases are a gate, not a score
 
