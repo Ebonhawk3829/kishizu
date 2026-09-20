@@ -87,8 +87,15 @@ services:
       - "/data/shows.yaml"
       - "-serve"
       - "0.0.0.0:8098"
+      - "-transmission"
+      - "http://<tailnet-ip>:9091/transmission/rpc"
+      - "-ntfy"
+      - "http://<tailnet-ip>:8085/kishizu"   # omit to disable notifications
       - "-dry-run"                # remove to actually download
 ```
+
+`-transmission` is required once you remove `-dry-run`; kishizu refuses to
+start without it rather than polling against an endpoint that cannot resolve.
 
 Then:
 
@@ -176,7 +183,7 @@ done once by hand.
 | `-db` | `kishizu.db` | SQLite database path |
 | `-config` | `shows.yaml` | Show seed file used by `-seed` |
 | `-serve` | — | Address for the web UI, e.g. `:8098` |
-| `-transmission` | `http://<tailnet-ip>:9091/transmission/rpc` | Transmission RPC endpoint |
+| `-transmission` | — | Transmission RPC endpoint. Required unless `-dry-run` is set |
 | `-library` | `/media/anime` | Library root for finished episodes, as kishizu sees it |
 | `-staging` | `/downloads/anime` | Staging root Transmission downloads into, as kishizu sees it |
 | `-keep` | `2` | Recently watched episodes to keep on disk |
@@ -186,7 +193,7 @@ done once by hand.
 | `-backfill-slugs` | — | Attach animeschedule slugs from the mapping file and enrich from the schedule |
 | `-slugs` | `slugs.yaml` | Name to slug mapping used by `-backfill-slugs` |
 | `-prefer` | `VARYG,Erai-Raws,SubsPlease,ToonsHub` | Preferred release groups, best first |
-| `-ntfy` | `http://<tailnet-ip>:8085/kishizu` | ntfy topic for notifications; empty disables |
+| `-ntfy` | — | ntfy topic URL for notifications; empty disables |
 | `-debug` | `false` | Verbose logging of every decision |
 | `-show` | — | Only run this show (substring match on canonical name) |
 | `-list` | — | List tracked shows with next episode and air dates |

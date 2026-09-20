@@ -24,6 +24,21 @@ func magnetFor(infohash, title string) string {
 	return "magnet:?xt=urn:btih:" + infohash + "&dn=" + title
 }
 
+// notify sends an ntfy alert, logging any failure.
+//
+// Notifications are best-effort — a missed ping must never stop a download —
+// but a failure has to be visible. Discarding the error is how a wrong topic
+// URL went unnoticed: every ping failed silently and the only symptom was
+// that no notification arrived.
+func notify(n *ntfy.Client, title, message string, priority int) {
+	if n == nil {
+		return
+	}
+	if err := n.Send(title, message, priority); err != nil {
+		log.Printf("ntfy: %s: %v", title, err)
+	}
+}
+
 // runLoop polls Nyaa on a schedule and hands grabs to Transmission.
 //
 // dry-run is the default and matters: the machine is built and trained before
@@ -96,7 +111,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, 
 					// 3-minute poll, pinging every failure is ~480 a day.
 					if !transmissionDown {
 						transmissionDown = true
-						n.Send("kishizu: Transmission unreachable",
+						notify(n, "kishizu: Transmission unreachable",
 							"grabs will be retried; "+err.Error(), ntfy.PriorityHigh)
 					}
 					continue
@@ -104,7 +119,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, 
 				if transmissionDown {
 					transmissionDown = false
 					log.Printf("transmission: reachable again")
-					n.Send("kishizu: Transmission reachable",
+					notify(n, "kishizu: Transmission reachable",
 						"grabs resumed", ntfy.PriorityDefault)
 				}
 				if err := l.MarkGrabbed(d); err != nil {
@@ -112,7 +127,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, 
 					continue
 				}
 				log.Printf("GRABBED %s ep%d %s", d.Show, d.Episode, d.Item.Title)
-				n.Send("kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), ntfy.PriorityLow)
+				notify(n, "kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), ntfy.PriorityLow)
 			}
 		}
 		// Logged every tick, including when nothing was grabbed: silence in the
@@ -236,7 +251,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, 
 			}
 			if len(deleted) > 0 {
 				log.Printf("watch: %d deleted, %d kept", len(deleted), len(kept))
-				n.Send("kishizu: episodes deleted",
+				notify(n, "kishizu: episodes deleted",
 					fmt.Sprintf("%d deleted, %d kept", len(deleted), len(kept)), ntfy.PriorityDefault)
 			}
 		}

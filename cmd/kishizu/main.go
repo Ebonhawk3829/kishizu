@@ -37,13 +37,16 @@ func main() {
 	trainName := flag.String("train", "", "train a show (substring match on canonical name)")
 	ep := flag.Int("ep", 0, "episode number to train against (0 = next unwatched)")
 	serve := flag.String("serve", "", "start the web UI on this address (e.g. 127.0.0.1:8098)")
-	rpc := flag.String("transmission", "http://TAILNET_IP:9091/transmission/rpc", "Transmission RPC endpoint")
+	// Empty by default. A placeholder hostname here silently broke downloads:
+	// the endpoint looked configured but never resolved, and nothing errored
+	// until a grab was attempted. An empty value fails loudly at startup.
+	rpc := flag.String("transmission", "", "Transmission RPC endpoint (required to download)")
 	library := flag.String("library", "/media/anime", "library root for finished episodes, as kishizu sees it")
 	staging := flag.String("staging", "/downloads/anime", "staging root Transmission downloads into, as kishizu sees it")
 	keep := flag.Int("keep", 2, "recently watched episodes to keep on disk")
 	interval := flag.Duration("interval", 5*time.Minute, "RSS poll interval")
 	dryRun := flag.Bool("dry-run", true, "poll and decide but do not hand off to Transmission")
-	ntfyURL := flag.String("ntfy", "http://TAILNET_IP:8085/kishizu", "ntfy topic URL for notifications (empty disables)")
+	ntfyURL := flag.String("ntfy", "", "ntfy topic URL for notifications (empty disables)")
 	debugOn := flag.Bool("debug", false, "verbose logging of every decision (toggleable at runtime via POST /api/debug)")
 	infer := flag.Bool("infer", false, "derive group offsets from air dates instead of training by hand")
 	backfill := flag.Bool("backfill-slugs", false, "attach animeschedule slugs from the mapping file and enrich from the schedule")
@@ -58,6 +61,15 @@ func main() {
 	// init; the flag wins when given.
 	if *debugOn {
 		debug.Set(true)
+	}
+
+	// Fail loudly on a missing endpoint. Both of these once defaulted to a
+	// placeholder hostname, which looked configured but never resolved: the
+	// listener polled happily and every grab or notification failed silently.
+	// An empty value is a deployment mistake, not a working default.
+	if !*dryRun && *rpc == "" {
+		fmt.Fprintf(os.Stderr, "-transmission is required unless -dry-run is set\n")
+		os.Exit(1)
 	}
 
 	st, err := store.Open(*dbPath)
@@ -86,10 +98,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "art cache: %v\n", err)
 			os.Exit(1)
 		}
-		srv.SetArt(artCache)			// Adopting a finished season needs the same paths and endpoint the
-			// listener uses. Without this the endpoints report that adoption is
-			// not configured rather than half-working.
-			srv.SetAdopt(*staging, *library, *rpc)		// The listener runs alongside the UI. It is dry-run by default: it
+		srv.SetArt(artCache) // Adopting a finished season needs the same paths and endpoint the
+		// listener uses. Without this the endpoints report that adoption is
+		// not configured rather than half-working.
+		srv.SetAdopt(*staging, *library, *rpc) // The listener runs alongside the UI. It is dry-run by default: it
 		// polls, matches and logs decisions, but hands nothing to Transmission
 		// until -dry-run=false. The user switches it on deliberately.
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
