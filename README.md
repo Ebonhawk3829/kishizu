@@ -108,6 +108,10 @@ Open **http://localhost:8098**.
 Pin a version rather than using `:latest`. This tool is not on a compatibility
 promise.
 
+Timestamps are UTC everywhere: log lines and the database agree, so the same
+event does not read 12 hours apart depending on which one you look at. `TZ`
+affects the container's clock but not how kishizu writes times.
+
 kishizu is dry-run by default: it polls, matches and logs what it would
 download, but hands nothing to Transmission until you remove `-dry-run`.
 

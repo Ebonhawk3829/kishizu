@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,6 +30,11 @@ import (
 )
 
 func main() {
+	// Log in UTC so timestamps agree with the database, which stores UTC via
+	// SQLite's datetime('now'). Otherwise the two read 12 hours apart for the
+	// same event, and the container's TZ decides which one looks wrong.
+	log.SetFlags(log.LstdFlags | log.LUTC)
+
 	dbPath := flag.String("db", "kishizu.db", "path to the SQLite database")
 	show := flag.String("show", "", "only run this show (substring match on canonical name)")
 	seed := flag.Bool("seed", false, "insert the shows from the seed file")
