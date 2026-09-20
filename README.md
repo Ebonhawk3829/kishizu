@@ -368,11 +368,6 @@ release.
 
 </details>
 
-## Design
-
-[`DESIGN.md`](DESIGN.md) is the original design sketch, kept for context. It
-predates the implementation and describes intent rather than current behaviour.
-
 ## License
 
 [MIT](LICENSE)

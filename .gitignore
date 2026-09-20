@@ -11,9 +11,6 @@
 __pycache__/
 *.pyc
 
-# Cached scrape attempts (large, regenerable)
-testdata/search_cache/
-
 # Design mockups — scratch, not part of the shipped app
 concepts/
 
@@ -34,7 +31,6 @@ REVIEW.md
 review*.md
 *.review.md
 
-# Scraped Nyaa pages kept as parser fixtures. Harmless in themselves, but
-# they are someone's browsing history and are regenerable from the site.
-testdata/*.html
-testdata/refs.json
+# Scraped Nyaa pages and search caches. Regenerable from the site, and they
+# are browsing history. Kept on disk for local parser work, never committed.
+testdata/

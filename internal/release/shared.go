@@ -1,7 +1,5 @@
 // Package release parses Nyaa release titles into structured fields.
 //
-// This is a port of the Python prototype (testdata/match.py), which was
-// validated against 11 hand-labelled reference torrents and 75 live uploads.
 // The logic is deliberately dumb: regex extraction plus integer arithmetic. All
 // the intelligence lives in the alias list and the per-group offsets, not here.
 package release
