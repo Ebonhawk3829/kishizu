@@ -203,7 +203,14 @@
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 4px; font-size: 16px; font-weight: 500;
   }
-  .modal-scroll { overflow-y: auto; margin-top: 14px; padding-right: 6px; }
+  /* The scroll area must be allowed to shrink below its content height, or it
+     grows to fit everything and the modal overflows instead of scrolling.
+     flex:1 gives it the leftover space; min-height:0 lets it actually shrink.
+     Without both, a long list is clipped with no scrollbar. */
+  .modal-scroll {
+    overflow-y: auto; margin-top: 14px; padding-right: 6px;
+    flex: 1 1 auto; min-height: 0;
+  }
 
   /* ── form controls ──────────────────────────────────────────────────── */
   label {
@@ -446,7 +453,7 @@
       <div class="field-error" id="adopt-error"></div>
     </div>
 
-    <div id="adopt-review" class="hidden">
+    <div id="adopt-review" class="hidden" style="display:flex;flex-direction:column;min-height:0;flex:1">
       <p class="hint" id="adopt-summary"></p>
       <div id="adopt-warnings"></div>
       <div class="modal-scroll">
