@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ebonhawk3829/kishizu/internal/anilist"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/seadex"
@@ -180,6 +181,24 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.SetSource(sh.ID, store.SourceSeaDex); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	// Cover art. An adopted show never touches animeschedule.net, so it has
+	// none from the usual path, and SeaDex's API exposes no image. But the
+	// entry URL carries the AniList id, and AniList serves the same poster
+	// the SeaDex page shows. Best effort: a failure costs a missing poster,
+	// not the adoption.
+	if id := seadex.AniListIDFromURL(req.URL); id > 0 {
+		if m, err := anilist.New().FetchMedia(id); err == nil && m != nil && m.CoverURL != "" {
+			if err := s.st.SetImageURL(sh.ID, m.CoverURL); err != nil {
+				log.Printf("adopt: set image: %v", err)
+			} else if s.art != nil {
+				if _, err := s.art.Ensure(m.CoverURL); err != nil {
+					log.Printf("adopt: cache art: %v", err)
+				}
+			}
+		} else if err != nil {
+			log.Printf("adopt: anilist lookup: %v", err)
+		}
 	}
 	// Mark the episodes downloading. This is what makes Reconcile pick the
 	// files up: it only finalises episodes already in flight.

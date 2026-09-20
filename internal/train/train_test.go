@@ -97,10 +97,10 @@ func TestProposeRanksUncertaintyFirst(t *testing.T) {
 		// Confident and correct: low value as a question.
 		item("[Erai-raws] Bleach: Sennen Kessen Hen - Kashin Tan - 07 [1080p DSNP WEB-DL]"),
 		// Matches the show, number unreadable: maximally informative.
-			// "Batch" carries no episode number at all, unlike "45v2" which
-			// does parse now that the bare-number pattern allows a version
-			// suffix.
-			item("[Lazier] Bleach Thousand-Year Blood War - Batch (WEB 1080p EAC3)"),
+		// "Batch" carries no episode number at all, unlike "45v2" which
+		// does parse now that the bare-number pattern allows a version
+		// suffix.
+		item("[Lazier] Bleach Thousand-Year Blood War - Batch (WEB 1080p EAC3)"),
 		// Absolute numbering, unseen group: needs confirming.
 		item("[ToonsHub] BLEACH Thousand-Year Blood War S01E47 1080p CR WEB-DL"),
 	}

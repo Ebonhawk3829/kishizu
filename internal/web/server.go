@@ -1036,6 +1036,16 @@ const NeedsTraining = "needs training"
 // "upcoming" rather than counting down to a date.
 const Upcoming = "upcoming"
 
+// Complete is the state of a season adopted from SeaDex: finished, on disk or
+// on its way, and never hunted.
+//
+// Distinct from the airing states because the questions that produce those do
+// not apply. An adopted season has no air dates, so "has it aired" is
+// meaningless, and it is never trained, so "does it need training" is wrong.
+// It gets its own section rather than being filed under Airing, which would
+// claim kishizu is watching it week by week.
+const Complete = "complete"
+
 // The most demanding episode wins: hunting beats ready-to-watch beats
 // up-to-date. Any no-release-found episode sets NeedsAttention, since that is
 // the state asking the user to look at it.
@@ -1078,7 +1088,10 @@ func showState(states []cycle.State, trained, aired, adopted bool) (string, bool
 				return string(cycle.ReadyToWatch), false
 			}
 		}
-		return string(cycle.UpToDate), false
+		// Nothing outstanding: the season is on disk and watched, or was
+		// adopted and has already been consumed. Either way it is complete
+		// rather than "up to date", which implies a next episode is coming.
+		return Complete, false
 	}
 
 	if !aired {

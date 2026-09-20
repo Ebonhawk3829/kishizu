@@ -533,7 +533,13 @@ async function loadShows() {
     const tb = b.next_schedule ? new Date(b.next_schedule.airs_at).getTime() : Infinity;
     return ta - tb;
   };
-  const airing = shows.filter(s => s.state !== 'upcoming').sort(byAir);
+  // Adopted seasons have no air dates to sort by, so they go alphabetically.
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  // Adopted seasons get their own section. They are finished and never
+  // hunted, so filing them under Airing would claim kishizu is watching them
+  // week by week.
+  const complete = shows.filter(s => s.state === 'complete').sort(byName);
+  const airing = shows.filter(s => s.state !== 'upcoming' && s.state !== 'complete').sort(byAir);
   // Soonest first, so the next thing to decide is at the top. Shows with no
   // announced slot sort last: there is nothing to act on for those, and
   // putting them first would bury the ones that need a decision.
@@ -556,7 +562,8 @@ async function loadShows() {
       </div>`;
     return;
   }
-  el('shows').innerHTML = sect('Airing', airing) + sect('Upcoming', upcoming);
+  el('shows').innerHTML =
+    sect('Airing', airing) + sect('Upcoming', upcoming) + sect('Complete', complete);
   loadSummary();
 }
 
@@ -591,6 +598,7 @@ function card(s) {
     'up-to-date':       'st-idle',
     'needs training':   'st-train',
     'upcoming':         'st-soon',
+    'complete':         'st-idle',
   }[st] || 'st-idle';
 
   // Air line: the next episode the user actually owes, with its air time when

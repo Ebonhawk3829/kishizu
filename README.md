@@ -277,7 +277,13 @@ per file, where `0` means download it but do not track it as an episode.
 Adopted seasons are not polled and are never trained: the release was chosen by
 hand, so there is nothing to hunt for and nothing to learn. They go straight to
 *downloading*, then *ready to watch*, and are deleted after watching like any
-other episode.
+other episode. They appear under **Complete** rather than Airing, since nothing
+is being watched week by week.
+
+Cover art comes from AniList. An adopted season never touches
+animeschedule.net, and SeaDex's API exposes no image, but the entry URL carries
+the AniList id and AniList serves the same poster the SeaDex page shows. If the
+lookup fails the adoption still succeeds, without a poster.
 
 Confirming creates the show, marks the confirmed episodes *downloading*, and
 hands the magnet to Transmission. From there the usual pipeline takes over:

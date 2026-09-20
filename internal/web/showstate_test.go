@@ -92,7 +92,10 @@ func TestAdoptedShowIsNotUpcomingOrNeedsTraining(t *testing.T) {
 	}{
 		{[]cycle.State{cycle.Downloading}, string(cycle.Downloading)},
 		{[]cycle.State{cycle.ReadyToWatch}, string(cycle.ReadyToWatch)},
-		{[]cycle.State{cycle.UpToDate}, string(cycle.UpToDate)},
+		// Nothing outstanding reads as complete, not "up to date": the
+		// latter implies a next episode is coming, and for a finished
+		// season none is.
+		{[]cycle.State{cycle.UpToDate}, Complete},
 		{[]cycle.State{cycle.Missing}, string(cycle.Missing)},
 	}
 	for _, c := range cases {
