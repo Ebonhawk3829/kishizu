@@ -718,7 +718,9 @@ function browseRow(e) {
   const art = e.image
     ? `<img class="art" src="${escapeHtml(e.image)}" loading="lazy" alt="">`
     : `<div class="art"></div>`;
-  const when = e.airs_at ? when(e.airs_at) : 'no air time listed';
+  // Named `airs`, not `when`: a local called `when` would shadow the global
+  // when() formatter and hit the temporal dead zone on its own initialiser.
+  const airs = e.airs_at ? when(e.airs_at) : 'no air time listed';
   const btn = e.tracked
     ? `<span class="st st-idle"><span class="dot"></span>tracked</span>`
     : `<button class="btn" data-act="browse-add" data-slug="${escapeHtml(e.slug)}">Add</button>`;
@@ -727,7 +729,7 @@ function browseRow(e) {
     ${art}
     <div>
       <div class="name" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
-      <div class="sub">${escapeHtml(when)}</div>
+      <div class="sub">${escapeHtml(airs)}</div>
     </div>
     <span class="acts">${btn}</span>
   </div>`;
