@@ -58,6 +58,16 @@
   .head .season {
     font-size: 13px; color: var(--t3); letter-spacing: .06em; text-transform: uppercase;
   }
+  /* Settings sits at the far right of the header: it is used rarely, and
+     keeping it out of the disclosure stack leaves that list to the things
+     that change what kishizu does day to day. */
+  .head .spacer { flex: 1; }
+  .head .gear {
+    background: none; border: 0; color: var(--t3); cursor: pointer;
+    font: inherit; font-size: 13.5px; padding: 8px 13px; border-radius: 7px;
+    transition: background .1s ease, color .1s ease;
+  }
+  .head .gear:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
   .tagline { color: var(--t3); font-size: 14.5px; margin: 0 0 52px; }
 
   /* ── summary ────────────────────────────────────────────────────────── */
@@ -151,6 +161,11 @@
   .browse { margin-top: 12px; max-height: 420px; overflow-y: auto; }
   .browse .row .acts { opacity: 1; }
   .browse .row .art { width: 34px; height: 48px; }
+  /* Long titles wrap instead of truncating. The browser list is for picking
+     a show by name, and a title cut at 30 characters with the rest behind a
+     hover tooltip is not a picker. */
+  .browse .row .name { white-space: normal; overflow: visible; text-overflow: clip; }
+  .browse-divider { height: 1px; background: oklch(0.28 0.010 285); margin: 18px 0; }
 
   /* Settings: a stack of field groups, each on its own row so the labels
      stay aligned across sections. */
@@ -389,6 +404,8 @@
   <img src="/static/logo.png" alt="kishizu">
   <h1>kishizu</h1>
   <span class="season" id="season"></span>
+  <span class="spacer"></span>
+  <button class="gear" id="btn-settings-open" title="Settings">Settings</button>
 </div>
 <p class="tagline">Declare the season. Watch the episodes. Stop thinking about it.</p>
 
@@ -399,7 +416,7 @@
 <details class="disc" id="disc-add">
   <summary><span class="chev">&rsaquo;</span> Add a show</summary>
   <div class="body">
-    <p class="hint">Paste an animeschedule.net URL and the season length, cover art and every alternative name are filled in for you. Or just type a name — whatever you'd search Nyaa for.</p>
+    <p class="hint">Pick from the current season, or paste an animeschedule.net URL. Either way the season length, cover art and every alternative name are filled in for you. Typing a name works too — whatever you'd search Nyaa for.</p>
     <div class="fields">
       <div><label for="add-name">Name or URL</label><input id="add-name" type="text" placeholder="https://animeschedule.net/anime/... or show name"></div>
       <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
@@ -407,30 +424,17 @@
       <div><button class="btn" id="btn-add">Add</button></div>
     </div>
     <div class="field-error" id="add-error"></div>
-  </div>
-</details>
 
-<details class="disc" id="disc-settings">
-  <summary><span class="chev">&rsaquo;</span> Settings</summary>
-  <div class="body">
-    <p class="hint">These are the settings from your configuration file. Changing
-    paths or the downloader needs a restart; everything else takes effect on
-    save.</p>
-    <div class="field-error" id="settings-error"></div>
-    <div id="settings-form" class="settings"></div>
-    <div class="fields">
-      <div><button class="btn" id="btn-settings-save">Save</button></div>
+    <div class="browse-divider"></div>
+    <p class="hint">Or browse the current season, from a cached snapshot. Everything is shown; the filter narrows it.</p>
+    <div class="fields" style="grid-template-columns: 1fr auto auto">
+      <div><label for="browse-q">Filter</label><input id="browse-q" type="text" placeholder="title or slug"></div>
+      <div><button class="btn ghost" id="btn-browse-refresh">Refresh</button></div>
+      <div><button class="btn ghost" id="btn-browse-clear">Clear</button></div>
     </div>
-  </div>
-</details>
-
-<details class="disc" id="disc-browse">
-  <summary><span class="chev">&rsaquo;</span> Browse this season</summary>
-  <div class="body">
-    <p class="hint">Every show on the current season, from a cached snapshot.
-    Pick one to add it — the slug is an exact identity, so the season length,
-    cover art and every alternative name are filled in for you.</p>
-    <div><button class="btn" id="btn-browse-open">Open browser</button></div>
+    <div class="field-error" id="browse-error"></div>
+    <p class="hint" id="browse-meta"></p>
+    <div id="browse-results" class="browse"></div>
   </div>
 </details>
 
@@ -510,29 +514,25 @@
     </div>
   </div>
 </div>
-
-<!-- Browsing the season. The whole cached list is shown at once; the filter
-     narrows it client-side rather than requiring a search to get started. -->
-<div class="modal-backdrop hidden" id="browse-modal">
+<!-- Settings. Reads and writes the configuration file; secrets are masked and
+     never written back. Paths and the downloader need a restart to take
+     effect, because they are captured into structs at startup. -->
+<div class="modal-backdrop hidden" id="settings-modal">
   <div class="modal">
     <div class="modal-head">
-      <span>Browse this season</span>
-      <button class="btn ghost" id="btn-browse-close">Close</button>
+      <span>Settings</span>
+      <button class="btn ghost" id="btn-settings-close">Close</button>
     </div>
 
-    <div class="fields" style="grid-template-columns: 1fr auto auto">
-      <div>
-        <label for="browse-q">Filter</label>
-        <input id="browse-q" type="text" placeholder="title or slug">
-      </div>
-      <div><button class="btn ghost" id="btn-browse-refresh">Refresh</button></div>
-      <div><button class="btn ghost" id="btn-browse-clear">Clear</button></div>
-    </div>
-    <div class="field-error" id="browse-error"></div>
-    <p class="hint" id="browse-meta"></p>
-
+    <p class="hint">These are the settings from your configuration file. Changing
+    paths or the downloader needs a restart; everything else takes effect on
+    save.</p>
+    <div class="field-error" id="settings-error"></div>
     <div class="modal-scroll">
-      <div id="browse-results" class="browse"></div>
+      <div id="settings-form" class="settings"></div>
+    </div>
+    <div class="fields" style="margin-top:16px">
+      <div><button class="btn" id="btn-settings-save">Save</button></div>
     </div>
   </div>
 </div>
@@ -638,7 +638,11 @@ async function loadShows() {
     return;
   }
   el('shows').innerHTML =
-    sect('Airing', airing) + sect('Upcoming', upcoming) + sect('Complete', complete);
+    // Complete first: a finished season is not being hunted, so it is the
+    // least urgent thing on the page, but it is also where a show goes once
+    // adopted and never leaves. Putting it last buried it below the sections
+    // that change every week.
+    sect('Complete', complete) + sect('Airing', airing) + sect('Upcoming', upcoming);
   loadSummary();
 }
 
@@ -664,19 +668,14 @@ async function addShow() {
 // empty and broken.
 
 let browseAll = [];
+let browseLoaded = false;
 
-function openBrowse() {
-  el('browse-modal').classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-  el('browse-q').value = '';
-  fieldError('browse-error', '');
+// Browse lives inside the Add-a-show disclosure, so there is no modal to
+// open: the first time the disclosure is expanded, the cached list loads.
+function initBrowse() {
+  if (browseLoaded) return;
+  browseLoaded = true;
   browse(false);
-  el('browse-q').focus();
-}
-
-function closeBrowse() {
-  el('browse-modal').classList.add('hidden');
-  document.body.style.overflow = '';
 }
 
 // Browse the season. The list comes from a cached snapshot, so it works when
@@ -758,6 +757,18 @@ async function addFromBrowse(slug) {
 // the UI cannot know a credential it never showed.
 
 let settingsView = null;
+
+function openSettings() {
+  el('settings-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  fieldError('settings-error', '');
+  loadSettings();
+}
+
+function closeSettings() {
+  el('settings-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
 
 async function loadSettings() {
   try {
@@ -1406,9 +1417,9 @@ function wireActions() {
   });
 
   el('btn-add').onclick = addShow;
+  el('btn-settings-open').onclick = openSettings;
+  el('btn-settings-close').onclick = closeSettings;
   el('btn-settings-save').onclick = saveSettings;
-  el('btn-browse-open').onclick = openBrowse;
-  el('btn-browse-close').onclick = closeBrowse;
   el('btn-browse-refresh').onclick = () => browse(true);
   el('btn-browse-clear').onclick = () => {
     el('browse-q').value = '';
@@ -1416,6 +1427,11 @@ function wireActions() {
   };
   el('browse-q').oninput = applyBrowseFilter;
   el('browse-q').onkeydown = e => { if (e.key === 'Enter') browse(false); };
+  // The list loads the first time the disclosure is opened, not on page load:
+  // it costs a request, and most sessions do not add a show.
+  el('disc-add').addEventListener('toggle', () => {
+    if (el('disc-add').open) initBrowse();
+  });
   el('btn-adopt-open').onclick = openAdopt;
   el('btn-adopt-close').onclick = closeAdopt;
   el('btn-adopt-lookup').onclick = adoptLookup;
@@ -1537,11 +1553,6 @@ async function adoptConfirm() {
 })();
 
 wireActions();
-// Settings are loaded lazily: the panel is closed by default, and fetching on
-// load would cost a file read nobody asked for.
-el('disc-settings').addEventListener('toggle', () => {
-  if (el('disc-settings').open && !settingsView) loadSettings();
-});
 loadShows();
 
 function escapeHtml(s) {

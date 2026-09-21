@@ -223,9 +223,13 @@ watch signal would never match.
 
 ## Adding shows
 
-**Browse the season.** Open **Browse this season** and pick from the cached
-timetable. The slug is an exact identity, so the season length, cover art and
-every alternative name are filled in for you.
+Everything lives under **Add a show**.
+
+**Browse the season.** The cached timetable is right there in the panel —
+every show on the current season, with the filter narrowing it. Pick one and
+the slug is an exact identity, so the season length, cover art and every
+alternative name are filled in for you. The list loads the first time you open
+the panel, not on page load.
 
 **Paste a URL.** An animeschedule.net URL (or a bare slug) does the same thing:
 
