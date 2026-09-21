@@ -10,17 +10,19 @@ import (
 	"time"
 )
 
-// tile builds one timetable tile in the shape the site renders.
+// tile builds one season-page tile in the shape the site renders: a div
+// carrying a route attribute (the slug) and an anime-tile-title heading.
 func tile(slug, title, img, when string) string {
-	s := `<a href="anime/` + slug + `" class="show-link">`
+	s := `<div route="` + slug + `" showID="X">`
+	s += `<a href="/anime/` + slug + `">`
+	s += `<h2 class="anime-tile-title" itemprop="name">` + title + `</h2></a>`
 	if img != "" {
 		s += `<img src="` + img + `" alt="">`
 	}
-	s += `<h2 class="show-title-bar">` + title + `</h2>`
 	if when != "" {
 		s += `<time datetime="` + when + `"></time>`
 	}
-	return s + `</a>`
+	return s + `</div>`
 }
 
 var sampleTimetable = `<html><body><div class="timetable">
@@ -157,9 +159,7 @@ func TestCacheReusesFreshSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldURL := TimetableURL
-	TimetableURL = srv.URL
-	defer func() { TimetableURL = oldURL }()
+	defer PinTimetableURL(srv.URL)()
 
 	for i := 0; i < 3; i++ {
 		if _, err := c.Get(nil); err != nil {
@@ -243,6 +243,7 @@ func TestCacheFallsBackToStale(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
+	defer PinTimetableURL(srv.URL)()
 
 	got, err := c.Get(srv.Client())
 	if err != nil {

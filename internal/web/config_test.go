@@ -296,3 +296,86 @@ func TestTimetableMarksTracked(t *testing.T) {
 		t.Error("new-show must not be marked tracked")
 	}
 }
+
+// TestTimetableReturnsTheWholeList: browsing must show everything without
+// requiring a search first. An empty list until the user types made the panel
+// look broken, and hid the fact that the cache was working.
+func TestTimetableReturnsTheWholeList(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv, err := New(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := schedule.NewCache(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Seed(&schedule.Timetable{
+		Fetched: time.Now(),
+		Entries: []schedule.Entry{
+			{Slug: "a", Title: "Alpha"},
+			{Slug: "b", Title: "Beta"},
+			{Slug: "c", Title: "Gamma"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetTimetable(c)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/timetable", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Alpha", "Beta", "Gamma"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("full list missing %q", want)
+		}
+	}
+	if !strings.Contains(body, `"count":3`) {
+		t.Errorf("count wrong: %s", body)
+	}
+}
+
+// TestTimetableFilterNarrows: the query still works, for when the list is
+// long enough to need it.
+func TestTimetableFilterNarrows(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv, err := New(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := schedule.NewCache(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Seed(&schedule.Timetable{
+		Fetched: time.Now(),
+		Entries: []schedule.Entry{
+			{Slug: "a", Title: "Alpha"},
+			{Slug: "b", Title: "Beta"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetTimetable(c)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/timetable?q=alp", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Alpha") || strings.Contains(body, "Beta") {
+		t.Errorf("filter did not narrow: %s", body)
+	}
+}

@@ -39,27 +39,78 @@ type Timetable struct {
 	Entries []Entry `json:"entries"`
 }
 
-// TimetableURL is the seasonal timetable page.
+// TimetableURL is the current season's show list.
 //
-// A variable rather than a constant so tests can point it at a stub.
-var TimetableURL = URL + "/seasonal"
+// The site has no "/seasonal" page — that was a guess and 404s. The season
+// pages are /seasons/<season>-<year>, and each lists every show for that cour
+// as an anime-tile.
+//
+// A variable rather than a constant so tests can point it at a stub. It is
+// refreshed from the date on each fetch, so the browse list does not go stale
+// at the turn of a cour.
+var TimetableURL = CurrentSeasonURL(time.Now())
 
-// reTileAnchor matches a timetable tile's link, which carries the slug.
+// pinnedTimetableURL is set by PinTimetableURL, which tests use to point the
+// fetch at a stub. While pinned, FetchTimetable will not recompute the URL
+// from the date.
+var pinnedTimetableURL bool
+
+// PinTimetableURL fixes the timetable URL, for tests. It returns a function
+// that restores the normal date-derived behaviour.
+func PinTimetableURL(u string) func() {
+	old := TimetableURL
+	TimetableURL = u
+	pinnedTimetableURL = true
+	return func() {
+		TimetableURL = old
+		pinnedTimetableURL = false
+	}
+}
+
+// SeasonURL builds the show-list URL for a season and year.
+func SeasonURL(season string, year int) string {
+	return fmt.Sprintf("%s/seasons/%s-%d", URL, strings.ToLower(season), year)
+}
+
+// CurrentSeasonURL returns the show-list URL for the season containing now.
 //
-// The tile markup pairs an anchor with the title heading that follows it, so
-// the title is recovered by forward-parsing to the next heading rather than
-// by matching a block shape — the same nesting problem the show page has.
+// Derived from the date rather than hardcoded, so the browse list does not go
+// stale at the turn of a cour. Seasons start in January, April, July and
+// October.
+func CurrentSeasonURL(now time.Time) string {
+	seasons := []string{"winter", "spring", "summer", "fall"}
+	season := seasons[int(now.Month()-1)/3]
+	return SeasonURL(season, now.Year())
+}
+
+// Tile markup, as the season pages actually render it. Each tile is a div
+// carrying a route attribute (the slug) and an anime-tile-title heading.
+//
+// The slug comes from the route attribute rather than the anchor href because
+// the tile repeats the link several times (thumbnail, title, buttons) and the
+// attribute is the one unambiguous place it appears.
 var (
-	reTileAnchor = regexp.MustCompile(`<a href="anime/([^"]+)"[^>]*class="show-link"`)
-	reTileTitle  = regexp.MustCompile(`<h2 class="show-title-bar">([^<]+)</h2>`)
-	reTileImg    = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
-	reTileTime   = regexp.MustCompile(`<time[^>]+datetime="([^"]+)"`)
+	reTileRoute = regexp.MustCompile(`route="([^"]+)"`)
+	reTileTitle = regexp.MustCompile(`<h2 class="anime-tile-title"[^>]*>([^<]+)</h2>`)
+	reTileImg   = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
+	reTileTime  = regexp.MustCompile(`<time[^>]+datetime="([^"]+)"`)
+	// The page inlines its CSS, which repeats the tile class names.
+	reStyleBlock = regexp.MustCompile(`(?s)<style.*?</style>`)
 )
 
 // FetchTimetable retrieves the seasonal timetable.
 func FetchTimetable(client *http.Client) (*Timetable, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	// Refresh from the date, so the list follows the season rather than
+	// whatever cour was current at startup. A long-running container would
+	// otherwise keep browsing a season that has ended.
+	//
+	// Skipped when a test has pinned TimetableURL to a stub, which is what
+	// RefreshSeasonURL is for.
+	if !pinnedTimetableURL {
+		TimetableURL = CurrentSeasonURL(time.Now())
 	}
 	resp, err := client.Get(TimetableURL)
 	if err != nil {
@@ -94,58 +145,61 @@ func ParseTimetable(r interface{ Read([]byte) (int, error) }) (*Timetable, error
 }
 
 func parseTimetableString(page string) (*Timetable, error) {
-	type anchor struct {
+	// Strip style blocks first: the page inlines its CSS, which contains the
+	// same class names as the markup and would otherwise match.
+	page = reStyleBlock.ReplaceAllString(page, "")
+
+	type tile struct {
 		slug string
 		pos  int
 	}
-	var anchors []anchor
-	for _, m := range reTileAnchor.FindAllStringSubmatchIndex(page, -1) {
-		anchors = append(anchors, anchor{slug: page[m[2]:m[3]], pos: m[1]})
+	var tiles []tile
+	for _, m := range reTileRoute.FindAllStringSubmatchIndex(page, -1) {
+		tiles = append(tiles, tile{slug: page[m[2]:m[3]], pos: m[0]})
 	}
-	if len(anchors) == 0 {
-		return nil, fmt.Errorf("no shows found on the timetable page")
+	if len(tiles) == 0 {
+		return nil, fmt.Errorf("no shows found on the season page")
 	}
 
-	// Each anchor's title is the next heading after it. Pairing by position
-	// is what makes this robust: the tile markup nests, so a block regex
-	// cannot tell one tile's end from the next tile's start.
-	titles := make([]struct {
+	// Titles, by position, so each tile can claim the one that follows it.
+	type titled struct {
 		pos   int
 		title string
-	}, 0)
+	}
+	var titles []titled
 	for _, m := range reTileTitle.FindAllStringSubmatchIndex(page, -1) {
-		titles = append(titles, struct {
-			pos   int
-			title string
-		}{pos: m[0], title: html.UnescapeString(strings.TrimSpace(page[m[2]:m[3]]))})
+		titles = append(titles, titled{
+			pos:   m[0],
+			title: html.UnescapeString(strings.TrimSpace(page[m[2]:m[3]])),
+		})
 	}
 
 	seen := map[string]bool{}
-	out := make([]Entry, 0, len(anchors))
-	for i, a := range anchors {
-		if seen[a.slug] {
+	out := make([]Entry, 0, len(tiles))
+	for i, t := range tiles {
+		if seen[t.slug] {
 			continue
 		}
-		seen[a.slug] = true
+		seen[t.slug] = true
 
-		e := Entry{Slug: a.slug}
-		// The tile's extent is up to the next anchor, or the end of the page.
+		e := Entry{Slug: t.slug}
+		// The tile's extent runs to the next tile, or the end of the page.
 		end := len(page)
-		if i+1 < len(anchors) {
-			end = anchors[i+1].pos
+		if i+1 < len(tiles) {
+			end = tiles[i+1].pos
 		}
-		tile := page[a.pos:end]
+		body := page[t.pos:end]
 
-		for _, t := range titles {
-			if t.pos >= a.pos && t.pos < end {
-				e.Title = t.title
+		for _, ti := range titles {
+			if ti.pos >= t.pos && ti.pos < end {
+				e.Title = ti.title
 				break
 			}
 		}
-		if m := reTileImg.FindStringSubmatch(tile); m != nil {
+		if m := reTileImg.FindStringSubmatch(body); m != nil {
 			e.ImageURL = html.UnescapeString(strings.ReplaceAll(m[1], "&amp;", "&"))
 		}
-		if m := reTileTime.FindStringSubmatch(tile); m != nil {
+		if m := reTileTime.FindStringSubmatch(body); m != nil {
 			e.AirsAt = parseAirsAt(html.UnescapeString(m[1]))
 		}
 		out = append(out, e)
