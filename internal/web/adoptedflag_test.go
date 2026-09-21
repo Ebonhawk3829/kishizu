@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
@@ -86,5 +87,52 @@ func TestAdoptedShowIsFlaggedAdopted(t *testing.T) {
 	air := byName["Airing Show"]
 	if air.Adopted {
 		t.Error("airing show: adopted = true, want false")
+	}
+}
+
+// TestAdoptedFlagIndependentOfWatchState: an adopted season must be flagged
+// adopted while its episodes are still unwatched, so the UI can file it under
+// Complete as a CATEGORY rather than waiting for every episode to be watched.
+//
+// The Complete section filters on `adopted`, not on state === 'complete'.
+// Filtering on state would leave a freshly adopted season sitting under
+// Airing, which claims kishizu is hunting it week by week when it is not.
+func TestAdoptedFlagIndependentOfWatchState(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv, err := New(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sh, err := st.CreateShow("Adopted", nil, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSource(sh.ID, store.SourceSeaDex); err != nil {
+		t.Fatal(err)
+	}
+	// All downloaded, none watched.
+	for _, n := range []int{1, 2, 3} {
+		if err := st.UpsertEpisode(sh.ID, n, episode.Downloaded, "H", "Adopted"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/shows", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"adopted":true`) {
+		t.Errorf("adopted flag not set while episodes are unwatched: %s", body)
+	}
+	// The state stays the actionable one, so the card can still say what to do.
+	if !strings.Contains(body, `"state":"ready to watch"`) {
+		t.Errorf("state should be ready to watch, got: %s", body)
 	}
 }

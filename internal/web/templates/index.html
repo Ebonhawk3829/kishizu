@@ -605,11 +605,16 @@ async function loadShows() {
   };
   // Adopted seasons have no air dates to sort by, so they go alphabetically.
   const byName = (a, b) => a.name.localeCompare(b.name);
-  // Adopted seasons get their own section. They are finished and never
-  // hunted, so filing them under Airing would claim kishizu is watching them
-  // week by week.
-  const complete = shows.filter(s => s.state === 'complete').sort(byName);
-  const airing = shows.filter(s => s.state !== 'upcoming' && s.state !== 'complete').sort(byAir);
+  // Complete is a CATEGORY, not a state: a season that has finished releasing
+  // belongs here whether or not it has been watched. Within the section the
+  // card still shows its real state — downloading, ready to watch, or up to
+  // date — because those are the things worth acting on.
+  //
+  // Filtering on state === 'complete' instead would leave an adopted season
+  // sitting under Airing until every episode was watched, which claims
+  // kishizu is hunting it week by week when it is not.
+  const complete = shows.filter(s => s.adopted).sort(byName);
+  const airing = shows.filter(s => !s.adopted && s.state !== 'upcoming').sort(byAir);
   // Soonest first, so the next thing to decide is at the top. Shows with no
   // announced slot sort last: there is nothing to act on for those, and
   // putting them first would bury the ones that need a decision.
