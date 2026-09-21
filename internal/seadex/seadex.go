@@ -220,7 +220,7 @@ func ParseEntry(r io.Reader) (*Entry, error) {
 				Tags:         rt.Tags,
 			}
 			for _, rf := range rt.Files {
-				t.Files = append(t.Files, File{Name: rf.Name, Length: rf.Length})
+				t.Files = append(t.Files, File(rf))
 			}
 			e.Torrents = append(e.Torrents, t)
 		}

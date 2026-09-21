@@ -1,44 +1,22 @@
 package web
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
 // TestAdoptEndToEnd: a confirmed adoption must create the show with source
 // seadex and mark the episodes downloading, which is what makes Reconcile pick
-// the files up. Transmission is a stub that records what it was handed.
+// the files up. The downloader is a fake that records what it was handed.
+//
+// Asserting against the fake rather than a stubbed Transmission RPC is the
+// point of the Downloader interface: the test should not care which client is
+// behind it, only that the magnet and a per-show directory were handed over.
 func TestAdoptEndToEnd(t *testing.T) {
-	var added map[string]any
-	tx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Transmission-Session-Id") == "" {
-			w.Header().Set("X-Transmission-Session-Id", "T")
-			w.WriteHeader(http.StatusConflict)
-			return
-		}
-		var body struct {
-			Method    string `json:"method"`
-			Arguments struct {
-				Filename    string `json:"filename"`
-				DownloadDir string `json:"download-dir"`
-			} `json:"arguments"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		added = map[string]any{
-			"method": body.Method,
-			"magnet": body.Arguments.Filename,
-			"dir":    body.Arguments.DownloadDir,
-		}
-		w.Write([]byte(`{"result":"success","arguments":{}}`))
-	}))
-	defer tx.Close()
-
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +26,8 @@ func TestAdoptEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.SetAdopt(t.TempDir(), t.TempDir(), tx.URL)
+	dl := &download.Fake{}
+	srv.SetAdopt(t.TempDir(), t.TempDir(), dl)
 
 	rec := postJSON(t, srv, "/api/adopt", map[string]any{
 		"url":       "https://releases.moe/112124/",
@@ -64,15 +43,16 @@ func TestAdoptEndToEnd(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Transmission got the magnet and a per-show directory.
-	if added["method"] != "torrent-add" {
-		t.Errorf("method = %v, want torrent-add", added["method"])
+	// The downloader got the magnet and a per-show directory.
+	if dl.Count() != 1 {
+		t.Fatalf("downloader got %d adds, want 1", dl.Count())
 	}
-	if got := added["magnet"]; got != "magnet:?xt=urn:btih:HASH123&dn=DanMachi III" {
-		t.Errorf("magnet = %v", got)
+	added := dl.Last()
+	if added.Magnet != "magnet:?xt=urn:btih:HASH123&dn=DanMachi III" {
+		t.Errorf("magnet = %q", added.Magnet)
 	}
-	if got := added["dir"]; got == "" || filepath.Base(got.(string)) != "DanMachi III" {
-		t.Errorf("download dir = %v, want a DanMachi III directory", got)
+	if filepath.Base(added.Dir) != "DanMachi III" {
+		t.Errorf("download dir = %q, want a DanMachi III directory", added.Dir)
 	}
 
 	// The show exists with source seadex.

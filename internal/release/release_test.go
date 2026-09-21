@@ -158,3 +158,32 @@ func TestBareNumberAllowsVersionSuffix(t *testing.T) {
 		}
 	}
 }
+
+// TestSanitise: names must be safe on both Linux and Windows, since Syncthing
+// moves files between them.
+func TestSanitise(t *testing.T) {
+	cases := map[string]string{
+		"Show: The Sequel": "Show The Sequel",
+		"Show/Slash":       "ShowSlash",
+		"Trailing. Dots..": "Trailing. Dots",
+		"CON":              "_CON",
+		"Com1":             "_Com1",
+		"Normal Show":      "Normal Show",
+	}
+	for in, want := range cases {
+		if got := Sanitise(in); got != want {
+			t.Errorf("Sanitise(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSanitiseKeepsNamesUsable: sanitising must not mangle ordinary names, only
+// the characters that break on Windows (Syncthing crosses to the user's PC).
+func TestSanitiseKeepsNamesUsable(t *testing.T) {
+	if got := Sanitise("Tomb Raider King"); got != "Tomb Raider King" {
+		t.Errorf("Sanitise = %q, want it unchanged", got)
+	}
+	if got := Sanitise("BLEACH: Thousand-Year Blood War"); got != "BLEACH Thousand-Year Blood War" {
+		t.Errorf("Sanitise = %q, want the colon stripped only", got)
+	}
+}

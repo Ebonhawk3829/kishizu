@@ -5,7 +5,6 @@ package store
 import (
 	"database/sql"
 	"embed"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,7 +37,7 @@ func Open(path string) (*Store, error) {
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
@@ -367,22 +366,6 @@ func (s *Store) Vocabulary() (map[string]map[string]string, error) {
 func (s *Store) SetSlug(showID int64, slug string) error {
 	_, err := s.db.Exec(`UPDATE show SET slug = ? WHERE id = ?`, slug, showID)
 	return err
-}
-
-// ShowBySlug looks a show up by its animeschedule slug. Returns nil when no
-// show carries it.
-func (s *Store) ShowBySlug(slug string) (*Show, error) {
-	if slug == "" {
-		return nil, nil
-	}
-	var id int64
-	if err := s.db.QueryRow(`SELECT id FROM show WHERE slug = ?`, slug).Scan(&id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return s.GetShow(id)
 }
 
 // Where a show came from. Recorded on the show row and used to decide which

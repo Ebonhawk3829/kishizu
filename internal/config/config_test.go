@@ -19,7 +19,7 @@ shows:
     watched: 7
     max: 13
 `
-	shows, err := parse(src)
+	shows, err := parseShows(src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestParseRejectsBadInput(t *testing.T) {
 		"no name":     "shows:\n  - watched: 3\n",
 	}
 	for name, src := range cases {
-		if _, err := parse(src); err == nil {
+		if _, err := parseShows(src); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
@@ -62,12 +62,12 @@ func TestParseRejectsBadInput(t *testing.T) {
 // error, so a user can start from a blank slate.
 func TestParseEmptyIsEmpty(t *testing.T) {
 	for _, src := range []string{"", "# just a comment\n", "shows:\n"} {
-		shows, err := parse(src)
+		shows, err := parseShows(src)
 		if err != nil {
-			t.Fatalf("parse(%q): %v", src, err)
+			t.Fatalf("parseShows(%q): %v", src, err)
 		}
 		if len(shows) != 0 {
-			t.Errorf("parse(%q) = %d shows, want 0", src, len(shows))
+			t.Errorf("parseShows(%q) = %d shows, want 0", src, len(shows))
 		}
 	}
 }

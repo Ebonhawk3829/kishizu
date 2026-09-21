@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
+	"github.com/Ebonhawk3829/kishizu/internal/naming"
 )
 
 // TestWatchedAcceptsLibraryFilename: a filename kishizu wrote itself must be
@@ -53,7 +54,17 @@ func TestWatchedStillRejectsUncertainNonLibraryNames(t *testing.T) {
 
 // TestIsLibraryForm: the recogniser must accept kishizu's own names and reject
 // ordinary release titles.
+//
+// It now goes through the naming scheme rather than a fixed regex, so a
+// configured layout is recognised just as the default is.
 func TestIsLibraryForm(t *testing.T) {
+	srv := testServer(t)
+	scheme, err := naming.Resolve(naming.PresetKishizu, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetNaming(scheme)
+
 	yes := []string{
 		"Clevatess Season 2 - E09.mkv",
 		"Tomb Raider King - E10.mkv",
@@ -65,13 +76,48 @@ func TestIsLibraryForm(t *testing.T) {
 		"[Group] Show - 47 (1080p)",
 	}
 	for _, s := range yes {
-		if !isLibraryForm(s) {
+		if !srv.isLibraryForm(s) {
 			t.Errorf("isLibraryForm(%q) = false, want true", s)
 		}
 	}
 	for _, s := range no {
-		if isLibraryForm(s) {
+		if srv.isLibraryForm(s) {
 			t.Errorf("isLibraryForm(%q) = true, want false", s)
 		}
+	}
+}
+
+// TestIsLibraryFormFollowsTheScheme: a custom layout must be recognised too.
+// A scheme that cannot read its own output leaves every watch signal to the
+// fuzzy path, where a library name scores too low to pass the confidence gate
+// and nothing is ever marked watched.
+func TestIsLibraryFormFollowsTheScheme(t *testing.T) {
+	srv := testServer(t)
+	scheme, err := naming.Resolve(naming.PresetSonarr, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetNaming(scheme)
+
+	if !srv.isLibraryForm("Show - S01E09.mkv") {
+		t.Error("sonarr scheme must recognise its own name")
+	}
+	if srv.isLibraryForm("Show - E09.mkv") {
+		t.Error("sonarr scheme must not claim the kishizu form")
+	}
+}
+
+// TestServerAlwaysHasAScheme: a server with no scheme could not recognise
+// kishizu's own filenames, which silently breaks deletion — the watch signal
+// would fall through to the fuzzy path, where a library name scores too low
+// to pass the confidence gate. So New installs the default rather than
+// leaving it to the caller.
+func TestServerAlwaysHasAScheme(t *testing.T) {
+	srv := testServer(t)
+	if srv.naming == nil {
+		t.Fatal("New must install a default naming scheme")
+	}
+	if !srv.isLibraryForm("Show - E09.mkv") {
+		t.Error("the default scheme must recognise the default layout")
 	}
 }

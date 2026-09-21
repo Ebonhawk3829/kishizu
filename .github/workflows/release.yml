@@ -60,3 +60,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Injected so the binary reports its own version. The image tag
+          # alone is not enough: a tag can be re-pushed, and a locally built
+          # binary has no tag at all.
+          build-args: |
+            VERSION=${{ github.ref_name }}

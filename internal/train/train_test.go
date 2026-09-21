@@ -268,23 +268,6 @@ func TestAcceptLearnsUnseenGroupOffset(t *testing.T) {
 	}
 }
 
-func TestReasonUpdatesMatcher(t *testing.T) {
-	cases := map[Reason]bool{
-		ReasonWrongEpisode: true,
-		ReasonWrongShow:    true,
-		ReasonBatch:        false,
-		ReasonDub:          false,
-		ReasonCodec:        false,
-		ReasonQuality:      false,
-		ReasonOther:        false,
-	}
-	for r, want := range cases {
-		if got := r.UpdatesMatcher(); got != want {
-			t.Errorf("%s.UpdatesMatcher() = %v, want %v", r, got, want)
-		}
-	}
-}
-
 // TestCommitPersists: what the session learned must survive to the database.
 func TestCommitPersists(t *testing.T) {
 	st := testStore(t)

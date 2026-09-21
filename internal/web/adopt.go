@@ -10,18 +10,12 @@ import (
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/anilist"
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/seadex"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 )
-
-// magnetFor builds a magnet link from an infohash. The display name is kept so
-// the torrent has a readable name in Transmission.
-func magnetFor(infohash, title string) string {
-	return "magnet:?xt=urn:btih:" + infohash + "&dn=" + title
-}
 
 // ---------- adopting a finished season ----------
 //
@@ -116,9 +110,9 @@ func (s *Server) handleAdoptPreview(w http.ResponseWriter, r *http.Request) {
 // each one is. This is the review step's output, so the classifier's proposals
 // are never trusted silently.
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
-	if s.adopt.rpcURL == "" || s.adopt.staging == "" || s.adopt.library == "" {
+	if s.adopt.downloader == nil || s.adopt.staging == "" || s.adopt.library == "" {
 		writeErr(w, http.StatusNotImplemented,
-			fmt.Errorf("adoption is not configured on this server (needs staging, library and Transmission RPC)"))
+			fmt.Errorf("adoption is not configured on this server (needs staging, library and a downloader)"))
 		return
 	}
 
@@ -218,9 +212,8 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("staging mkdir: %w", err))
 		return
 	}
-	tc := transmission.New(s.adopt.rpcURL)
-	if err := tc.AddWithDir(magnetFor(req.InfoHash, req.Title), stagingDir); err != nil {
-		writeErr(w, http.StatusBadGateway, fmt.Errorf("transmission add: %w", err))
+	if err := s.adopt.downloader.Add(download.Magnet(req.InfoHash, req.Title), stagingDir); err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("%s add: %w", s.adopt.downloader.Name(), err))
 		return
 	}
 

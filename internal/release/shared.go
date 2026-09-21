@@ -13,7 +13,7 @@ import (
 // ResQuality orders resolutions by ascending quality, for comparing a release
 // against a floor. 0 means unknown.
 //
-// Deliberately separate from ResolutionPenalty in rules.go. The penalty map
+// Deliberately separate from quality.Policy.ResolutionPenalty. The penalty map
 // ranks by *preference*, which is not the same thing: 2160p is acceptable but
 // not preferred, so it carries a small penalty while still being higher quality
 // than 1080p. Deriving one from the other conflates the two and makes a floor

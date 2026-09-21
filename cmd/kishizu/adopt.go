@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/seadex"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 )
 
 // adoptSeason prepares an adoption of a finished season from a SeaDex entry
@@ -30,7 +30,7 @@ import (
 // -adopt-episodes overrides the classifier's proposal, which is how the
 // review step is exercised before the UI exists: a comma-separated list of
 // the numbers to adopt, in the same order as the listed files.
-func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, rpcURL string, confirm bool) error {
+func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, dl download.Downloader, confirm bool) error {
 	id := seadex.AniListIDFromURL(rawURL)
 	if id == 0 {
 		return fmt.Errorf("could not read a SeaDex entry id from %q", rawURL)
@@ -102,14 +102,14 @@ func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, 
 
 	fmt.Printf("Adopting %d episode(s): %s\n", len(eps), joinInts(eps))
 	// The magnet's display name is the torrent's own name, not the group:
-	// Transmission shows it in its list, and "sam" alone says nothing.
-	fmt.Printf("Magnet:      %s\n", magnetFor(plan.Torrent.InfoHash, title))
+	// the client shows it in its list, and "sam" alone says nothing.
+	fmt.Printf("Magnet:      %s\n", download.Magnet(plan.Torrent.InfoHash, title))
 	fmt.Printf("Staging dir: %s\n", stagingDir)
 	fmt.Printf("Library dir: %s\n", libraryDir)
 	fmt.Println()
 
 	if !confirm {
-		fmt.Println("Dry run. Re-run with -adopt-confirm to hand this to Transmission.")
+		fmt.Printf("Dry run. Re-run with -adopt-confirm to hand this to %s.\n", dl.Name())
 		return nil
 	}
 
@@ -136,13 +136,12 @@ func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, 
 	}
 
 	// One staging directory per show, created here so it is owned by our uid
-	// rather than Transmission's.
+	// rather than the downloader's.
 	if err := os.MkdirAll(stagingDir, 0o775); err != nil {
 		return fmt.Errorf("staging mkdir %s: %w", stagingDir, err)
 	}
-	tc := transmission.New(rpcURL)
-	if err := tc.AddWithDir(magnetFor(plan.Torrent.InfoHash, title), stagingDir); err != nil {
-		return fmt.Errorf("transmission add: %w", err)
+	if err := dl.Add(download.Magnet(plan.Torrent.InfoHash, title), stagingDir); err != nil {
+		return fmt.Errorf("%s add: %w", dl.Name(), err)
 	}
 
 	fmt.Printf("Adopted %q: %d episodes downloading.\n", title, len(eps))

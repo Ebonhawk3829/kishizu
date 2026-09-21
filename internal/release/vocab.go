@@ -24,9 +24,8 @@ import (
 // This is why training is worth doing. Offsets are per-group and saturate
 // after one example; vocabulary compounds.
 type Vocabulary struct {
-	mu       sync.RWMutex
-	byKind   map[string]map[string]string // kind -> normalised token -> canonical
-	canonFor map[string]func(string) string
+	mu     sync.RWMutex
+	byKind map[string]map[string]string // kind -> normalised token -> canonical
 }
 
 // Vocabulary kinds. Each corresponds to one parsed field.
@@ -79,17 +78,6 @@ func (v *Vocabulary) Lookup(kind, token string) string {
 		return ""
 	}
 	return m[vocabKey(token)]
-}
-
-// All returns every learned synonym for a kind, for display and export.
-func (v *Vocabulary) All(kind string) map[string]string {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-	out := map[string]string{}
-	for k, val := range v.byKind[kind] {
-		out[k] = val
-	}
-	return out
 }
 
 // Load seeds the vocabulary, used when opening the database.

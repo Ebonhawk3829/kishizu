@@ -16,6 +16,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
+	"github.com/Ebonhawk3829/kishizu/internal/quality"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
@@ -37,19 +38,28 @@ type Decision struct {
 // Listener polls feeds and produces grab decisions.
 type Listener struct {
 	st *store.Store
+	// Policy is the quality policy applied to every release. It is global:
+	// the same rules hold for every show, so it is set once rather than per
+	// show.
+	Policy *quality.Policy
 	// Now is overridable in tests.
 	Now func() time.Time
 }
 
-// New builds a Listener.
+// New builds a Listener with the default quality policy.
 func New(st *store.Store) *Listener {
-	return &Listener{st: st, Now: time.Now}
+	return NewWithPolicy(st, quality.Default())
 }
 
-// PollShow fetches one show's feed and evaluates each item.
-func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
-	return l.pollShow(sh)
-} // DueShows returns the shows whose RSS should be polled right now, with the
+// NewWithPolicy builds a Listener that applies a specific quality policy.
+func NewWithPolicy(st *store.Store, p *quality.Policy) *Listener {
+	if p == nil {
+		p = quality.Default()
+	}
+	return &Listener{st: st, Policy: p, Now: time.Now}
+}
+
+// DueShows returns the shows whose RSS should be polled right now, with the
 // interval each wants.
 //
 // A show is due when any of its episodes is hunting (aggressive rate) or
@@ -136,12 +146,12 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 	return len(offsets) > 0
 }
 
-// pollShow fetches one show's feed and evaluates each item.
+// PollShow fetches one show's feed and evaluates each item.
 //
 // Query on every alias, not just the canonical name: Nyaa's search is a plain
 // substring match, so a long specific name misses groups that write the title
 // differently. Results are merged and deduplicated on infohash.
-func (l *Listener) pollShow(sh *store.Show) ([]Decision, error) {
+func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
 	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
 	if err != nil {
 		return nil, err
@@ -216,7 +226,7 @@ func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, it nyaa.Item) Deci
 	// whole quality policy: batch and unreadable/sub-floor resolutions are
 	// rejected; codec, dub and uncensored are ranked later.
 	r := m.Parse(it.Title)
-	if rejected, why := release.RuleReject(&r); rejected {
+	if rejected, why := l.Policy.Reject(&r); rejected {
 		d.Reason = why
 		return d
 	}
@@ -280,7 +290,7 @@ func (l *Listener) airDateOK(sh *store.Show, it nyaa.Item) bool {
 // Ordering: group preference (global, set in advance), then the global rules,
 // then seeders, then recency. Group comes first because which group posted a
 // release says more about its quality than any attribute of the file does.
-func Best(decisions []Decision) []Decision {
+func (l *Listener) Best(decisions []Decision) []Decision {
 	// Only grabs, and only one per (show, episode).
 	byEp := map[string]Decision{}
 	for _, d := range decisions {
@@ -288,7 +298,7 @@ func Best(decisions []Decision) []Decision {
 			continue
 		}
 		key := fmt.Sprintf("%d:%d", d.ShowID, d.Episode)
-		if cur, ok := byEp[key]; !ok || better(d, cur) {
+		if cur, ok := byEp[key]; !ok || l.better(d, cur) {
 			byEp[key] = d
 		}
 	}
@@ -309,15 +319,15 @@ func Best(decisions []Decision) []Decision {
 // better reports whether candidate a beats the current pick.
 //
 // Ordering is: group preference (global order), then the global rules, then
-// seeders, then recency. The group order is hardcoded in release/rules.go;
-// training never writes it.
-func better(a, b Decision) bool {
-	ga := groupRankOf(a)
-	gb := groupRankOf(b)
+// seeders, then recency. The policy is global and set in advance; training
+// never writes it.
+func (l *Listener) better(a, b Decision) bool {
+	ga := l.groupRankOf(a)
+	gb := l.groupRankOf(b)
 	if ga != gb {
 		return ga < gb
 	}
-	ra, rb := ruleRank(a), ruleRank(b)
+	ra, rb := l.ruleRank(a), l.ruleRank(b)
 	if ra != rb {
 		return ra < rb
 	}
@@ -330,9 +340,9 @@ func better(a, b Decision) bool {
 // groupRankOf is where a release's group sits in the global preferred order.
 // Unlisted groups sort last but are not excluded — the order is a ranking,
 // not an allowlist.
-func groupRankOf(d Decision) int {
+func (l *Listener) groupRankOf(d Decision) int {
 	r := release.Parse(d.Item.Title)
-	return release.GroupRank(r.Group)
+	return l.Policy.GroupRank(r.Group)
 }
 
 // ruleRank scores a release against the global rules: codec, resolution, dub
@@ -340,10 +350,13 @@ func groupRankOf(d Decision) int {
 //
 // These are constants, not per-release grades. Nobody wants a batch or a dub,
 // and x264 beats a re-encoded x265, so asking per release was wasted effort.
-func ruleRank(d Decision) int {
+func (l *Listener) ruleRank(d Decision) int {
 	r := release.Parse(d.Item.Title)
-	return release.RuleRank(&r)
+	return l.Policy.Rank(&r)
 }
+
+// Best reduces grab decisions to one per episode, keeping the best-ranked
+// candidate for each.
 
 // FilterPreferences reduces grab decisions to one per (show, episode), keeping
 // the best-ranked candidate.
@@ -359,7 +372,7 @@ func (l *Listener) FilterPreferences(decisions []Decision) []Decision {
 		}
 	}
 	for _, ds := range byShow {
-		out = append(out, Best(ds)...)
+		out = append(out, l.Best(ds)...)
 	}
 	return out
 }

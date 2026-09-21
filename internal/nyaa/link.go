@@ -12,11 +12,9 @@ import (
 )
 
 var (
-	reOgTitle     = regexp.MustCompile(`property=["']og:title["']\s+content=["']([^"']+)["']`)
-	reOgTitleRev  = regexp.MustCompile(`content=["']([^"']+)["']\s+property=["']og:title["']`)
-	reTitleTag    = regexp.MustCompile(`(?s)<title>(.*?)</title>`)
-	reViewURL     = regexp.MustCompile(`nyaa\.si/view/(\d+)`)
-	reInfoHashURL = regexp.MustCompile(`(?i)\b([0-9a-f]{40})\b`)
+	reOgTitle    = regexp.MustCompile(`property=["']og:title["']\s+content=["']([^"']+)["']`)
+	reOgTitleRev = regexp.MustCompile(`content=["']([^"']+)["']\s+property=["']og:title["']`)
+	reTitleTag   = regexp.MustCompile(`(?s)<title>(.*?)</title>`)
 )
 
 // ResolveLink fetches a Nyaa view page and returns the release title.

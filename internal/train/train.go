@@ -35,27 +35,6 @@ var (
 	regexpQuality = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k|web-?dl|webrip|web|bd|blu-?ray|remux|avc|hevc|h\.?264|h\.?265|x264|x265|av1|aac|flac|opus|e-?ac-?3|ac3|ddp|10bit|hi10|dsnp|cr|amzn|nf|adn|iqiyi|dual|multi|subs?|dub|dubbed|raw|batch|complete|v2|v3|repack|proper|weekly)\b`)
 )
 
-// Reason is why the user rejected a candidate. It determines whether the
-// matcher is updated or only the filters/preferences.
-type Reason string
-
-const (
-	ReasonWrongEpisode Reason = "wrong_episode" // matcher problem
-	ReasonWrongShow    Reason = "wrong_show"    // matcher problem
-	ReasonBatch        Reason = "batch"         // filter: exclude batches
-	ReasonDub          Reason = "dub"           // filter: exclude dubs
-	ReasonCodec        Reason = "codec"         // preference: ranking only
-	ReasonQuality      Reason = "quality"       // filter or preference
-	ReasonOther        Reason = "other"
-)
-
-// UpdatesMatcher reports whether this reason means the matching model is wrong.
-// Only these two should change aliases or offsets; everything else is a
-// quality preference and must not corrupt the matcher.
-func (r Reason) UpdatesMatcher() bool {
-	return r == ReasonWrongEpisode || r == ReasonWrongShow
-}
-
 // Candidate is a release the tool is asking about.
 type Candidate struct {
 	Item        nyaa.Item
@@ -119,9 +98,7 @@ func (s *Session) Seed(title string) error {
 	s.m.Defaults = distinct(s.m.Offsets)
 
 	// The seed also teaches us aliases.
-	for _, a := range extractAliases(title) {
-		s.m.Alias = append(s.m.Alias, a)
-	}
+	s.m.Alias = append(s.m.Alias, extractAliases(title)...)
 	s.Accepted++
 	return nil
 }
@@ -336,21 +313,14 @@ func (s *Session) Accept(c Candidate) error {
 // again this session. Quality verdicts are global rules set in advance —
 // training never writes them — so the only thing a rejection teaches is
 // "stop asking about this release".
-func (s *Session) Reject(c Candidate, reason Reason) error {
+func (s *Session) Reject(c Candidate) error {
 	s.Asked[c.Item.InfoHash] = true
 	s.Rejected++
-	_ = reason
 	return nil
 }
 
 // Show exposes the working model so callers can match against it mid-session.
 func (s *Session) Show() *match.MemShow { return s.m }
-
-// confidenceFor is the model's confidence in a title, using everything learned
-// so far. Exposed so tests can assert that confidence rises with training.
-func (s *Session) confidenceFor(title string) float64 {
-	return match.Match(s.m, title).Confidence
-}
 
 // MarkAsked records a release as seen, so it is not proposed again.
 //

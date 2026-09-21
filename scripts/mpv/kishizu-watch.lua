@@ -1,8 +1,8 @@
 -- kishizu-watch.lua: tell kishizu when an episode has been watched.
 --
--- Runs on the user's PC inside mpv. Posts the file path to kishizu on a
--- tailnet device; kishizu does the matching, so the script never needs to know
--- show names, offsets or episode numbers.
+-- Runs on the user's PC inside mpv. Posts the file path to kishizu wherever
+-- it is reachable; kishizu does the matching, so the script never needs to
+-- know show names, offsets or episode numbers.
 --
 -- Signal rules:
 --   * An episode counts as watched when playback reaches within
@@ -21,19 +21,20 @@ local utils = require 'mp.utils'
 local options = require 'mp.options'
 
 local o = {
-    -- kishizu endpoint on the tailnet. Replace TAILNET_IP with your server's
-    -- tailnet address (e.g. 100.x.y.z).
-    endpoint = 'http://TAILNET_IP:8098/api/watched',
+    -- kishizu's /api/watched endpoint. Replace HOST with wherever kishizu is
+    -- reachable from this machine: a hostname, a LAN address, or a VPN
+    -- address. Set this in mpv's script-opts rather than editing the file.
+    endpoint = 'http://HOST:8098/api/watched',
     -- Only files under this directory are reported. mpv is used for all media
     -- on this machine, so without the gate every film and TV episode would be
     -- posted to kishizu and come back as a 422. Subdirectories count.
     -- Empty disables the filter and reports everything.
-    root = 'C:\\Anime',
+    root = '',
     -- Seconds from the end within which playback counts as watched. The user
     -- skips the ED, so "reached the end" alone would miss most episodes.
     mark_window = 120,
     -- ntfy topic for failure alerts. Empty disables.
-    ntfy = 'http://TAILNET_IP:8085/kishizu',
+    ntfy = '',
     -- Where failed posts are spooled for retry.
     spool = mp.command_native({'expand-path', '~~state/kishizu-spool.txt'}),
 }

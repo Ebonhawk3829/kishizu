@@ -12,10 +12,40 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
       - run: go build ./...
       - run: go vet ./...
       - run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13
+
+  # Guards against documentation drift: every flag the binary accepts must
+  # have a row in the README flags table, and vice versa. A flag added
+  # without documentation (or a documented flag removed from the binary)
+  # fails the build rather than surfacing as a support question later.
+  docs-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: Flags in -help must match the README table
+        run: |
+          go run ./cmd/kishizu -help 2>&1 \
+            | grep -oE "^  -[a-z-]+" | sed 's/^  //' | sort > /tmp/flags.txt
+          grep -oE '^\| `-[a-z-]+`' README.md \
+            | sed 's/| `//;s/`//' | sort > /tmp/readme.txt
+          diff /tmp/flags.txt /tmp/readme.txt

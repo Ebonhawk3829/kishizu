@@ -144,6 +144,26 @@
     transition: background .1s ease, color .1s ease;
   }
   .acts button:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
+
+  /* Browse results reuse the row grid, but their action is always visible:
+     the whole point of the list is to click Add, and hiding it behind a
+     hover would make the list look inert. */
+  .browse { margin-top: 12px; max-height: 420px; overflow-y: auto; }
+  .browse .row .acts { opacity: 1; }
+  .browse .row .art { width: 34px; height: 48px; }
+
+  /* Settings: a stack of field groups, each on its own row so the labels
+     stay aligned across sections. */
+  .settings .fields {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px; margin-bottom: 12px;
+  }
+  .settings label { display: block; font-size: 12px; color: var(--t2); margin-bottom: 4px; }
+  .settings input, .settings select {
+    width: 100%; box-sizing: border-box; background: oklch(0.19 0.010 285);
+    border: 1px solid oklch(0.28 0.010 285); border-radius: 7px;
+    color: var(--t1); font: inherit; font-size: 13.5px; padding: 7px 9px;
+  }
   .acts button.danger:hover { color: var(--bad); }
   .acts.confirming { opacity: 1; }
   .acts .ask { color: var(--t2); font-size: 13.5px; padding: 8px 4px 8px 13px; }
@@ -390,6 +410,36 @@
   </div>
 </details>
 
+<details class="disc" id="disc-settings">
+  <summary><span class="chev">&rsaquo;</span> Settings</summary>
+  <div class="body">
+    <p class="hint">These are the settings from your configuration file. Changing
+    paths or the downloader needs a restart; everything else takes effect on
+    save.</p>
+    <div class="field-error" id="settings-error"></div>
+    <div id="settings-form" class="settings"></div>
+    <div class="fields">
+      <div><button class="btn" id="btn-settings-save">Save</button></div>
+    </div>
+  </div>
+</details>
+
+<details class="disc" id="disc-browse">
+  <summary><span class="chev">&rsaquo;</span> Browse this season</summary>
+  <div class="body">
+    <p class="hint">Every show on the seasonal timetable, from a cached snapshot.
+    Pick one to add it — the slug is an exact identity, so the season length,
+    cover art and every alternative name are filled in for you.</p>
+    <div class="fields">
+      <div><label for="browse-q">Filter</label><input id="browse-q" type="text" placeholder="title or slug"></div>
+      <div><button class="btn" id="btn-browse">Browse</button></div>
+      <div><button class="btn ghost" id="btn-browse-refresh">Refresh from site</button></div>
+    </div>
+    <div class="field-error" id="browse-error"></div>
+    <div id="browse-results" class="browse"></div>
+  </div>
+</details>
+
 <details class="disc" id="disc-adopt">
   <summary><span class="chev">&rsaquo;</span> Adopt a finished season</summary>
   <div class="body">
@@ -583,6 +633,171 @@ async function addShow() {
   } catch (e) { fieldError('add-error', e.message); }
 }
 
+// Browse the seasonal timetable. The list comes from a cached snapshot, so it
+// works when the schedule site is unreachable; Refresh forces a re-fetch.
+async function browse(refresh) {
+  const q = el('browse-q').value.trim();
+  fieldError('browse-error', '');
+  const url = '/api/timetable?q=' + encodeURIComponent(q) + (refresh ? '&refresh=1' : '');
+  try {
+    const r = await api(url);
+    renderBrowse(r.entries || []);
+    if (!r.count) fieldError('browse-error', 'Nothing matched. Try a shorter search, or refresh from the site.');
+  } catch (e) { fieldError('browse-error', e.message); }
+}
+
+// One browse row. Already-tracked shows are marked rather than hidden: hiding
+// them would make the list look incomplete, and the user may want to confirm
+// a show really is being tracked.
+function browseRow(e) {
+  const art = e.image
+    ? `<img class="art" src="${escapeHtml(e.image)}" loading="lazy" alt="">`
+    : `<div class="art"></div>`;
+  const when = e.airs_at ? when(e.airs_at) : 'no air time listed';
+  const btn = e.tracked
+    ? `<span class="st st-idle"><span class="dot"></span>tracked</span>`
+    : `<button class="btn" data-act="browse-add" data-slug="${escapeHtml(e.slug)}">Add</button>`;
+  return `
+  <div class="row">
+    ${art}
+    <div>
+      <div class="name" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
+      <div class="sub">${escapeHtml(when)}</div>
+    </div>
+    <span class="acts">${btn}</span>
+  </div>`;
+}
+
+function renderBrowse(entries) {
+  el('browse-results').innerHTML = entries.length
+    ? entries.map(browseRow).join('')
+    : '<p class="hint">No shows found.</p>';
+}
+
+// Add a show straight from the browse list, by slug. The slug is an exact
+// identity, so this is the same path as pasting the URL — no title matching.
+async function addFromBrowse(slug) {
+  try {
+    const r = await api('/api/shows', { name: slug });
+    toast(`Added ${r.name}.`);
+    loadShows();
+    browse(false); // re-mark the row as tracked
+  } catch (e) { fieldError('browse-error', e.message); }
+}
+
+// ── settings ──────────────────────────────────────────────────────────────
+// The configuration file is the source of truth; this edits it. Secrets are
+// never displayed, and a masked value left untouched is preserved on save —
+// the UI cannot know a credential it never showed.
+
+let settingsView = null;
+
+async function loadSettings() {
+  try {
+    settingsView = await api('/api/config');
+    renderSettings();
+  } catch (e) { fieldError('settings-error', e.message); }
+}
+
+function renderSettings() {
+  const v = settingsView;
+  if (!v) return;
+  const c = v.choices || {};
+  const opts = (list, cur) => (list || []).map(k =>
+    `<option value="${escapeHtml(String(k))}"${String(k) === String(cur) ? ' selected' : ''}>${escapeHtml(String(k))}</option>`).join('');
+
+  el('settings-form').innerHTML = `
+    <div class="fields">
+      <div><label for="set-library">Library</label><input id="set-library" type="text" value="${escapeHtml(v.library)}"></div>
+      <div><label for="set-staging">Staging</label><input id="set-staging" type="text" value="${escapeHtml(v.staging)}"></div>
+      <div><label for="set-interval">Poll interval</label><input id="set-interval" type="text" value="${escapeHtml(v.interval)}"></div>
+      <div><label for="set-keep">Keep watched</label><input id="set-keep" type="number" min="0" value="${v.keep}"></div>
+      <div><label for="set-dry">Dry run</label><select id="set-dry">
+        <option value="true"${v.dry_run ? ' selected' : ''}>yes</option>
+        <option value="false"${v.dry_run ? '' : ' selected'}>no</option>
+      </select></div>
+    </div>
+    <div class="fields">
+      <div><label for="set-dl">Downloader</label><select id="set-dl">${opts(c.downloaders, v.downloader.kind)}</select></div>
+      <div><label for="set-rpc">Transmission RPC</label><input id="set-rpc" type="text" value="${escapeHtml(v.downloader.transmission_rpc)}"></div>
+      <div><label for="set-qbit">qBittorrent URL</label><input id="set-qbit" type="text" value="${escapeHtml(v.downloader.qbittorrent_url)}"></div>
+      <div><label for="set-qbit-user">qBittorrent user</label><input id="set-qbit-user" type="text" value="${escapeHtml(v.downloader.qbittorrent_user)}"></div>
+      <div><label for="set-qbit-pass">qBittorrent password</label><input id="set-qbit-pass" type="password" value="${escapeHtml(v.downloader.qbittorrent_pass)}" placeholder="unchanged"></div>
+    </div>
+    <div class="fields">
+      <div><label for="set-nt">Notifier</label><select id="set-nt">${opts(c.notifiers, v.notifier.kind)}</select></div>
+      <div><label for="set-ntfy">ntfy topic</label><input id="set-ntfy" type="text" value="${escapeHtml(v.notifier.ntfy_topic)}"></div>
+      <div><label for="set-gotify">Gotify URL</label><input id="set-gotify" type="text" value="${escapeHtml(v.notifier.gotify_url)}"></div>
+      <div><label for="set-gotify-token">Gotify token</label><input id="set-gotify-token" type="password" value="${escapeHtml(v.notifier.gotify_token)}" placeholder="unchanged"></div>
+    </div>
+    <div class="fields">
+      <div><label for="set-ix-base">Indexer</label><input id="set-ix-base" type="text" value="${escapeHtml(v.indexer.base)}"></div>
+      <div><label for="set-ix-cat">Category</label><input id="set-ix-cat" type="text" value="${escapeHtml(v.indexer.category)}"></div>
+      <div><label for="set-ix-ua">User agent</label><input id="set-ix-ua" type="text" value="${escapeHtml(v.indexer.user_agent)}"></div>
+      <div><label for="set-ix-min">Min interval</label><input id="set-ix-min" type="text" value="${escapeHtml(v.indexer.min_interval)}"></div>
+    </div>
+    <div class="fields">
+      <div><label for="set-floor">Resolution floor</label><input id="set-floor" type="text" value="${escapeHtml(v.quality.resolution_floor)}"></div>
+      <div><label for="set-groups">Group order</label><input id="set-groups" type="text" value="${escapeHtml((v.quality.group_order || []).join(', '))}"></div>
+    </div>
+    <div class="fields">
+      <div><label for="set-preset">Naming</label><select id="set-preset">${opts(c.presets, v.naming.preset)}</select></div>
+      <div><label for="set-pattern">Pattern (custom only)</label><input id="set-pattern" type="text" value="${escapeHtml(v.naming.pattern)}"></div>
+      <div><label for="set-season-folder">Season folder</label><select id="set-season-folder">
+        <option value="true"${v.naming.season_folder ? ' selected' : ''}>yes</option>
+        <option value="false"${v.naming.season_folder ? '' : ' selected'}>no</option>
+      </select></div>
+    </div>`;
+}
+
+async function saveSettings() {
+  fieldError('settings-error', '');
+  const v = settingsView;
+  if (!v) return;
+  const body = {
+    library: el('set-library').value.trim(),
+    staging: el('set-staging').value.trim(),
+    interval: el('set-interval').value.trim(),
+    keep: parseInt(el('set-keep').value, 10) || 0,
+    dry_run: el('set-dry').value === 'true',
+    downloader: {
+      kind: el('set-dl').value,
+      transmission_rpc: el('set-rpc').value.trim(),
+      qbittorrent_url: el('set-qbit').value.trim(),
+      qbittorrent_user: el('set-qbit-user').value.trim(),
+      // Left as the mask when untouched, which the server reads as
+      // "preserve the existing value" rather than "clear it".
+      qbittorrent_pass: el('set-qbit-pass').value,
+    },
+    notifier: {
+      kind: el('set-nt').value,
+      ntfy_topic: el('set-ntfy').value.trim(),
+      gotify_url: el('set-gotify').value.trim(),
+      gotify_token: el('set-gotify-token').value,
+    },
+    indexer: {
+      base: el('set-ix-base').value.trim(),
+      category: el('set-ix-cat').value.trim(),
+      user_agent: el('set-ix-ua').value.trim(),
+      min_interval: el('set-ix-min').value.trim(),
+    },
+    quality: {
+      resolution_floor: el('set-floor').value.trim(),
+      group_order: el('set-groups').value.split(',').map(s => s.trim()).filter(Boolean),
+    },
+    naming: {
+      preset: el('set-preset').value,
+      pattern: el('set-pattern').value.trim(),
+      season_folder: el('set-season-folder').value === 'true',
+    },
+  };
+  try {
+    await api('/api/config', body, 'POST');
+    toast('Settings saved. Restart for path and downloader changes.');
+    await loadSettings();
+  } catch (e) { fieldError('settings-error', e.message); }
+}
+
 // One show row. Status is the hero; everything else is quieter than it.
 // Actions carry data attributes, not inline JS: a show name with an
 // apostrophe would break out of a quoted onclick string, and a crafted name
@@ -626,13 +841,21 @@ function card(s) {
   if (st === 'missing' || st === 'ready to watch') {
     acts = `<button data-act="unlatch" data-id="${s.id}" data-next="${s.next}">Re-grab</button>` + acts;
   }
-  acts += `<button data-act="train" data-id="${s.id}">Train</button>`;
+  // An adopted season is never trained and never polled: the release was
+  // chosen by hand, so there is nothing to hunt for and nothing to learn.
+  // Offering Train here would be a button that cannot do anything.
+  if (!s.adopted) {
+    acts += `<button data-act="train" data-id="${s.id}">Train</button>`;
+  }
   acts += `<button class="danger" data-act="remove" data-id="${s.id}">Remove</button>`;
 
   // The server already says "needs training" or "upcoming" as the state, so
   // the badge is only needed when the state is something else and the show is
   // still untrained — i.e. it has episodes on disk but no offsets learned.
-  const untrained = (s.trained || st === 'needs training' || st === 'upcoming') ? ''
+  //
+  // An adopted season is excluded: it has no offsets by design, so calling it
+  // untrained would flag a show that is already on disk or in flight.
+  const untrained = (s.trained || s.adopted || st === 'needs training' || st === 'upcoming') ? ''
     : ' &middot; <span class="untrained">untrained</span>';
 
   // Art comes from the show page at add time, so even an unaired show has a
@@ -1070,6 +1293,9 @@ function wireActions() {
       case 'remove':
         if (s) removeShow(s.id, s.name);
         break;
+      case 'browse-add':
+        addFromBrowse(t.dataset.slug);
+        break;
       case 'accept':
         acceptAll(Number(t.dataset.index));
         break;
@@ -1113,6 +1339,10 @@ function wireActions() {
   });
 
   el('btn-add').onclick = addShow;
+  el('btn-settings-save').onclick = saveSettings;
+  el('btn-browse').onclick = () => browse(false);
+  el('btn-browse-refresh').onclick = () => browse(true);
+  el('browse-q').onkeydown = e => { if (e.key === 'Enter') browse(false); };
   el('btn-adopt-open').onclick = openAdopt;
   el('btn-adopt-close').onclick = closeAdopt;
   el('btn-adopt-lookup').onclick = adoptLookup;
@@ -1234,6 +1464,11 @@ async function adoptConfirm() {
 })();
 
 wireActions();
+// Settings are loaded lazily: the panel is closed by default, and fetching on
+// load would cost a file read nobody asked for.
+el('disc-settings').addEventListener('toggle', () => {
+  if (el('disc-settings').open && !settingsView) loadSettings();
+});
 loadShows();
 
 function escapeHtml(s) {

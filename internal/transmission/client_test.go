@@ -47,16 +47,3 @@ func TestAddReportsFailure(t *testing.T) {
 }
 
 // TestListParsesTorrents: the fields kishizu needs come back intact.
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (haystack == needle ||
-		len(haystack) > 0 && stringContains(haystack, needle))
-}
-
-func stringContains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}

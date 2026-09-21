@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -22,7 +23,7 @@ func testServerWithAdopt(t *testing.T) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.SetAdopt(t.TempDir(), t.TempDir(), "http://127.0.0.1:1/transmission/rpc")
+	srv.SetAdopt(t.TempDir(), t.TempDir(), &download.Fake{})
 	return srv, st
 }
 

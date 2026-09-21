@@ -115,8 +115,7 @@ func trainShowCmd(st *store.Store, sh *store.Show, targetEp int) error {
 					return err
 				}
 			case strings.HasPrefix(p, "n"):
-				reason := askReason(reader, cands[i])
-				if err := s.Reject(cands[i], reason); err != nil {
+				if err := s.Reject(cands[i]); err != nil {
 					return err
 				}
 			}
@@ -133,28 +132,4 @@ func trainShowCmd(st *store.Store, sh *store.Show, targetEp int) error {
 		fmt.Printf("  offset %-16s %d\n", g, off)
 	}
 	return nil
-}
-
-// askReason asks why a candidate was rejected. The reason determines whether
-// the matcher is corrected or only a filter/preference is added.
-func askReason(reader *bufio.Reader, c train.Candidate) train.Reason {
-	fmt.Printf("  why was %q wrong?\n", truncate(c.Item.Title, 50))
-	fmt.Printf("    [1] wrong episode  [2] wrong show  [3] batch  [4] dub\n")
-	fmt.Printf("    [5] codec/quality  [6] other: ")
-
-	line, _ := reader.ReadString('\n')
-	switch strings.TrimSpace(line) {
-	case "1":
-		return train.ReasonWrongEpisode
-	case "2":
-		return train.ReasonWrongShow
-	case "3":
-		return train.ReasonBatch
-	case "4":
-		return train.ReasonDub
-	case "5":
-		return train.ReasonCodec
-	default:
-		return train.ReasonOther
-	}
 }

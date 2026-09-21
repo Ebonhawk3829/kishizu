@@ -6,22 +6,23 @@ import (
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
-	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/train"
 )
 
 // inferOffsets derives group offsets from the schedule and feed for every
-// show, and applies the user's preferred group order.
+// show.
 //
 // This is the shortcut for a fresh season: instead of confirming parses by
 // hand, the air times already in the database do the work. Results are
 // reviewable per show and resettable from the training panel.
-func inferOffsets(st *store.Store, preferred string) error {
-	groups := splitGroups(preferred)
-	// The group order is global and set in advance; the -prefer flag overrides
-	// the compiled-in default for this run.
-	release.DefaultGroupOrder = groups
+//
+// The group order is global and set in advance, so it is read from the
+// quality policy rather than taken as an argument. It used to be overridable
+// with -prefer, but that flag only ever reached this function: the listener
+// reads the policy directly, so the flag silently did nothing for the
+// pipeline that actually grabs.
+func inferOffsets(st *store.Store) error {
 	shows, err := st.ListShows()
 	if err != nil {
 		return err
@@ -49,16 +50,6 @@ func inferOffsets(st *store.Store, preferred string) error {
 		fmt.Printf("  %-50s %s\n", truncate(sh.CanonicalName, 50), formatOffsets(offsets))
 	}
 	return nil
-}
-
-func splitGroups(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if g := strings.TrimSpace(p); g != "" {
-			out = append(out, g)
-		}
-	}
-	return out
 }
 
 func formatOffsets(m map[string]int) string {

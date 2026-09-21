@@ -13,18 +13,23 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/art"
+	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/match"
-	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
+	"github.com/Ebonhawk3829/kishizu/internal/naming"
+	"github.com/Ebonhawk3829/kishizu/internal/notify"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
+	"github.com/Ebonhawk3829/kishizu/internal/version"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
@@ -49,7 +54,7 @@ type Server struct {
 	tmpl  *template.Template
 	watch *watch.Handler
 	// notifier is optional; nil disables notifications.
-	notifier *ntfy.Client
+	notifier notify.Notifier
 	// art caches cover art on disk so the UI does not depend on the
 	// schedule's CDN at page-load time. Optional; nil means no art.
 	art *art.Cache
@@ -60,25 +65,36 @@ type Server struct {
 	// mutex makes that real under concurrent requests.
 	session trainSession
 	// adopt holds what an adoption needs that the store does not have: where
-	// Transmission should put the download, where the library is, and how to
-	// reach Transmission. Set by SetAdopt; adoption is disabled until then.
+	// the downloader should put the download, where the library is, and how
+	// to reach the downloader. Set by SetAdopt; adoption is disabled until
+	// then.
 	adopt adoptConfig
+	// naming is the library layout. It must be the same scheme the
+	// reconciler writes with, or the watch signal cannot recognise kishizu's
+	// own filenames. Nil means the default layout.
+	naming *naming.Scheme
+	// timetable caches the seasonal schedule for the browse list. Nil means
+	// browsing is unavailable.
+	timetable *schedule.Cache
+	// configPath is the configuration file, for the settings UI. Empty means
+	// configuration cannot be read or written.
+	configPath string
 }
 
 // adoptConfig is the deployment-specific half of an adoption.
 type adoptConfig struct {
-	staging string
-	library string
-	rpcURL  string
+	staging    string
+	library    string
+	downloader download.Downloader
 }
 
 // SetAdopt enables adopting finished seasons from the web UI.
 //
 // Without it the endpoints return an error rather than half-working: an
-// adoption that cannot reach Transmission or does not know the library root
-// would create episode rows that never resolve.
-func (s *Server) SetAdopt(staging, library, rpcURL string) {
-	s.adopt = adoptConfig{staging: staging, library: library, rpcURL: rpcURL}
+// adoption that cannot reach the downloader or does not know the library
+// root would create episode rows that never resolve.
+func (s *Server) SetAdopt(staging, library string, dl download.Downloader) {
+	s.adopt = adoptConfig{staging: staging, library: library, downloader: dl}
 }
 
 // New builds the server and parses the embedded templates.
@@ -88,6 +104,13 @@ func New(st *store.Store) (*Server, error) {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 	srv := &Server{st: st, tmpl: tmpl, vocab: release.NewVocabulary()}
+	// A naming scheme is always present. Nil would mean the watch signal
+	// could not recognise kishizu's own filenames, which silently breaks
+	// deletion — so the default is installed here rather than left to the
+	// caller.
+	if sc, err := naming.Resolve(naming.PresetKishizu, "", nil); err == nil {
+		srv.naming = sc
+	}
 	// Seed the vocabulary from the database. A failure here is not fatal: the
 	// tool still works, it just reads fewer titles until it is taught again.
 	if entries, err := st.Vocabulary(); err == nil {
@@ -102,8 +125,8 @@ func New(st *store.Store) (*Server, error) {
 // still records state but cannot sweep files.
 func (s *Server) SetWatch(h *watch.Handler) { s.watch = h }
 
-// SetNotifier attaches the ntfy client for user-visible alerts.
-func (s *Server) SetNotifier(c *ntfy.Client) { s.notifier = c }
+// SetNotifier attaches the notifier for user-visible alerts.
+func (s *Server) SetNotifier(c notify.Notifier) { s.notifier = c }
 
 // SetArt attaches the cover-art cache. Without it the UI falls back to the
 // remote URLs, which works but keeps the CDN dependency.
@@ -122,7 +145,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(logoData)
+		// A failed logo write is a broken image in the browser; there is no
+		// handler-level recovery worth adding.
+		_, _ = w.Write(logoData)
 	})
 	// Cached cover art, served from disk so the browser never reaches the
 	// schedule's CDN.
@@ -131,7 +156,7 @@ func (s *Server) Handler() http.Handler {
 			http.FileServer(http.Dir(s.art.Dir()))))
 	}
 	mux.HandleFunc("GET /shows", s.handleListShows)
-	// Adding a show from the UI. Seeding from shows.yaml still works and
+	// Adding a show from the UI. Seeding from kishizu.yaml still works and
 	// updates aliases for existing shows, so the two paths coexist.
 	mux.HandleFunc("POST /api/shows", s.handleAddShow)
 	// Removing a show, for when a season ends or was added by mistake.
@@ -168,7 +193,329 @@ func (s *Server) Handler() http.Handler {
 	// live run without a restart.
 	mux.HandleFunc("POST /api/debug", s.handleDebugToggle)
 
+	// Browsing the seasonal timetable, so a show can be picked from a list
+	// rather than only added by pasting a URL.
+	mux.HandleFunc("GET /api/timetable", s.handleTimetable)
+
+	// Configuration: read the effective settings, and write them back.
+	mux.HandleFunc("GET /api/config", s.handleGetConfig)
+	mux.HandleFunc("POST /api/config", s.handleSaveConfig)
+
+	// Liveness for container orchestration. Separate from /api/summary
+	// because a healthcheck must not depend on the database or the network:
+	// a slow Nyaa poll should never mark the container unhealthy.
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	// Build identity, for bug reports and for checking what a pinned image
+	// tag actually contains.
+	mux.HandleFunc("GET /api/version", s.handleVersion)
+
 	return mux
+}
+
+// handleHealth reports that the process is up.
+//
+// Deliberately shallow: it checks nothing external. A healthcheck that
+// failed when Nyaa was unreachable would restart a container that was
+// working correctly, and the whole point of the design is that kishizu keeps
+// running when an upstream is down.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	// No caching: a healthcheck that reads a stale 200 is worse than useless.
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"status": "ok", "version": version.String()})
+}
+
+// handleVersion reports the build identity.
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"version": version.String(),
+		"go":      version.GoVersion(),
+	})
+}
+
+// handleTimetable serves the seasonal timetable for the browse list.
+//
+// ?q= filters by substring, ?refresh=1 forces a re-fetch. Filtering happens
+// server-side so the same list works from the command line, and so the client
+// does not have to hold the whole season to search it.
+//
+// A show already being tracked is marked, so the browse list does not offer
+// something the user is already watching.
+func (s *Server) handleTimetable(w http.ResponseWriter, r *http.Request) {
+	if s.timetable == nil {
+		writeErr(w, http.StatusNotImplemented,
+			fmt.Errorf("browsing is not configured on this server"))
+		return
+	}
+	force := r.URL.Query().Get("refresh") == "1"
+
+	var tt *schedule.Timetable
+	var err error
+	if force {
+		tt, err = s.timetable.Refresh(nil)
+	} else {
+		tt, err = s.timetable.Get(nil)
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+
+	// Which of these are already tracked, by slug.
+	tracked := map[string]bool{}
+	if shows, serr := s.st.ListShows(); serr == nil {
+		for _, sh := range shows {
+			if sh.Slug != "" {
+				tracked[sh.Slug] = true
+			}
+		}
+	}
+
+	entries := tt.Search(r.URL.Query().Get("q"))
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"slug":    e.Slug,
+			"title":   e.Title,
+			"image":   e.ImageURL,
+			"airs_at": airsAtString(e.AirsAt),
+			"tracked": tracked[e.Slug],
+		})
+	}
+	writeJSON(w, map[string]any{
+		"fetched": tt.Fetched.Format(time.RFC3339),
+		"count":   len(out),
+		"entries": out,
+	})
+}
+
+// airsAtString renders an air time for JSON, or "" when there is none.
+func airsAtString(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
+// ---------- configuration ----------
+
+// configPath is where the configuration file lives, set by SetConfigPath.
+// Empty means configuration cannot be read or written from the UI.
+func (s *Server) SetConfigPath(p string) { s.configPath = p }
+
+// handleGetConfig reports the effective configuration.
+//
+// Secrets are masked. The UI never needs to display a credential, and sending
+// one to the browser puts it in the page, in memory, and in any screenshot.
+// A masked value that is left untouched is preserved on save.
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configPath == "" {
+		writeErr(w, http.StatusNotImplemented,
+			fmt.Errorf("no configuration file is configured on this server"))
+		return
+	}
+	cfg, err := config.Load(s.configPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, configView(cfg.Server))
+}
+
+// handleSaveConfig writes the configuration back to the file.
+//
+// Secrets are preserved rather than overwritten when the submitted value is
+// the mask or empty: the UI cannot know a credential it never displayed, so
+// blank must mean "leave it alone" and not "clear it".
+func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configPath == "" {
+		writeErr(w, http.StatusNotImplemented,
+			fmt.Errorf("no configuration file is configured on this server"))
+		return
+	}
+	var req config.Server
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// Load the current file so untouched values — including secrets — survive.
+	cur, err := config.Load(s.configPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if isMasked(req.Downloader.QBittorrentPass) {
+		req.Downloader.QBittorrentPass = cur.Server.Downloader.QBittorrentPass
+	}
+	if isMasked(req.Notifier.GotifyToken) {
+		req.Notifier.GotifyToken = cur.Server.Notifier.GotifyToken
+	}
+	// A credential supplied by environment variable must not be written into
+	// the file. Saving it would defeat the reason for using one.
+	qbitFromEnv, gotifyFromEnv := secretFromEnv(cur.Server)
+	if qbitFromEnv {
+		req.Downloader.QBittorrentPass = ""
+	}
+	if gotifyFromEnv {
+		req.Notifier.GotifyToken = ""
+	}
+
+	// Validate before writing: a config that cannot be loaded is worse than
+	// one that was never changed, because kishizu would refuse to start.
+	if err := validateServer(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := config.Save(s.configPath, cur, &req); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("config: saved %s (restart required for some settings)", s.configPath)
+	writeJSON(w, map[string]any{
+		"saved":            true,
+		"restart_required": true,
+	})
+}
+
+// SecretMask is what the UI sends back for a credential it did not display.
+const SecretMask = "••••••••"
+
+// isMasked reports whether a submitted value is the mask, meaning "unchanged".
+func isMasked(s string) bool {
+	return s == SecretMask || s == ""
+}
+
+// secretFromEnv reports whether a credential came from the environment rather
+// than the configuration file.
+//
+// Such a value must never be written back: the whole point of supplying it by
+// environment variable is to keep it out of the file, and saving it would
+// silently undo that. It is also never sent to the browser, for the same
+// reason any other secret is masked.
+func secretFromEnv(s *config.Server) (qbitPass, gotifyToken bool) {
+	if s == nil {
+		return false, false
+	}
+	qbitPass = strings.TrimSpace(os.Getenv(config.EnvQBittorrentPass)) != ""
+	gotifyToken = strings.TrimSpace(os.Getenv(config.EnvGotifyToken)) != ""
+	return qbitPass, gotifyToken
+}
+
+// validateServer rejects a configuration kishizu could not run with.
+//
+// Checked before writing, because a config file that cannot be loaded is
+// worse than one that was never edited: kishizu would refuse to start, and
+// the user would have to fix it by hand.
+func validateServer(s *config.Server) error {
+	if s.Library == "" {
+		return fmt.Errorf("library is required")
+	}
+	if s.Staging == "" {
+		return fmt.Errorf("staging is required")
+	}
+	if s.Keep != nil && *s.Keep < 0 {
+		return fmt.Errorf("keep must be >= 0")
+	}
+	if s.Interval != "" {
+		if _, err := time.ParseDuration(s.Interval); err != nil {
+			return fmt.Errorf("interval %q: %w", s.Interval, err)
+		}
+	}
+	if _, err := download.ParseKind(s.Downloader.Kind); err != nil {
+		return err
+	}
+	if _, err := notify.ParseKind(s.Notifier.Kind); err != nil {
+		return err
+	}
+	if s.Indexer.MinInterval != "" {
+		if _, err := time.ParseDuration(s.Indexer.MinInterval); err != nil {
+			return fmt.Errorf("indexer.min_interval %q: %w", s.Indexer.MinInterval, err)
+		}
+	}
+	if _, err := naming.ParsePreset(s.Naming.Preset); err != nil {
+		return err
+	}
+	if s.Naming.Preset == string(naming.PresetCustom) {
+		if err := naming.ValidatePattern(s.Naming.Pattern); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// configView is the configuration as the UI sees it: secrets masked, and the
+// choices offered so the form can render them without a second request.
+func configView(s *config.Server) map[string]any {
+	qbitFromEnv, gotifyFromEnv := secretFromEnv(s)
+	view := map[string]any{
+		"library":  s.Library,
+		"staging":  s.Staging,
+		"interval": s.Interval,
+		"dry_run":  boolVal(s.DryRun),
+		"keep":     intVal(s.Keep),
+		"downloader": map[string]any{
+			"kind":             s.Downloader.Kind,
+			"transmission_rpc": s.Downloader.TransmissionRPC,
+			"qbittorrent_url":  s.Downloader.QBittorrentURL,
+			"qbittorrent_user": s.Downloader.QBittorrentUser,
+			// Masked: the UI never needs to show a credential.
+			"qbittorrent_pass": mask(s.Downloader.QBittorrentPass),
+			// Set by environment variable, so the field is read-only and the
+			// value is never written back to the file.
+			"qbittorrent_pass_env": qbitFromEnv,
+		},
+		"notifier": map[string]any{
+			"kind":             s.Notifier.Kind,
+			"ntfy_topic":       s.Notifier.NtfyTopic,
+			"gotify_url":       s.Notifier.GotifyURL,
+			"gotify_token":     mask(s.Notifier.GotifyToken),
+			"gotify_token_env": gotifyFromEnv,
+		},
+		"indexer": map[string]any{
+			"base":         s.Indexer.Base,
+			"category":     s.Indexer.Category,
+			"user_agent":   s.Indexer.UserAgent,
+			"min_interval": s.Indexer.MinInterval,
+		},
+		"quality": map[string]any{
+			"resolution_floor": s.Quality.ResolutionFloor,
+			"group_order":      s.Quality.GroupOrder,
+		},
+		"naming": map[string]any{
+			"preset":        s.Naming.Preset,
+			"pattern":       s.Naming.Pattern,
+			"season_folder": boolVal(s.Naming.SeasonFolder),
+		},
+		"choices": map[string]any{
+			"downloaders": download.Kinds,
+			"notifiers":   notify.Kinds,
+			"presets":     naming.Presets,
+		},
+	}
+	return view
+}
+
+func mask(s string) string {
+	if s == "" {
+		return ""
+	}
+	return SecretMask
+}
+
+func boolVal(b *bool) bool {
+	if b == nil {
+		return false
+	}
+	return *b
+}
+
+func intVal(i *int) int {
+	if i == nil {
+		return 0
+	}
+	return *i
 }
 
 // handleSetState forces an episode into a state, bypassing the latch.
@@ -375,6 +722,9 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		"hunting":     hunting,
 		"missing":     missing,
 		"upToDate":    ready == 0 && downloading == 0 && hunting == 0 && missing == 0,
+		// Reported here as well as on /healthz so a widget can show which
+		// build it is talking to without a second request.
+		"version": version.String(),
 	}
 	if next.Name != "" {
 		out["next"] = map[string]any{
@@ -574,9 +924,14 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 		} else if len(missing) > 0 {
 			log.Printf("watch: %d episode(s) missing from disk", len(missing))
 			if s.notifier != nil {
-				s.notifier.Send("kishizu: file missing",
+				// alert() is not used here because the server has no
+				// package-level helper; a failed send is logged by the
+				// notifier itself, and the episode stays flagged in the UI.
+				if err := s.notifier.Send("kishizu: file missing",
 					fmt.Sprintf("%d episode(s) vanished before the watch signal", len(missing)),
-					ntfy.PriorityHigh)
+					notify.PriorityHigh); err != nil {
+					log.Printf("notify: %v", err)
+				}
 			}
 		}
 	}
@@ -648,12 +1003,15 @@ func (s *Server) matchFile(base string) (int64, int, error) {
 		if !res.Matched || res.Episode <= 0 {
 			continue
 		}
-		// A filename in kishizu's own library form ("<Show> - E09.mkv") is
-		// inherently certain: it was written by this tool on completion, so it
-		// needs no confidence gate. Requiring one here blocked every watch
-		// signal, since a library name has no group and therefore scores only
-		// 0.5 — below the threshold.
-		if isLibraryForm(base) {
+		// A filename in the configured library form is inherently certain: it
+		// was written by this tool on completion, so it needs no confidence
+		// gate. Requiring one here blocked every watch signal, since a library
+		// name has no group and therefore scores only 0.5 — below the
+		// threshold.
+		//
+		// Recognised by the naming scheme rather than a fixed regex, so a
+		// custom layout is trusted just as much as the default.
+		if s.isLibraryForm(base) {
 			return sh.ID, res.Episode, nil
 		}
 		// Otherwise only act on confident matches. A wrong guess here deletes
@@ -668,9 +1026,27 @@ func (s *Server) matchFile(base string) (int64, int, error) {
 
 // isLibraryForm reports whether a filename looks like one kishizu wrote:
 // "<Show> - E<NN>.<ext>".
-func isLibraryForm(name string) bool {
-	return release.ReLibrary.MatchString(name)
+// isLibraryForm reports whether a filename was written by kishizu.
+//
+// Delegates to the naming scheme, which is the same one that wrote the file.
+// A scheme that cannot recognise its own output would leave every watch
+// signal to the fuzzy path, where a library name scores too low to pass the
+// confidence gate and nothing is ever marked watched.
+func (s *Server) isLibraryForm(name string) bool {
+	if s.naming == nil {
+		return false
+	}
+	return s.naming.EpisodeFrom(name) > 0
 }
+
+// SetNaming attaches the naming scheme, so the watch signal recognises the
+// layout the reconciler writes.
+func (s *Server) SetNaming(sc *naming.Scheme) { s.naming = sc }
+
+// SetTimetable attaches the seasonal timetable cache, which backs the browse
+// list. Without it the browse endpoints report that browsing is unavailable
+// rather than returning an empty list that looks like "nothing is airing".
+func (s *Server) SetTimetable(c *schedule.Cache) { s.timetable = c }
 
 // ListenAndServe starts the server and blocks until ctx is cancelled.
 //
@@ -690,7 +1066,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
-	log.Printf("kishizu listening on %s", addr)
+	log.Printf("kishizu %s listening on %s", version.String(), addr)
 	err := srv.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -901,6 +1277,11 @@ type showJSON struct {
 	Aliases []string       `json:"aliases"`
 	Offsets map[string]int `json:"offsets"`
 	Trained bool           `json:"trained"`
+	// Adopted is true for a finished season taken from releases.moe. Such a
+	// show is never trained and never polled, so the UI must not offer
+	// training or claim it is untrained — both would be noise about a
+	// question that does not apply.
+	Adopted bool `json:"adopted"`
 	// ImageURL is the season's cover art from the schedule, empty when unknown.
 	ImageURL string `json:"image_url"`
 	// Cadence is the air weekday, 0 = Sunday. Nil when unknown. Shown in the
@@ -947,6 +1328,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Aliases:  sh.Aliases,
 			Offsets:  offsets,
 			Trained:  len(offsets) > 0,
+			Adopted:  sh.Source == store.SourceSeaDex,
 			Cadence:  sh.CadenceWeekday,
 			ImageURL: s.imageFor(sh),
 		}

@@ -322,8 +322,8 @@ func SlugFromURL(raw string) string {
 	// Strip any scheme and host.
 	if i := strings.Index(s, "/anime/"); i >= 0 {
 		s = s[i+len("/anime/"):]
-	} else if strings.HasPrefix(s, "anime/") {
-		s = s[len("anime/"):]
+	} else {
+		s = strings.TrimPrefix(s, "anime/")
 	}
 	s = strings.Trim(s, "/")
 	// A slug is a path segment: no slashes, no spaces.

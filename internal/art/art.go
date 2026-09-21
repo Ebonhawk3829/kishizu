@@ -80,8 +80,8 @@ func (c *Cache) Ensure(rawURL string) (string, error) {
 		return "", err
 	}
 	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes)); err != nil {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()
+		_ = os.Remove(tmp)
 		return "", err
 	}
 	if err := f.Close(); err != nil {

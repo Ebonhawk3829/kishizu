@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,13 +29,72 @@ type Item struct {
 	Remake   bool
 }
 
+// Indexer is where releases are searched for.
+//
+// Nyaa is the default and the only indexer kishizu has been tested against,
+// but the base URL and category are configurable so a mirror, or a different
+// indexer with the same RSS shape, can be used.
+type Indexer struct {
+	// Base is the indexer root, e.g. https://nyaa.si
+	Base string
+	// Category is the indexer's category filter, e.g. 1_2 for
+	// anime-english-translated on Nyaa.
+	Category string
+	// UserAgent is sent on every request. Some indexers reject the default
+	// Go user agent outright, and a descriptive one lets an admin see who is
+	// polling them.
+	UserAgent string
+	// MinInterval is the shortest time between requests. Politeness: a
+	// public indexer should not be hammered, and a burst that looks like a
+	// scraper gets the caller blocked.
+	MinInterval time.Duration
+}
+
+// DefaultIndexer is Nyaa's anime-english-translated category.
+func DefaultIndexer() Indexer {
+	return Indexer{
+		Base:        "https://nyaa.si",
+		Category:    "1_2",
+		UserAgent:   "kishizu",
+		MinInterval: time.Second,
+	}
+}
+
+// current is the indexer used by the package-level helpers.
+//
+// A package-level default rather than a parameter on every call, because the
+// indexer is a property of the deployment, not of any one query. Set once at
+// startup from configuration.
+var current = DefaultIndexer()
+
+// SetIndexer sets the indexer used by the package-level helpers. Empty fields
+// in ix keep the current value, so a partial config does not blank it out.
+func SetIndexer(ix Indexer) {
+	if ix.Base != "" {
+		current.Base = strings.TrimRight(ix.Base, "/")
+	}
+	if ix.Category != "" {
+		current.Category = ix.Category
+	}
+	if ix.UserAgent != "" {
+		current.UserAgent = ix.UserAgent
+	}
+	if ix.MinInterval > 0 {
+		current.MinInterval = ix.MinInterval
+	}
+}
+
+// IndexerInUse returns the indexer the package-level helpers will use.
+func IndexerInUse() Indexer { return current }
+
 // FeedURL builds a per-show RSS URL.
 //
 // RSS accepts c (category) and q (search) but ignores p (pagination) and s/o
 // (sort). Per-show feeds are what make this work: 75 items covers 14-33 days of
 // a single show, so backfill after downtime is free.
 func FeedURL(alias string) string {
-	return "https://nyaa.si/?page=rss&c=1_2&q=" + url.QueryEscape(alias)
+	return current.Base + "/?page=rss&c=" + url.QueryEscape(current.Category) +
+		"&q=" + url.QueryEscape(alias)
 }
 
 // FeedURLsFor returns candidate feed URLs for a show, broadest first.
@@ -97,7 +157,17 @@ func Fetch(client *http.Client, rawURL string) ([]Item, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	resp, err := client.Get(rawURL)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	// A descriptive user agent: some indexers reject the Go default outright,
+	// and an admin reading their logs should be able to see who is polling.
+	if ua := current.UserAgent; ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
+	rateLimit()
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +176,29 @@ func Fetch(client *http.Client, rawURL string) ([]Item, error) {
 		return nil, fmt.Errorf("nyaa returned %d", resp.StatusCode)
 	}
 	return Parse(resp.Body)
+}
+
+// Rate limiting state. A public indexer is a shared resource: polling every
+// show every tick with no floor between requests is the kind of traffic that
+// gets a caller blocked, and being blocked looks exactly like "no releases
+// found".
+var (
+	rateMu      sync.Mutex
+	lastRequest time.Time
+)
+
+// rateLimit waits out the minimum interval between indexer requests.
+func rateLimit() {
+	interval := current.MinInterval
+	if interval <= 0 {
+		return
+	}
+	rateMu.Lock()
+	defer rateMu.Unlock()
+	if wait := interval - time.Since(lastRequest); wait > 0 {
+		time.Sleep(wait)
+	}
+	lastRequest = time.Now()
 }
 
 // ---------- XML shape ----------

@@ -17,39 +17,66 @@ package grab
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
+	"github.com/Ebonhawk3829/kishizu/internal/naming"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
 // Reconciler matches finished downloads to episodes and finalises them.
 type Reconciler struct {
 	st *store.Store
-	// Staging is where Transmission drops completed files, as kishizu sees it.
-	// One directory per show, so a file's show is known from its location and
-	// only its episode number has to be read from the name.
+	// Staging is where the downloader drops completed files, as kishizu sees
+	// it. One directory per show, so a file's show is known from its location
+	// and only its episode number has to be read from the name.
 	Staging string
-	// Library is the root files are moved into, laid out as
-	// <Library>/<Show>/<Show> - E<NN>.<ext>.
+	// Library is the root files are moved into.
 	Library string
+	// Scheme decides the filename and directory layout. Never nil after New.
+	Scheme *naming.Scheme
+	// PruneUnselected, when set and true, deletes staged files that were not
+	// selected for tracking once a pack is complete. Nil means off.
+	//
+	// Off by default because it deletes data. It is opt-in per deployment,
+	// and only ever removes files inside staging that resolved to no
+	// in-flight episode.
+	PruneUnselected *bool
 }
 
 // New builds a Reconciler.
 //
 // staging and library are both required: staging is scanned for completed
-// files, library is where they are moved to. No Transmission client is
+// files, library is where they are moved to. No downloader client is
 // needed — the done-script removes torrents on completion, so the staging
 // directory is the durable record, not the torrent list.
 func New(st *store.Store, staging, library string) *Reconciler {
-	return &Reconciler{st: st, Staging: staging, Library: library}
+	return NewWithScheme(st, staging, library, nil)
 }
+
+// NewWithScheme builds a Reconciler that files episodes using a specific
+// naming scheme. A nil scheme means kishizu's own layout.
+func NewWithScheme(st *store.Store, staging, library string, s *naming.Scheme) *Reconciler {
+	if s == nil {
+		s, _ = naming.Resolve(naming.PresetKishizu, "", nil)
+	}
+	return &Reconciler{st: st, Staging: staging, Library: library, Scheme: s}
+}
+
+// seasonOf is the season number to file an episode under.
+//
+// kishizu tracks one cour at a time, so a show is always its own season 1:
+// there is no season number in the database because there is never more than
+// one in play. The naming schemes that want one (sonarr, plex) get 1, which
+// is what those tools call a show's first tracked season.
+func seasonOf(_ *store.Show) int { return 1 }
 
 // Reconcile finalises every completed download that corresponds to a
 // downloading episode.
@@ -90,7 +117,7 @@ func (r *Reconciler) Reconcile() error {
 		if len(inFlight) == 0 {
 			continue
 		}
-		dir := filepath.Join(r.Staging, watch.Sanitise(sh.CanonicalName))
+		dir := filepath.Join(r.Staging, release.Sanitise(sh.CanonicalName))
 		files, err := mediaFiles(dir)
 		if err != nil {
 			// Missing directory is normal: nothing has completed for this
@@ -106,17 +133,18 @@ func (r *Reconciler) Reconcile() error {
 			log.Printf("grab: offsets for %s: %v", sh.CanonicalName, err)
 			continue
 		}
+		var unresolved []string
 		for _, f := range files {
 			num, ok := episodeOf(f, offsets)
 			if !ok {
+				unresolved = append(unresolved, f)
 				debug.Log("%s: cannot resolve episode from %q", sh.CanonicalName, filepath.Base(f))
 				continue
 			}
 			ep, ok := inFlight[num]
 			if !ok {
-				// Completed, but not an episode we are waiting for. Left in
-				// staging: deleting something unrecognised is worse than
-				// leaving it.
+				// Completed, but not an episode we are waiting for.
+				unresolved = append(unresolved, f)
 				debug.Log("%s: %s resolves to ep%d, not downloading", sh.CanonicalName, filepath.Base(f), num)
 				continue
 			}
@@ -125,8 +153,96 @@ func (r *Reconciler) Reconcile() error {
 				log.Printf("grab: %s ep%d: %v", sh.CanonicalName, num, err)
 			}
 		}
+		// Once every episode in flight has landed, the pack is complete and
+		// anything left in staging was not selected. Prune it.
+		r.pruneUnselected(sh, dir, unresolved, inFlight)
 	}
 	return nil
+}
+
+// pruneUnselected deletes staged files that were not selected for tracking,
+// once every episode in flight has been finalised.
+//
+// A magnet link carries no file list, so an adoption downloads the whole
+// release and the checkboxes in the review screen decide which files become
+// episodes — not which files arrive. Without this, the unselected extras
+// (NCOP, NCED, OVAs) sit in staging forever, holding disk for files nobody
+// asked for.
+//
+// It only runs when the pack is COMPLETE. Deleting while episodes are still
+// in flight would race the download: a file that has not finished writing
+// yet resolves to nothing, and pruning it would destroy an episode the user
+// is waiting for.
+//
+// The user's selection is the authority. If they ticked the wrong boxes, the
+// wrong files are kept — that is their call, and guessing on their behalf
+// would be worse.
+func (r *Reconciler) pruneUnselected(sh *store.Show, dir string, unresolved []string, inFlight map[int]*store.Episode) {
+	if len(unresolved) == 0 || r.PruneUnselected == nil || !*r.PruneUnselected {
+		return
+	}
+	// Re-read: finalise has run since inFlight was built, so an episode that
+	// was downloading may now be downloaded.
+	eps, err := r.st.EpisodesForShow(sh.ID)
+	if err != nil {
+		return
+	}
+	for _, ep := range eps {
+		if _, was := inFlight[ep.Number]; was && ep.State == episode.Downloading {
+			// Still waiting on something: not complete, do not prune.
+			debug.Log("%s: ep%d still downloading, not pruning", sh.CanonicalName, ep.Number)
+			return
+		}
+	}
+
+	for _, f := range unresolved {
+		// Never delete outside staging: a corrupted path must not take a
+		// library file with it.
+		abs, err := filepath.Abs(f)
+		if err != nil {
+			continue
+		}
+		root, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		if abs != root && !strings.HasPrefix(abs, root+string(filepath.Separator)) {
+			log.Printf("grab: refusing to prune %q: outside staging %q", abs, root)
+			continue
+		}
+		if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+			log.Printf("grab: prune %s: %v", abs, err)
+			continue
+		}
+		log.Printf("grab: pruned unselected %s", filepath.Base(abs))
+	}
+	// Drop the directories the pack arrived in, now that they are empty.
+	pruneEmptyDirs(dir)
+}
+
+// pruneEmptyDirs removes empty directories under root, deepest first.
+//
+// A pack arrives as its own directory, sometimes with an Extras subdirectory.
+// Leaving them behind means the staging tree fills with empty folders that
+// the daily cleanup has to find.
+func pruneEmptyDirs(root string) {
+	var dirs []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() || path == root {
+			return nil
+		}
+		dirs = append(dirs, path)
+		return nil
+	})
+	// Deepest first, so a parent is empty by the time it is reached.
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	for _, d := range dirs {
+		entries, err := os.ReadDir(d)
+		if err != nil || len(entries) > 0 {
+			continue
+		}
+		_ = os.Remove(d)
+	}
 }
 
 // episodeOf resolves a staged file to an episode number.
@@ -134,6 +250,13 @@ func (r *Reconciler) Reconcile() error {
 // The raw number comes from the filename; the group's offset corrects it to
 // the local numbering. Everything else in the name — resolution, codec,
 // service, subtitle tags — is noise and is ignored.
+//
+// A show with NO offsets at all falls back to the raw number. That is an
+// adopted season: the release was chosen by hand, so there was never a
+// training run to learn offsets from, and requiring one meant every file in
+// the pack failed to resolve and the episodes stayed "downloading" forever.
+// The raw number is right for such a release because the user confirmed which
+// file is which episode at adoption time.
 func episodeOf(path string, offsets map[string]int) (int, bool) {
 	// Strip the extension before parsing: the trailing-group regex otherwise
 	// captures "ToonsHub.mkv" as the group name, which matches no offset.
@@ -142,6 +265,13 @@ func episodeOf(path string, offsets map[string]int) (int, bool) {
 	raw := rel.RawEpisode()
 	if raw == 0 {
 		return 0, false
+	}
+	if len(offsets) == 0 {
+		// No offsets known: trust the raw number. See the note above.
+		if raw <= 0 {
+			return 0, false
+		}
+		return raw, true
 	}
 	group := rel.Group
 	if group == "" {
@@ -176,20 +306,33 @@ func lookupOffset(group string, offsets map[string]int) (int, bool) {
 	return 0, false
 }
 
-// mediaFiles returns the video files directly under dir.
+// mediaFiles returns the video files under dir, at any depth.
+//
+// Recursive because a torrent is not always a flat list of files: a season
+// pack arrives as one directory named after the release, with the episodes
+// inside it. Reading only the top level found nothing for such a torrent, so
+// a completed download sat in staging forever and its episode stayed
+// "downloading".
+//
+// Depth is not bounded, but the reconciler only ever acts on a file that
+// resolves to an episode already in flight, so extra files are left alone
+// rather than moved.
 func mediaFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+	var out []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if isMedia(d.Name()) {
+			out = append(out, path)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if isMedia(e.Name()) {
-			out = append(out, filepath.Join(dir, e.Name()))
-		}
 	}
 	return out, nil
 }
@@ -197,8 +340,9 @@ func mediaFiles(dir string) ([]string, error) {
 // finalise renames the finished torrent into the library layout and marks the
 // episode downloaded.
 //
-// The target is <library>/<Show>/<Show> - E<NN>.<ext>. The extension comes
-// from the source file.
+// The target comes from the naming scheme, not from a format string baked in
+// here, so a configured layout is honoured everywhere rather than only on the
+// write path. The extension comes from the source file.
 //
 // The two database writes are a transaction, so the episode can never be
 // marked downloaded without its path (or vice versa) — a half-finalised
@@ -210,16 +354,13 @@ func (r *Reconciler) finalise(sh *store.Show, ep *store.Episode, src string) err
 		return fmt.Errorf("no file extension on %q", src)
 	}
 
-	show := watch.Sanitise(sh.CanonicalName)
-	newName := fmt.Sprintf("%s - E%02d%s", show, ep.Number, ext)
+	finalPath := r.Scheme.Path(r.Library, sh.CanonicalName, seasonOf(sh), ep.Number, ext)
 
 	// The library folder is not assumed to exist: a daily cleanup job removes
 	// show folders left with no media files, so it is recreated as needed.
-	destDir := filepath.Join(r.Library, show)
-	if err := os.MkdirAll(destDir, 0o775); err != nil {
-		return fmt.Errorf("mkdir %s: %w", destDir, err)
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o775); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(finalPath), err)
 	}
-	finalPath := filepath.Join(destDir, newName)
 
 	// Same filesystem, so this is an atomic rename rather than a copy. The
 	// file appears in the library complete and correctly named, or not at all.
@@ -244,19 +385,19 @@ func (r *Reconciler) healLibrary(sh *store.Show, eps []*store.Episode) {
 		if ep.State != episode.Downloading {
 			continue
 		}
-		show := watch.Sanitise(sh.CanonicalName)
-		ext := ""
-		for _, e := range []string{".mkv", ".mp4", ".m4v", ".avi", ".ts", ".mov", ".webm"} {
-			candidate := filepath.Join(r.Library, show, fmt.Sprintf("%s - E%02d%s", show, ep.Number, e))
+		// Every extension the scheme could have written, since the exact one
+		// is not recorded anywhere. Derived from the scheme rather than
+		// hardcoded, so a custom layout heals as correctly as the default.
+		finalPath := ""
+		for _, candidate := range r.Scheme.Candidates(r.Library, sh.CanonicalName, seasonOf(sh), ep.Number) {
 			if _, err := os.Stat(candidate); err == nil {
-				ext = e
+				finalPath = candidate
 				break
 			}
 		}
-		if ext == "" {
+		if finalPath == "" {
 			continue
 		}
-		finalPath := filepath.Join(r.Library, show, fmt.Sprintf("%s - E%02d%s", show, ep.Number, ext))
 		if err := r.st.FinaliseEpisode(sh.ID, ep.Number, finalPath); err != nil {
 			log.Printf("grab: heal %s ep%d: %v", sh.CanonicalName, ep.Number, err)
 			continue

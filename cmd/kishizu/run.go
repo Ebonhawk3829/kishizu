@@ -9,33 +9,30 @@ import (
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/art"
+	"github.com/Ebonhawk3829/kishizu/internal/config"
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/grab"
 	"github.com/Ebonhawk3829/kishizu/internal/listen"
-	"github.com/Ebonhawk3829/kishizu/internal/ntfy"
+	"github.com/Ebonhawk3829/kishizu/internal/naming"
+	"github.com/Ebonhawk3829/kishizu/internal/notify"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
-// magnetFor builds a magnet link from an RSS item. The display name is kept so
-// the torrent has a readable name in Transmission.
-func magnetFor(infohash, title string) string {
-	return "magnet:?xt=urn:btih:" + infohash + "&dn=" + title
-}
-
-// notify sends an ntfy alert, logging any failure.
+// notify sends an alert, logging any failure.
 //
 // Notifications are best-effort — a missed ping must never stop a download —
 // but a failure has to be visible. Discarding the error is how a wrong topic
 // URL went unnoticed: every ping failed silently and the only symptom was
 // that no notification arrived.
-func notify(n *ntfy.Client, title, message string, priority int) {
+func alert(n notify.Notifier, title, message string, priority notify.Priority) {
 	if n == nil {
 		return
 	}
 	if err := n.Send(title, message, priority); err != nil {
-		log.Printf("ntfy: %s: %v", title, err)
+		log.Printf("%s: %s: %v", n.Name(), title, err)
 	}
 }
 
@@ -48,23 +45,43 @@ func notify(n *ntfy.Client, title, message string, priority int) {
 //
 // The loop exits when ctx is cancelled, so SIGINT/SIGTERM stop the pollers,
 // the sweepers and the schedule refresh together with the HTTP server.
-func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, staging, library string, keep int, interval time.Duration, dryRun bool, ntfyURL string) {
-	l := listen.New(st)
-	tc := transmission.New(rpcURL)
-	w := watch.New(st, library, keep)
-	rec := grab.New(st, staging, library)
-	n := ntfy.New(ntfyURL)
+func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl download.Downloader, scheme *naming.Scheme, cfg *config.File, n notify.Notifier) {
+	s := cfg.Server
+	interval, err := time.ParseDuration(s.Interval)
+	if err != nil {
+		log.Printf("listener: bad interval %q, using 5m: %v", s.Interval, err)
+		interval = 5 * time.Minute
+	}
+	keep := 2
+	if s.Keep != nil {
+		keep = *s.Keep
+	}
+	dryRun := true
+	if s.DryRun != nil {
+		dryRun = *s.DryRun
+	}
 
-	log.Printf("listener: polling every %s (dry-run=%v, transmission=%s)",
-		interval, dryRun, rpcURL)
+	// The quality policy is global and comes from configuration, so the
+	// listener ranks releases by what the user actually asked for. Only the
+	// fields that were set are applied, so a partial section keeps the
+	// shipped defaults.
+	l := listen.NewWithPolicy(st, buildQuality(s.Quality))
+	w := watch.New(st, s.Library, keep)
+	rec := grab.NewWithScheme(st, s.Staging, s.Library, scheme)
+	// Pruning deletes data, so it is opt-in and comes from configuration
+	// rather than being on by default.
+	rec.PruneUnselected = s.PruneUnselected
+
+	log.Printf("listener: polling every %s (dry-run=%v, downloader=%s)",
+		interval, dryRun, dl.Name())
 
 	// lastPolled tracks when each show was last fetched, so per-show intervals
 	// are honoured: a hunting show polls every 3 minutes while an up-to-date
 	// one is never touched.
 	lastPolled := map[int64]time.Time{}
-	// transmissionDown latches the failure alert so a sustained outage pings
+	// downloaderDown latches the failure alert so a sustained outage pings
 	// once rather than on every poll.
-	transmissionDown := false
+	downloaderDown := false
 
 	poll := func() {
 		// Poll only the shows that are due: hunting episodes get the aggressive
@@ -97,37 +114,37 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, 
 					log.Printf("WOULD GRAB %s ep%d %s (%s)", d.Show, d.Episode, d.Item.Title, d.Reason)
 					continue
 				}
-				// One staging directory per show. Transmission creates it on
-				// add, but making it here means the path is known to exist
-				// and is owned by our uid rather than Transmission's.
-				dir := filepath.Join(staging, watch.Sanitise(d.Show))
+				// One staging directory per show. The downloader creates it
+				// on add, but making it here means the path is known to exist
+				// and is owned by our uid rather than the downloader's.
+				dir := filepath.Join(s.Staging, release.Sanitise(d.Show))
 				if err := os.MkdirAll(dir, 0o775); err != nil {
 					log.Printf("staging mkdir %s: %v", dir, err)
 					continue
 				}
-				if err := tc.AddWithDir(magnetFor(d.Item.InfoHash, d.Item.Title), dir); err != nil {
-					log.Printf("transmission add: %v", err)
+				if err := dl.Add(download.Magnet(d.Item.InfoHash, d.Item.Title), dir); err != nil {
+					log.Printf("%s add: %v", dl.Name(), err)
 					// Alert once, then stay quiet until it recovers. At a
 					// 3-minute poll, pinging every failure is ~480 a day.
-					if !transmissionDown {
-						transmissionDown = true
-						notify(n, "kishizu: Transmission unreachable",
-							"grabs will be retried; "+err.Error(), ntfy.PriorityHigh)
+					if !downloaderDown {
+						downloaderDown = true
+						alert(n, "kishizu: "+dl.Name()+" unreachable",
+							"grabs will be retried; "+err.Error(), notify.PriorityHigh)
 					}
 					continue
 				}
-				if transmissionDown {
-					transmissionDown = false
-					log.Printf("transmission: reachable again")
-					notify(n, "kishizu: Transmission reachable",
-						"grabs resumed", ntfy.PriorityDefault)
+				if downloaderDown {
+					downloaderDown = false
+					log.Printf("%s: reachable again", dl.Name())
+					alert(n, "kishizu: "+dl.Name()+" reachable",
+						"grabs resumed", notify.PriorityDefault)
 				}
 				if err := l.MarkGrabbed(d); err != nil {
 					log.Printf("mark grabbed: %v", err)
 					continue
 				}
 				log.Printf("GRABBED %s ep%d %s", d.Show, d.Episode, d.Item.Title)
-				notify(n, "kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), ntfy.PriorityLow)
+				alert(n, "kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), notify.PriorityLow)
 			}
 		}
 		// Logged every tick, including when nothing was grabbed: silence in the
@@ -251,8 +268,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, rpcURL, 
 			}
 			if len(deleted) > 0 {
 				log.Printf("watch: %d deleted, %d kept", len(deleted), len(kept))
-				notify(n, "kishizu: episodes deleted",
-					fmt.Sprintf("%d deleted, %d kept", len(deleted), len(kept)), ntfy.PriorityDefault)
+				alert(n, "kishizu: episodes deleted",
+					fmt.Sprintf("%d deleted, %d kept", len(deleted), len(kept)), notify.PriorityDefault)
 			}
 		}
 	}

@@ -1,0 +1,124 @@
+# kishizu configuration — EXAMPLE.
+#
+# Copy to kishizu.yaml and edit. kishizu.yaml is gitignored: it is your
+# watch list, and publishing it tells the internet what you watch and where
+# you are in each season.
+#
+# One file holds everything. The `server` section is the deployment; the
+# `shows` list seeds a fresh database. Every server key is optional — omit
+# one and the default below applies.
+#
+# Configure this FIRST if you are moving to kishizu mid-season from another
+# tool and want to pre-seed the database: run with -seed once the settings
+# are right, so the shows land with the paths and policy you intend.
+
+server:
+  # Where finished episodes are filed, as kishizu sees it.
+  library: /media/anime
+  # Where the downloader puts completed files. Must be on the SAME
+  # filesystem as library: the final move is a rename, and a rename across
+  # mount points fails.
+  staging: /downloads/anime
+  # Recently watched episodes to leave on disk. 0 keeps none.
+  keep: 2
+  # How often to poll for releases.
+  interval: 5m
+  # Decide but do not download. Remove once you trust the matching.
+  dry_run: true
+  # Delete files that were not selected for tracking, once a pack has
+  # finished. Off by default, because it deletes data. Only ever removes
+  # files inside staging that resolved to no in-flight episode.
+  prune_unselected: false
+
+  downloader:
+    # transmission or qbittorrent.
+    kind: transmission
+    transmission_rpc: http://localhost:9091/transmission/rpc
+    # qBittorrent's WebUI. Credentials are optional when the WebUI bypasses
+    # auth for localhost.
+    qbittorrent_url: http://localhost:8080
+    qbittorrent_user: ""
+    # Leave empty and set KISHIZU_QBITTORRENT_PASS instead, to keep the
+    # password out of this file entirely.
+    qbittorrent_pass: ""
+
+  notifier:
+    # ntfy, gotify or none.
+    kind: none
+    ntfy_topic: https://ntfy.sh/your-topic
+    gotify_url: ""
+    # Leave empty and set KISHIZU_GOTIFY_TOKEN instead, to keep the token out
+    # of this file entirely.
+    gotify_token: ""
+
+  indexer:
+    # Where releases are searched for.
+    base: https://nyaa.si
+    # Category filter. 1_2 is anime-english-translated on Nyaa.
+    category: "1_2"
+    # Sent on every request. Some indexers reject the Go default outright.
+    user_agent: kishizu
+    # Shortest time between requests. Be polite to public indexers.
+    min_interval: 1s
+
+  quality:
+    # Lowest acceptable resolution. Below this is rejected, not demoted.
+    resolution_floor: 1080p
+    # Preferred release groups, best first. Unlisted groups are still
+    # eligible — this is a ranking, not an allowlist.
+    group_order:
+      - SubsPlease
+      - Erai-Raws
+    # Advanced: override the built-in rankings. Lower is better. Omit these
+    # to use the defaults, which order codecs by generational loss (x264
+    # before a re-encoded x265 or AV1) and penalise 2160p as acceptable but
+    # not preferred.
+    # codec_rank:
+    #   x264: 0
+    #   x265: 20
+    #   av1: 30
+    # resolution_penalty:
+    #   1080p: 0
+    #   2160p: 10
+    #   720p: 90
+    # Added to a release's rank. Dub is demoted, never excluded; uncensored
+    # is negative so it is preferred.
+    # penalty_dub: 15
+    # penalty_uncensored: -5
+    # Exclude batches and season packs outright.
+    # reject_batch: true
+
+  naming:
+    # kishizu, sonarr, plex or custom.
+    #   kishizu  <library>/<Show>/<Show> - E09.mkv
+    #   sonarr   <library>/<Show>/Season 01/<Show> - S01E09.mkv
+    #   plex     <library>/<Show>/Season 01/<Show> - s01e09.mkv
+    preset: kishizu
+    # Required when preset is custom. Placeholders:
+    #   {show} {season} {season:2} {episode} {episode:2}
+    pattern: ""
+    # File into a Season NN folder. Implied by sonarr and plex.
+    season_folder: false
+
+# ── the show list ──────────────────────────────────────────────────────────
+# Seeds a fresh database. In practice you will add shows from the web UI by
+# browsing the season or pasting an animeschedule.net URL, which fills in the
+# aliases and episode count for you. This list is for seeding in one go.
+#
+#   name     - your own name for the show. Becomes the canonical name.
+#   aliases  - every other title it is known by. Include the romaji title
+#              used by animeschedule.net and by release groups, and any
+#              native title (Korean webtoon adaptations are listed under
+#              their Korean name, e.g. Tomb Raider King airs as "Dogul Wang").
+#   watched  - how many episodes you have already seen. Episodes 1..watched
+#              are latched as watched, so they are never grabbed.
+#   max      - total episodes in the season. 0 = unknown, no upper bound.
+#
+# Apply with: kishizu -db kishizu.db -config kishizu.yaml -seed
+
+shows:
+  - name: Example Show
+    aliases:
+      - Example Show Romaji Title
+    watched: 0
+    max: 12

@@ -25,7 +25,7 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 		sh, err := st.CreateShow(cs.Name, cs.Aliases, cs.Max)
 		if err != nil {
 			// Already present: update its aliases rather than skipping, so
-			// editing shows.yaml actually takes effect on an existing
+			// editing kishizu.yaml actually takes effect on an existing
 			// database. Skipping silently meant alias fixes never landed.
 			existing, _ := st.GetShowByName(cs.Name)
 			if existing == nil {

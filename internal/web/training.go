@@ -569,5 +569,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 func writeErr(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	// The response is already committed; a failed encode has nowhere better
+	// to report. The client sees a truncated body, which is the honest
+	// outcome for an error path.
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }

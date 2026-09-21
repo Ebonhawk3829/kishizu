@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/anilist"
+	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -39,7 +40,7 @@ func TestAdoptSetsCoverArt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.SetAdopt(t.TempDir(), t.TempDir(), tx.URL)
+	srv.SetAdopt(t.TempDir(), t.TempDir(), &download.Fake{})
 
 	// Point the AniList client at the stub for this test.
 	old := anilist.Endpoint

@@ -76,10 +76,6 @@ type GradedRelease struct {
 	Attrs      []AttrValue `json:"attrs"`
 }
 
-// resolutionRank is the shared ordering from the release package: the trainer
-// writes the floor and the listener enforces it, so they must agree.
-var resolutionRank = release.ResolutionPenalty
-
 // Inspect breaks a release title into the attributes the user can grade.
 func Inspect(title string, resolvedEp int) GradedRelease {
 	return InspectWithConfidence(title, resolvedEp, 0)

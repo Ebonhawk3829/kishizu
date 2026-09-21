@@ -206,7 +206,7 @@ func TestBestPicksPreferredGroup(t *testing.T) {
 		{Grab: true, ShowID: sh.ID, Episode: 9,
 			Item: item("H2", "[ToonsHub] Tomb Raider King S01E09 1080p HEVC")},
 	}
-	best := Best(decisions)
+	best := New(st).Best(decisions)
 	if len(best) != 1 {
 		t.Fatalf("got %d best, want 1", len(best))
 	}
@@ -222,7 +222,7 @@ func TestBestBreaksTiesOnSeeders(t *testing.T) {
 	b := Decision{Grab: true, ShowID: 1, Episode: 5, Item: item("HB", "[ToonsHub] Show S01E05 1080p")}
 	b.Item.Seeders = 30
 
-	best := Best([]Decision{a, b})
+	best := New(nil).Best([]Decision{a, b})
 	if len(best) != 1 || best[0].Item.InfoHash != "HB" {
 		t.Errorf("best = %+v, want HB (more seeders)", best)
 	}

@@ -159,12 +159,12 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int, force bool) (int, error) {
 		var num int
 		var st string
 		if err := rows.Scan(&num, &st); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		state[num] = episode.ParseState(st)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
