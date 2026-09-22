@@ -38,6 +38,44 @@ func TestParseEpisode(t *testing.T) {
 	}
 }
 
+// TestParseChineseEpisodeNumber: Bilibili-sourced releases number episodes
+// 第N话, and without reading that the whole release is ungrabbable — the
+// reason in the log is "episode unreadable", which looks like a parser bug
+// to nobody because the title looks fine to a human.
+//
+// This is a pattern in the parser rather than a vocabulary entry
+// deliberately: 第N话 is a different token for every episode, so teaching
+// the vocabulary one token teaches one episode. A pattern generalises
+// across every episode, which is what a numbering convention needs.
+func TestParseChineseEpisodeNumber(t *testing.T) {
+	cases := []struct {
+		in   string
+		ep   int
+		bare int
+	}{
+		{"[Doomdos] - Tomb Raider King - 第3话 - [1080p BILIBILI COM WEB-DL]", 3, 0},
+		{"[Doomdos] - BLEACH: Thousand-Year Blood War - The Calamity - 第43话 - [1080p BILIBILI COM WEB-DL]", 43, 0},
+		{"[Doomdos] - Grand Blue Dreaming3 - 第12话 - [1080p BILIBILI COM WEB-DL]", 12, 0},
+		// The characters can also appear in ordinary text. When a
+		// conventional episode marker is present too, it wins: a bare
+		// "- 47" is stronger evidence than a 第 that may be part of a
+		// sentence.
+		{"[Group] 第1话 is how they write it - 47 [1080p]", 0, 47},
+		// Conventional formats unaffected.
+		{"[SubsPlease] Show - 47 (1080p)", 0, 47},
+		{"[ToonsHub] Show S01E47 1080p", 47, 0},
+	}
+	for _, tc := range cases {
+		got := Parse(tc.in)
+		if got.Episode != tc.ep {
+			t.Errorf("Parse(%q).Episode = %d, want %d", tc.in, got.Episode, tc.ep)
+		}
+		if got.Bare != tc.bare {
+			t.Errorf("Parse(%q).Bare = %d, want %d", tc.in, got.Bare, tc.bare)
+		}
+	}
+}
+
 // TestParseCodec is the regression test for a bug where "H.264" and "H.265"
 // were not recognised: the original pattern used \b before "h", which fails
 // because the following character is a dot, not a word character.

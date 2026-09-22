@@ -45,9 +45,20 @@ var (
 	// The form kishizu itself writes on completion: "<Show> - E09.mkv".
 	// Without this the tool cannot read the episode number from its own
 	// renamed files, which is exactly what the mpv watch signal sends back.
-	reLibrary    = regexp.MustCompile(`(?i)\s-\sE(\d{1,4})(?:\s|\.|$)`)
-	reSeasonWord = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)\s+season\b|\bseason\s+(\d{1,2})\b`)
-	reResolution = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k)\b`)
+	reLibrary = regexp.MustCompile(`(?i)\s-\sE(\d{1,4})(?:\s|\.|$)`)
+	// Bilibili's Chinese episode marker, e.g. "第43话". Bilibili-sourced
+	// releases (Doomdos and similar) number episodes this way, and without
+	// it the whole release reads as having no episode at all — it can never
+	// be grabbed, and the reason in the log is "episode unreadable".
+	//
+	// This is a pattern rather than a vocabulary entry deliberately. The
+	// vocabulary maps one token to one value, and 第N话 is a different token
+	// for every episode: teaching 第3话 teaches episode 3 and nothing else.
+	// A pattern generalises across every episode, which is what a numbering
+	// convention needs.
+	reChineseEpisode = regexp.MustCompile(`第\s*(\d{1,4})\s*话`)
+	reSeasonWord     = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)\s+season\b|\bseason\s+(\d{1,2})\b`)
+	reResolution     = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k)\b`)
 	// Codec. The optional separator between the letter and the digits matters:
 	// releases write "H.264", "H 264", "h264" and "x265" interchangeably, and a
 	// plain \b before "h" fails on "H.265" because the dot is not a word char.
@@ -107,6 +118,17 @@ func Parse(title string) Release {
 
 	if m := reBare.FindStringSubmatch(title); m != nil {
 		r.Bare, _ = strconv.Atoi(m[1])
+	}
+
+	// Bilibili's 第N话. Runs after reBare and fills in only when nothing
+	// else found a number, so a title carrying both this and a conventional
+	// marker keeps the conventional reading — the characters can also appear
+	// in ordinary text, and a bare "- 47" is stronger evidence than a 第
+	// that may be part of a sentence.
+	if r.Episode == 0 && r.Bare == 0 {
+		if m := reChineseEpisode.FindStringSubmatch(title); m != nil {
+			r.Episode, _ = strconv.Atoi(m[1])
+		}
 	}
 
 	if m := reSeasonWord.FindStringSubmatch(title); m != nil {
