@@ -208,6 +208,7 @@ func (s *Server) recordWatched(showID int64, epNum int, source string) error {
 	if err := s.st.UpsertEpisode(showID, epNum, episode.Watched, "", ""); err != nil {
 		return err
 	}
+	log.Printf("watched: show %d ep %d (%s)", showID, epNum, source)
 	// Watching is progress just as a download is: if the watch point has
 	// reached the schedule's pointer, the pointer must move, or the UI
 	// keeps announcing an air date that is already in the past. Best-effort:

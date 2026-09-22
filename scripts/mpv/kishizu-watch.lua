@@ -8,8 +8,10 @@
 --   * An episode counts as watched when playback reaches within
 --     MARK_WINDOW seconds of the end (the user skips the ED), OR playback
 --     reaches the actual end.
---   * Nothing is posted while watching. The flag is checked once, on exit, so
---     a video abandoned at 20% never sends anything.
+--   * Nothing is posted while watching. Each file that reaches the mark
+--     window is remembered and posted once, on exit, so a video abandoned
+--     at 20% never sends anything and a playlist sends one signal per
+--     episode, not just the last one.
 --
 -- Failure path: if the POST fails, the payload is appended to a spool file and
 -- retried the next time mpv starts. A missed signal leaves a file on disk,
@@ -61,9 +63,10 @@ local function under_root(p)
         and (path:sub(#root + 1, #root + 1) == '/' or #path == #root)
 end
 
--- watched is set once playback gets close enough to the end.
-local watched = false
-local path = nil
+-- pending holds one entry per file that reached the mark window, so a
+-- playlist of episodes sends one signal per episode instead of only the
+-- last one.
+local pending = {}
 
 local function spool(payload)
     local f = io.open(o.spool, 'a')
@@ -143,46 +146,48 @@ local function flush_spool()
 end
 
 local function check_position(_, pos)
-    if watched or not pos then return end
+    local path = mp.get_property('path')
+    if not path or not under_root(path) then return end
+    if pending[path] then return end
     local dur = mp.get_property_number('duration')
     if not dur or dur == 0 then return end
     if dur - pos <= o.mark_window then
-        watched = true
-        mp.msg.info('kishizu: near end, will mark watched on exit')
+        pending[path] = true
+        mp.msg.info('kishizu: near end, will mark watched on exit: ' .. path)
     end
 end
 
 local function on_file_load()
-    watched = false
-    path = mp.get_property('path')
     -- Outside the anime root this session is none of kishizu's business: no
     -- signal, no spool entry. The spool is still flushed, so a failed anime
     -- signal gets retried even if the next thing played is a film.
+    local path = mp.get_property('path')
     if not under_root(path) then
         mp.msg.verbose('kishizu: ignoring ' .. tostring(path) ..
                        ' (outside ' .. o.root .. ')')
-        path = nil
     end
     flush_spool()
 end
 
 local function on_exit()
-    if not watched or not path then return end
-    local payload = utils.format_json({path = path})
-    local result = post(payload)
-    if result == 'ok' then
-        mp.msg.info('kishizu: marked watched: ' .. path)
-    elseif result == 'rejected' then
-        -- The server is fine, it just does not track this show. Not an
-        -- error, and not worth a phone notification: mpv plays plenty of
-        -- things kishizu has never heard of.
-        mp.msg.verbose('kishizu: ignored untracked file: ' .. path)
-    else
-        spool(payload)
-        notify('kishizu: could not reach server; watch signal spooled for ' ..
-               (path and mp.get_property('filename') or 'file'))
-        mp.msg.warn('kishizu: post failed, spooled')
+    for path in pairs(pending) do
+        local payload = utils.format_json({path = path})
+        local result = post(payload)
+        if result == 'ok' then
+            mp.msg.info('kishizu: marked watched: ' .. path)
+        elseif result == 'rejected' then
+            -- The server is fine, it just does not track this show. Not an
+            -- error, and not worth a phone notification: mpv plays plenty of
+            -- things kishizu has never heard of.
+            mp.msg.verbose('kishizu: ignored untracked file: ' .. path)
+        else
+            spool(payload)
+            notify('kishizu: could not reach server; watch signal spooled for ' ..
+                   mp.get_property('filename', path))
+            mp.msg.warn('kishizu: post failed, spooled: ' .. path)
+        end
     end
+    pending = {}
 end
 
 mp.register_event('start-file', on_file_load)
