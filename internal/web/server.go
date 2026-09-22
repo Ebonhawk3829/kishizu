@@ -200,6 +200,11 @@ func (s *Server) Handler() http.Handler {
 	// Configuration: read the effective settings, and write them back.
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/config", s.handleSaveConfig)
+	// One small preference, saved on toggle. The settings modal saves the
+	// whole file; this exists because the browse toggle is a click-anywhere
+	// control, and making it wait on a full round-trip of every setting would
+	// make a display choice feel like a form submission.
+	mux.HandleFunc("POST /api/config/browse-title", s.handleBrowseTitle)
 
 	// Liveness for container orchestration. Separate from /api/summary
 	// because a healthcheck must not depend on the database or the network:
@@ -403,6 +408,45 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		"saved":            true,
 		"restart_required": true,
 	})
+}
+
+// handleBrowseTitle saves just the browse display preference.
+//
+// A separate endpoint rather than reusing the full settings save, because the
+// toggle is a click-anywhere control: persisting it should be one small write,
+// not a round-trip of every setting with the secrets masked and unmasked.
+func (s *Server) handleBrowseTitle(w http.ResponseWriter, r *http.Request) {
+	if s.configPath == "" {
+		writeErr(w, http.StatusNotImplemented,
+			fmt.Errorf("no configuration file is configured on this server"))
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	pref, err := schedule.ParseBrowseTitle(req.Title)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// Load the current file so everything else survives untouched.
+	cur, err := config.Load(s.configPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	next := *cur.Server
+	next.Browse.Title = string(pref)
+	if err := config.Save(s.configPath, cur, &next); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]any{"saved": true, "title": string(pref)})
 }
 
 // SecretMask is what the UI sends back for a credential it did not display.

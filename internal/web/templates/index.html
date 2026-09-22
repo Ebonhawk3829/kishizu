@@ -738,9 +738,8 @@ async function browse(refresh) {
   try {
     const r = await api(url);
     browseAll = r.entries || [];
-    // The server decides which name to send as `title` from the config file,
-    // so the preference survives a reload without the client storing it.
-    if (r.title) setBrowseTitle(r.title, false);
+    // The server's preference is the seed; the toggle takes over from there.
+    if (r.title) setBrowseTitle(r.title);
     el('browse-meta').textContent =
       `${browseAll.length} shows` + (r.fetched ? ` · cached ${when(r.fetched)}` : '');
     applyBrowseFilter();
@@ -750,15 +749,27 @@ async function browse(refresh) {
   }
 }
 
-// Switch which name is displayed. refetch=false when the server already sent
-// titles in this language; true when the user flips the control, since the
-// server has to re-render the list.
-function setBrowseTitle(pref, refetch) {
+// Switch which name is displayed.
+//
+// Re-renders from data already in hand rather than refetching: the server
+// sends both names on every entry, so a display choice needs no round-trip.
+// Refetching here was the bug that made the toggle look dead — the server
+// reads the preference from the config file, which still held the old value,
+// so it re-asserted it and reset the control.
+//
+// The choice is persisted to the config file in the background, so it
+// survives a reload. A failed save is not fatal: the toggle still works for
+// this session, and the Settings modal saves it the ordinary way.
+function setBrowseTitle(pref) {
   browseTitle = pref;
   for (const b of document.querySelectorAll('#browse-title-seg .seg-btn')) {
     b.classList.toggle('on', b.dataset.title === pref);
   }
-  if (refetch) browse(false);
+  // Re-render from the data already in hand: the row layout reads browseTitle
+  // when it picks which name to show and which to put in the subtitle.
+  applyBrowseFilter();
+  api('/api/config/browse-title', { title: pref }, 'POST')
+    .catch(e => fieldError('browse-error', `Saved for this session only: ${e.message}`));
 }
 
 // Filter what is already loaded. No request: the list is small enough to hold
@@ -794,16 +805,19 @@ function browseRow(e) {
   const btn = e.tracked
     ? `<span class="st st-idle"><span class="dot"></span>tracked</span>`
     : `<button class="btn" data-act="browse-add" data-slug="${escapeHtml(e.slug)}">Add</button>`;
+  // The client picks the name, not the server: the server sends both on every
+  // entry, and the toggle has to re-render without a round-trip. Falls back
+  // to the romaji when there is no separate English name, so a row is never
+  // blank just because the show has one name.
+  const main = browseTitle === 'english' && e.english ? e.english : e.romaji;
   // The other name is shown underneath when it differs, so a show is
   // recognisable whichever language the list is displaying.
-  const other = browseTitle === 'english'
-    ? (e.romaji && e.romaji !== e.title ? e.romaji : '')
-    : (e.english && e.english !== e.title ? e.english : '');
+  const other = main !== e.romaji ? e.romaji : (e.english && e.english !== main ? e.english : '');
   return `
   <div class="row">
     ${art}
     <div>
-      <div class="name" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
+      <div class="name" title="${escapeHtml(main)}">${escapeHtml(main)}</div>
       <div class="sub">${escapeHtml(airs)}${other ? ` · ${escapeHtml(other)}` : ''}</div>
     </div>
     <span class="acts">${btn}</span>
@@ -1520,7 +1534,7 @@ function wireActions() {
   el('browse-q').oninput = applyBrowseFilter;
   el('browse-q').onkeydown = e => { if (e.key === 'Enter') browse(false); };
   for (const b of document.querySelectorAll('#browse-title-seg .seg-btn')) {
-    b.onclick = () => setBrowseTitle(b.dataset.title, true);
+    b.onclick = () => setBrowseTitle(b.dataset.title);
   }
   el('btn-adopt-open').onclick = openAdopt;
   el('btn-adopt-close').onclick = closeAdopt;

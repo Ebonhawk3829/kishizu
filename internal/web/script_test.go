@@ -173,10 +173,21 @@ func TestScriptRendersBrowseRow(t *testing.T) {
 	node := nodeAvailable(t)
 	src := extractScript(t)
 
+	// The entry shape the server sends: both names, per entry. The client
+	// picks which to display from browseTitle, so the toggle can re-render
+	// without a round-trip.
 	runner := domStub + "\n" + src + "\n" + `
-const row = browseRow({slug: 'a-show', title: 'A Show', image: '', airs_at: '2026-10-04T00:00:00Z', tracked: false});
-if (!row.includes('A Show')) { console.log('NO TITLE'); process.exit(1); }
-const tracked = browseRow({slug: 'b', title: 'B', image: '', airs_at: '', tracked: true});
+setBrowseTitle('romaji');
+const row = browseRow({slug: 'a-show', romaji: 'A Romaji', english: 'A English', image: '', airs_at: '2026-10-04T00:00:00Z', tracked: false});
+if (!row.includes('A Romaji')) { console.log('NO ROMAJI'); process.exit(1); }
+setBrowseTitle('english');
+const rowEn = browseRow({slug: 'a-show', romaji: 'A Romaji', english: 'A English', image: '', airs_at: '2026-10-04T00:00:00Z', tracked: false});
+if (!rowEn.includes('A English')) { console.log('NO ENGLISH'); process.exit(1); }
+// A show with no separate English name must still render, not go blank.
+setBrowseTitle('english');
+const rowNoEn = browseRow({slug: 'c', romaji: 'C Only', english: '', image: '', airs_at: '', tracked: false});
+if (!rowNoEn.includes('C Only')) { console.log('NO FALLBACK'); process.exit(1); }
+const tracked = browseRow({slug: 'b', romaji: 'B', english: '', image: '', airs_at: '', tracked: true});
 if (!tracked.includes('tracked')) { console.log('NO TRACKED MARK'); process.exit(1); }
 console.log('OK');
 `
