@@ -155,12 +155,32 @@
   }
   .acts button:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
 
-  /* Browse results reuse the row grid, but their action is always visible:
-     the whole point of the list is to click Add, and hiding it behind a
-     hover would make the list look inert. */
-  .browse { margin-top: 12px; max-height: 420px; overflow-y: auto; }
+  /* Browse results have their own grid, not the show-row one. The show-row
+     grid carries four columns (~612px of fixed width before the name), built
+     for the full page width — inside the disclosure body (max-width 64ch)
+     the flexible name column collapsed to nothing and every title wrapped one
+     word per line. Three columns fit the narrow container and the title gets
+     the space the fixed columns leave. */
+  .browse { margin-top: 12px; }
+  .browse .row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 14px; padding: 10px 8px 10px 0;
+  }
   .browse .row .acts { opacity: 1; }
   .browse .row .art { width: 34px; height: 48px; }
+
+  /* ── segmented control (title language) ─────────────────────────────── */
+  /* A pair of mutually exclusive choices shown together, rather than a
+     dropdown: the two options are short, and seeing both makes it obvious
+     that a choice exists. */
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg-btn {
+    background: none; border: 0; color: var(--t2); font: inherit; font-size: 12.5px;
+    padding: 5px 12px; cursor: pointer; transition: background .1s ease, color .1s ease;
+  }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--line); }
+  .seg-btn:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
+  .seg-btn.on { background: oklch(0.26 0.012 285); color: var(--t1); }
   /* Long titles wrap instead of truncating. The browser list is for picking
      a show by name, and a title cut at 30 characters with the rest behind a
      hover tooltip is not a picker. */
@@ -425,16 +445,14 @@
     </div>
     <div class="field-error" id="add-error"></div>
 
-    <div class="browse-divider"></div>
-    <p class="hint">Or browse the current season, from a cached snapshot. Everything is shown; the filter narrows it.</p>
-    <div class="fields" style="grid-template-columns: 1fr auto auto">
-      <div><label for="browse-q">Filter</label><input id="browse-q" type="text" placeholder="title or slug"></div>
-      <div><button class="btn ghost" id="btn-browse-refresh">Refresh</button></div>
-      <div><button class="btn ghost" id="btn-browse-clear">Clear</button></div>
+    <!-- The browse list opens as a modal rather than living inline. Inline it
+         inherited the disclosure body's 64ch width, which is narrower than the
+         show-row grid's fixed columns, so every title wrapped one word per
+         line. The trigger stays here because browsing is how you pick a show
+         to add; the list itself needs the full page width. -->
+    <div class="fields" style="margin-top:14px">
+      <div><button class="btn ghost" id="btn-browse-open">Browse this season</button></div>
     </div>
-    <div class="field-error" id="browse-error"></div>
-    <p class="hint" id="browse-meta"></p>
-    <div id="browse-results" class="browse"></div>
   </div>
 </details>
 
@@ -448,6 +466,37 @@
     <div><button class="btn" id="btn-adopt-open">Open adoption</button></div>
   </div>
 </details>
+
+<!-- Browsing the season. Opened from the Add-a-show disclosure, because
+     picking from the list is how you choose a show to add — but rendered as a
+     modal because the list needs the full page width. Inside the disclosure
+     body (max-width 64ch) the show-row grid's fixed columns left the title
+     column no room, and every title wrapped one word per line. -->
+<div class="modal-backdrop hidden" id="browse-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span>Browse this season</span>
+      <!-- Which name is displayed. The filter matches both either way, so this
+           is a display preference, not a search mode. -->
+      <div class="seg" id="browse-title-seg" role="group" aria-label="Title language">
+        <button class="seg-btn" data-title="romaji">Romaji</button>
+        <button class="seg-btn" data-title="english">English</button>
+      </div>
+      <button class="btn ghost" id="btn-browse-close">Close</button>
+    </div>
+    <p class="hint">Every show on the season, from a cached snapshot. The filter matches the romaji name, the English name and the slug, whichever is displayed.</p>
+    <div class="fields" style="grid-template-columns: 1fr auto auto">
+      <div><label for="browse-q">Filter</label><input id="browse-q" type="text" placeholder="title or slug"></div>
+      <div><button class="btn ghost" id="btn-browse-refresh">Refresh</button></div>
+      <div><button class="btn ghost" id="btn-browse-clear">Clear</button></div>
+    </div>
+    <div class="field-error" id="browse-error"></div>
+    <p class="hint" id="browse-meta"></p>
+    <div class="modal-scroll">
+      <div id="browse-results" class="browse"></div>
+    </div>
+  </div>
+</div>
 
 <!-- Training is scoped to a show and opened from that show's row. There is no
      separate "grade a release" path: grading one release and training the show
@@ -669,14 +718,17 @@ async function addShow() {
 
 let browseAll = [];
 let browseLoaded = false;
+// Which name the list displays. Seeded from the server's config on first load
+// and changed by the segmented control; the filter matches both either way.
+let browseTitle = 'romaji';
 
-// Browse lives inside the Add-a-show disclosure, so there is no modal to
-// open: the first time the disclosure is expanded, the cached list loads.
-function initBrowse() {
-  if (browseLoaded) return;
-  browseLoaded = true;
-  browse(false);
+function openBrowse() {
+  show('browse-modal', true);
+  if (!browseLoaded) { browseLoaded = true; browse(false); }
+  el('browse-q').focus();
 }
+
+function closeBrowse() { show('browse-modal', false); }
 
 // Browse the season. The list comes from a cached snapshot, so it works when
 // the schedule site is unreachable; Refresh forces a re-fetch.
@@ -686,6 +738,9 @@ async function browse(refresh) {
   try {
     const r = await api(url);
     browseAll = r.entries || [];
+    // The server decides which name to send as `title` from the config file,
+    // so the preference survives a reload without the client storing it.
+    if (r.title) setBrowseTitle(r.title, false);
     el('browse-meta').textContent =
       `${browseAll.length} shows` + (r.fetched ? ` · cached ${when(r.fetched)}` : '');
     applyBrowseFilter();
@@ -695,12 +750,28 @@ async function browse(refresh) {
   }
 }
 
+// Switch which name is displayed. refetch=false when the server already sent
+// titles in this language; true when the user flips the control, since the
+// server has to re-render the list.
+function setBrowseTitle(pref, refetch) {
+  browseTitle = pref;
+  for (const b of document.querySelectorAll('#browse-title-seg .seg-btn')) {
+    b.classList.toggle('on', b.dataset.title === pref);
+  }
+  if (refetch) browse(false);
+}
+
 // Filter what is already loaded. No request: the list is small enough to hold
 // in memory, and filtering locally keeps typing responsive.
+//
+// Matches the displayed title, the other title and the slug, so switching the
+// display language never hides a show that was findable before it.
 function applyBrowseFilter() {
   const q = el('browse-q').value.trim().toLowerCase();
   const hits = !q ? browseAll : browseAll.filter(e =>
     (e.title || '').toLowerCase().includes(q) ||
+    (e.romaji || '').toLowerCase().includes(q) ||
+    (e.english || '').toLowerCase().includes(q) ||
     (e.slug || '').toLowerCase().includes(q));
   renderBrowse(hits);
   if (!hits.length && q) {
@@ -723,12 +794,17 @@ function browseRow(e) {
   const btn = e.tracked
     ? `<span class="st st-idle"><span class="dot"></span>tracked</span>`
     : `<button class="btn" data-act="browse-add" data-slug="${escapeHtml(e.slug)}">Add</button>`;
+  // The other name is shown underneath when it differs, so a show is
+  // recognisable whichever language the list is displaying.
+  const other = browseTitle === 'english'
+    ? (e.romaji && e.romaji !== e.title ? e.romaji : '')
+    : (e.english && e.english !== e.title ? e.english : '');
   return `
   <div class="row">
     ${art}
     <div>
       <div class="name" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
-      <div class="sub">${escapeHtml(airs)}</div>
+      <div class="sub">${escapeHtml(airs)}${other ? ` · ${escapeHtml(other)}` : ''}</div>
     </div>
     <span class="acts">${btn}</span>
   </div>`;
@@ -825,6 +901,7 @@ function renderSettings() {
         <option value="true"${v.naming.season_folder ? ' selected' : ''}>yes</option>
         <option value="false"${v.naming.season_folder ? '' : ' selected'}>no</option>
       </select></div>
+      <div><label for="set-browse-title">Browse titles</label><select id="set-browse-title">${opts(c.browse_titles, v.browse.title)}</select></div>
     </div>`;
 }
 
@@ -867,6 +944,9 @@ async function saveSettings() {
       preset: el('set-preset').value,
       pattern: el('set-pattern').value.trim(),
       season_folder: el('set-season-folder').value === 'true',
+    },
+    browse: {
+      title: el('set-browse-title').value,
     },
   };
   try {
@@ -998,6 +1078,16 @@ function openTrain(showId) {
   backdrop.addEventListener('click', e => { if (e.target === backdrop) cancelTrain(); });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) cancelTrain();
+  });
+})();
+
+// Same for the browse modal. Browsing is read-only, so closing discards
+// nothing — unlike training, where Escape abandons a session in progress.
+(function () {
+  const backdrop = el('browse-modal');
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closeBrowse(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) closeBrowse();
   });
 })();
 
@@ -1420,6 +1510,8 @@ function wireActions() {
   el('btn-settings-open').onclick = openSettings;
   el('btn-settings-close').onclick = closeSettings;
   el('btn-settings-save').onclick = saveSettings;
+  el('btn-browse-open').onclick = openBrowse;
+  el('btn-browse-close').onclick = closeBrowse;
   el('btn-browse-refresh').onclick = () => browse(true);
   el('btn-browse-clear').onclick = () => {
     el('browse-q').value = '';
@@ -1427,11 +1519,9 @@ function wireActions() {
   };
   el('browse-q').oninput = applyBrowseFilter;
   el('browse-q').onkeydown = e => { if (e.key === 'Enter') browse(false); };
-  // The list loads the first time the disclosure is opened, not on page load:
-  // it costs a request, and most sessions do not add a show.
-  el('disc-add').addEventListener('toggle', () => {
-    if (el('disc-add').open) initBrowse();
-  });
+  for (const b of document.querySelectorAll('#browse-title-seg .seg-btn')) {
+    b.onclick = () => setBrowseTitle(b.dataset.title, true);
+  }
   el('btn-adopt-open').onclick = openAdopt;
   el('btn-adopt-close').onclick = closeAdopt;
   el('btn-adopt-lookup').onclick = adoptLookup;

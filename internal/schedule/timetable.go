@@ -2,8 +2,11 @@ package schedule
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
+	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,20 +26,217 @@ import (
 type Entry struct {
 	// Slug is the animeschedule identifier, an exact identity.
 	Slug string `json:"slug"`
-	// Title is the display name from the timetable tile.
+	// Title is the display name from the timetable tile, usually romaji.
 	Title string `json:"title"`
+	// EnglishTitle is the show's English name, empty until the entry has been
+	// enriched from its own page.
+	//
+	// It is not on the tile: the season page lists one name per show. Getting
+	// the English one means fetching the show's page, which is one request per
+	// show — so it is filled in by Enrich rather than by the timetable fetch,
+	// and cached with the snapshot rather than re-fetched on every browse.
+	EnglishTitle string `json:"english_title,omitempty"`
 	// ImageURL is the tile's poster, empty when the tile has none.
 	ImageURL string `json:"image_url,omitempty"`
 	// AirsAt is the next episode's air time, when the tile carries one.
 	AirsAt time.Time `json:"airs_at,omitempty"`
+	// Episodes is the season length, 0 when the page does not say.
+	//
+	// Filled in by Enrich, not by the tile. It is here so the cache can serve
+	// as the fast path when adding a show: without it, adding from the browse
+	// list meant re-fetching the show's page for a number already on disk.
+	Episodes int `json:"episodes,omitempty"`
+	// Status is the airing status: Ongoing, Finished, Upcoming. Empty until
+	// enriched.
+	//
+	// It is what lets the weekly refresh drop shows that have finished, rather
+	// than carrying every show from the start of a cour to the end of it.
+	Status string `json:"status,omitempty"`
+	// Type is the media type: TV, Movie, TV Short, OVA, ONA. Empty until
+	// enriched.
+	//
+	// Needed alongside Episodes because a Movie reports "Episodes: 1", which is
+	// true of a film and wrong as a season length. The cache has to carry the
+	// same distinction the show page does, or adding from browse would cap a
+	// film at one episode.
+	Type string `json:"type,omitempty"`
 }
 
 // Timetable is a cached snapshot of the seasonal schedule.
 type Timetable struct {
 	// Fetched is when this snapshot was taken.
 	Fetched time.Time `json:"fetched"`
+	// Enriched is when English titles were last fetched for these entries.
+	//
+	// Separate from Fetched because the two run on different schedules: the
+	// tile list is cheap (one request) and refreshes daily, while enrichment
+	// is one request per show and runs weekly. Conflating them would either
+	// re-fetch 100+ pages daily or never refresh the list.
+	Enriched time.Time `json:"enriched,omitempty"`
 	// Entries is every show on the timetable, ordered by title.
 	Entries []Entry `json:"entries"`
+}
+
+// BrowseTitle is which name the browse list displays.
+type BrowseTitle string
+
+const (
+	// BrowseRomaji is the schedule's own display name, usually romaji.
+	BrowseRomaji BrowseTitle = "romaji"
+	// BrowseEnglish is the show's English name, when it has one.
+	BrowseEnglish BrowseTitle = "english"
+)
+
+// BrowseTitles lists the choices the settings UI offers.
+var BrowseTitles = []BrowseTitle{BrowseRomaji, BrowseEnglish}
+
+// ParseBrowseTitle reads a browse title preference. Empty means romaji, which
+// is what the timetable has always shown — an unset value must keep working
+// rather than blank the list.
+func ParseBrowseTitle(s string) (BrowseTitle, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "romaji":
+		return BrowseRomaji, nil
+	case "english", "en":
+		return BrowseEnglish, nil
+	}
+	return "", fmt.Errorf("unknown browse title %q (want one of: romaji, english)", s)
+}
+
+// DisplayTitle is the name to show for an entry under a preference.
+//
+// Falls back to the romaji title when the English one is missing or identical:
+// most shows have no separate English name, and showing an empty row to make a
+// point about data completeness is worse than showing the name that exists.
+func (e Entry) DisplayTitle(pref BrowseTitle) string {
+	if pref == BrowseEnglish && e.EnglishTitle != "" {
+		return e.EnglishTitle
+	}
+	return e.Title
+}
+
+// EnrichTTL is how long English titles are reused before being re-fetched.
+//
+// A week: enrichment is one request per show, so it is the expensive half of
+// the cache, and English titles for a season's shows do not change once the
+// season is under way.
+const EnrichTTL = 7 * 24 * time.Hour
+
+// NeedsEnrich reports whether English titles are missing or stale.
+//
+// "Missing" counts, not just the timestamp: a list that was refreshed recently
+// but has entries with no English title is not in a usable state for someone
+// reading it in English, and waiting out the TTL would leave it that way for
+// days. The timestamp alone only says when the last attempt was, not whether it
+// covered everything.
+func (t *Timetable) NeedsEnrich() bool {
+	if time.Since(t.Enriched) >= EnrichTTL {
+		return true
+	}
+	for _, e := range t.Entries {
+		if e.EnglishTitle == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// CarryTitles copies English titles from prev onto any entry with the same
+// slug that does not have one.
+//
+// This is what keeps a list refresh cheap. Most shows persist from one snapshot
+// to the next, so their English titles are already known and re-fetching them
+// would be ~100 requests to learn what is already on disk. Only genuinely new
+// entries need a page fetch, which is usually none at all mid-season.
+//
+// Returns how many entries still need one.
+func (t *Timetable) CarryTitles(prev *Timetable) int {
+	if prev == nil {
+		return len(t.Entries)
+	}
+	known := map[string]string{}
+	for _, e := range prev.Entries {
+		if e.EnglishTitle != "" {
+			known[e.Slug] = e.EnglishTitle
+		}
+	}
+	missing := 0
+	for i := range t.Entries {
+		if t.Entries[i].EnglishTitle != "" {
+			continue
+		}
+		if n, ok := known[t.Entries[i].Slug]; ok {
+			t.Entries[i].EnglishTitle = n
+			continue
+		}
+		missing++
+	}
+	return missing
+}
+
+// Enrich fetches each entry's own page to fill in its English title.
+//
+// Only entries without one are fetched, so a refresh that carried titles
+// forward costs nothing. Call CarryTitles first.
+//
+// Failures are per-entry and non-fatal: one unreachable page leaves that
+// entry's EnglishTitle empty rather than failing the whole run, so a single
+// dead page cannot cost the season its English names. The caller falls back to
+// the romaji title for entries with no English one.
+//
+// client may be nil. Concurrency is bounded because the list is ~100 shows and
+// an unbounded fan-out would look like a scraper to the site — the same
+// politeness the indexer config applies to Nyaa.
+func (t *Timetable) Enrich(client *http.Client) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	// An entry is pending when it is missing anything the show page supplies,
+	// not just the English title. Carrying titles forward by slug means an
+	// entry can have its name but no season length, and that is still not a
+	// complete record.
+	var pending []*Entry
+	for i := range t.Entries {
+		e := &t.Entries[i]
+		if e.EnglishTitle == "" || e.Episodes == 0 || e.Status == "" {
+			pending = append(pending, e)
+		}
+	}
+	if len(pending) == 0 {
+		t.Enriched = time.Now().UTC()
+		return
+	}
+
+	const workers = 4
+	slugs := make(chan *Entry)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for e := range slugs {
+				sh, err := FetchShow(client, e.Slug)
+				if err != nil {
+					continue
+				}
+				for _, n := range sh.Names["English"] {
+					if n = strings.TrimSpace(n); n != "" {
+						e.EnglishTitle = n
+						break
+					}
+				}
+				e.Episodes = sh.Episodes
+				e.Status = sh.Status
+				e.Type = sh.Type
+			}
+		}()
+	}
+	for _, e := range pending {
+		slugs <- e
+	}
+	close(slugs)
+	wg.Wait()
+	t.Enriched = time.Now().UTC()
 }
 
 // TimetableURL is the current season's show list.
@@ -243,31 +443,72 @@ func NewCache(dir string, ttl time.Duration) (*Cache, error) {
 // not more than daily, and a stale list is still a usable browse list.
 const DefaultTimetableTTL = 24 * time.Hour
 
-// Get returns the cached timetable, refreshing it when stale or missing.
+// Get returns the cached timetable. It never fetches.
 //
-// A refresh failure falls back to the stale snapshot rather than erroring: a
-// cached list from yesterday is far more useful than an empty one, and the
-// site being down must not break browsing.
-func (c *Cache) Get(client *http.Client) (*Timetable, error) {
+// The cache is written by a background job on its own schedule, so serving the
+// browse list is a disk read and nothing else. That is the same shape as the
+// tracked shows: a scheduled job writes, the UI only reads.
+//
+// Doing the fetch here instead would put ~110 requests in the request path the
+// first time the list went stale, and the modal would sit empty while they ran.
+func (c *Cache) Get() (*Timetable, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.load()
+}
+
+// Update refreshes the snapshot and makes sure it is in a usable state.
+//
+// This is the write half, called by the background job and by the UI's Refresh
+// button. It is deliberately not called by Get: the two halves run on
+// different schedules, and conflating them is what put network I/O in the
+// request path.
+//
+// A refresh always leaves the list enriched, not merely fetched. Deferring
+// enrichment to the next pass was cheaper in requests but wrong: the list sat
+// without English titles for up to a week after every refresh, which is the
+// one thing the feature exists to prevent.
+//
+// The cost is kept down by carrying titles forward by slug rather than
+// re-fetching them — see CarryTitles. Mid-season a refresh usually adds no new
+// shows, so it costs one request for the tiles and nothing more.
+//
+// A failed fetch leaves the existing snapshot untouched rather than clearing
+// it — a stale list is more useful than an empty one, and the site being down
+// must not cost the user their browse list.
+func (c *Cache) Update(client *http.Client) (*Timetable, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if t, err := c.load(); err == nil && t != nil && time.Since(t.Fetched) < c.ttl {
-		return t, nil
-	}
-	fresh, err := FetchTimetable(client)
-	if err != nil {
-		// Fall back to whatever is on disk, however old.
-		if t, lerr := c.load(); lerr == nil && t != nil {
-			return t, nil
+	t, _ := c.load()
+	listStale := t == nil || time.Since(t.Fetched) >= c.ttl
+
+	if listStale {
+		fresh, err := FetchTimetable(client)
+		if err != nil {
+			return t, err
 		}
-		return nil, err
+		// Carry the known titles onto the new entries before enriching, so
+		// only genuinely new shows cost a request.
+		fresh.CarryTitles(t)
+		t = fresh
 	}
-	if err := c.save(fresh); err != nil {
-		// A failed save is not fatal: the snapshot is still usable in memory.
-		return fresh, nil
+
+	if t != nil && t.NeedsEnrich() {
+		t.Enrich(client)
 	}
-	return fresh, nil
+	// Pruned after enrichment, since "finished" comes from the show page and
+	// is not on the tile. A show that ended mid-cour otherwise lingers in the
+	// browse list until the season rolls over.
+	if t != nil {
+		if dropped := t.DropFinished(); dropped > 0 {
+			log.Printf("timetable: dropped %d finished show(s)", dropped)
+		}
+	}
+	if t != nil {
+		_ = c.save(t)
+	}
+	return t, nil
 }
 
 // Seed writes a snapshot into the cache without fetching it.
@@ -281,22 +522,39 @@ func (c *Cache) Seed(t *Timetable) error {
 	return c.save(t)
 }
 
-// Refresh forces a re-fetch, ignoring the TTL. Used by the UI's refresh button.
+// Refresh forces a re-fetch and re-enrichment, ignoring both TTLs. Used by the
+// UI's refresh button, for when the user wants the list now rather than at the
+// next scheduled pass.
+//
+// Titles are still carried forward, so a manual refresh mid-season costs one
+// request rather than ~100.
 func (c *Cache) Refresh(client *http.Client) (*Timetable, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	prev, _ := c.load()
 	fresh, err := FetchTimetable(client)
 	if err != nil {
 		return nil, err
 	}
+	fresh.CarryTitles(prev)
+	fresh.Enrich(client)
 	_ = c.save(fresh)
 	return fresh, nil
 }
 
+// load reads the snapshot from disk.
+//
+// A missing file is not an error: it means the background job has not run yet,
+// which is a normal state for a container that has only just started. Only a
+// file that exists but cannot be parsed is an error — that is corruption, and
+// silently serving an empty list would hide it.
 func (c *Cache) load() (*Timetable, error) {
 	b, err := os.ReadFile(c.path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var t Timetable
@@ -320,7 +578,52 @@ func (c *Cache) save(t *Timetable) error {
 	return os.Rename(tmp, c.path)
 }
 
+// Lookup finds one entry by slug. Returns nil when the cache does not have it.
+//
+// This is the fast path for adding a show: everything needed to create the
+// record is already on disk, so adding from the browse list costs no network
+// I/O and works when animeschedule is unreachable. A miss is not an error — it
+// means the show is not on this season's list, and the caller falls back to
+// fetching its page.
+func (t *Timetable) Lookup(slug string) *Entry {
+	for i := range t.Entries {
+		if t.Entries[i].Slug == slug {
+			return &t.Entries[i]
+		}
+	}
+	return nil
+}
+
+// DropFinished removes entries whose season has ended.
+//
+// The season page lists a cour's shows, and a show that finished mid-cour stays
+// on it until the season rolls over. Without this the browse list accumulates
+// every show from the start of a cour, most of which can no longer be added to
+// anything useful.
+//
+// Only an explicit "Finished" status is trusted. Absence from the page is not
+// evidence of anything — a transient parse failure or a partial fetch would
+// otherwise delete the whole list.
+func (t *Timetable) DropFinished() int {
+	kept := t.Entries[:0]
+	dropped := 0
+	for _, e := range t.Entries {
+		if strings.EqualFold(e.Status, "Finished") {
+			dropped++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	t.Entries = kept
+	return dropped
+}
+
 // Search filters the timetable by a case-insensitive substring.
+//
+// Matches the romaji title, the English title and the slug, regardless of
+// which one the list is displaying. The display preference is about what is on
+// screen, not what is findable: switching to English must not hide a show the
+// user could have found by its romaji name, and vice versa.
 //
 // Filtering happens here rather than in the UI so the same search works from
 // the command line, and so an empty query means "everything" in both places.
@@ -332,6 +635,7 @@ func (t *Timetable) Search(q string) []Entry {
 	var out []Entry
 	for _, e := range t.Entries {
 		if strings.Contains(strings.ToLower(e.Title), q) ||
+			strings.Contains(strings.ToLower(e.EnglishTitle), q) ||
 			strings.Contains(strings.ToLower(e.Slug), q) {
 			out = append(out, e)
 		}

@@ -141,7 +141,8 @@ func TestScriptDefinesRenderEntryPoints(t *testing.T) {
 
 	want := []string{
 		"loadShows", "loadSummary", "loadSettings",
-		"browse", "applyBrowseFilter", "browseRow", "initBrowse",
+		"browse", "applyBrowseFilter", "browseRow",
+		"openBrowse", "closeBrowse", "setBrowseTitle",
 		"openAdopt", "closeAdopt", "adoptLookup", "adoptConfirm",
 		"openSettings", "closeSettings",
 		"addShow", "addFromBrowse", "watchedUpTo", "unlatch", "removeShow",

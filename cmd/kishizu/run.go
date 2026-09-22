@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -43,9 +44,15 @@ func alert(n notify.Notifier, title, message string, priority notify.Priority) {
 // decision with its reason, so the behaviour can be reviewed before anything
 // downloads.
 //
+// Two scheduled jobs run alongside the poller, each writing to its own store
+// so the UI only ever reads:
+//
+//   - daily:   air times for the tracked shows, from each show's own page
+//   - weekly:  the seasonal browse list, plus each entry's English title
+//
 // The loop exits when ctx is cancelled, so SIGINT/SIGTERM stop the pollers,
 // the sweepers and the schedule refresh together with the HTTP server.
-func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl download.Downloader, scheme *naming.Scheme, cfg *config.File, n notify.Notifier) {
+func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl download.Downloader, scheme *naming.Scheme, cfg *config.File, n notify.Notifier, ttCache *schedule.Cache) {
 	s := cfg.Server
 	interval, err := time.ParseDuration(s.Interval)
 	if err != nil {
@@ -170,6 +177,21 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	daily := time.NewTicker(24 * time.Hour)
 	defer daily.Stop()
 
+	// How many consecutive daily checks must find a show's page missing before
+	// it is treated as finished.
+	//
+	// One 404 is not proof of anything: pages vanish transiently during a site
+	// update, and a single bad response would otherwise mark a show complete
+	// and stop it being hunted. Three consecutive days is a pattern rather than
+	// a blip, and the cost of waiting is two days of polling a show that has
+	// ended — which is harmless, since nothing is due for it anyway.
+	const missingThreshold = 3
+
+	// Consecutive not-found sightings per show, across runs. Held outside the
+	// closure so it survives between refreshes; a counter that reset each pass
+	// could never reach the threshold.
+	misses := map[int64]int{}
+
 	refreshSchedule := func() {
 		shows, err := st.ListShows()
 		if err != nil {
@@ -182,9 +204,28 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			}
 			info, err := schedule.FetchShow(nil, sh.Slug)
 			if err != nil {
+				// A 404 is evidence the page is gone; a timeout or a 5xx is the
+				// absence of evidence. Only the first says anything about the
+				// show, and even then one observation is not enough to claim it
+				// has finished — a page can 404 transiently during a site
+				// update. Count the sightings and act on the third.
+				if errors.Is(err, schedule.ErrNotFound) {
+					misses[sh.ID]++
+					log.Printf("schedule refresh: %s: page not found (%d of %d)",
+						sh.CanonicalName, misses[sh.ID], missingThreshold)
+					if misses[sh.ID] >= missingThreshold {
+						log.Printf("schedule refresh: %s: page gone %d days running, treating as finished",
+							sh.CanonicalName, misses[sh.ID])
+						finished++
+					}
+					continue
+				}
 				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 				continue
 			}
+			// The page is back, so whatever the earlier misses meant, it was
+			// not permanent.
+			delete(misses, sh.ID)
 			if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
 					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
@@ -240,6 +281,42 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	// Refresh once at startup so the windows are current.
 	refreshSchedule()
 
+	// The seasonal browse list, on its own weekly schedule.
+	//
+	// Separate from the daily job above because the two have different costs
+	// and different cadences: this one is a whole season (~110 shows) rather
+	// than the handful being tracked, and English titles do not change once a
+	// season is under way.
+	//
+	// It writes to the cache and the browse modal only reads, so the list is
+	// available when animeschedule is unreachable and opening browse costs no
+	// network I/O.
+	weekly := time.NewTicker(schedule.EnrichTTL)
+	defer weekly.Stop()
+
+	refreshTimetable := func() {
+		if ttCache == nil {
+			return
+		}
+		tt, err := ttCache.Update(nil)
+		if err != nil {
+			// Non-fatal: the existing snapshot stays, and browsing keeps
+			// working from it. Logged because a silent failure here would
+			// look like a list that simply never changes.
+			log.Printf("timetable: refresh failed, keeping the cached list: %v", err)
+			return
+		}
+		log.Printf("timetable: %d shows, %d with an English title",
+			len(tt.Entries), countEnglish(tt))
+	}
+
+	// Warmed at startup, so a fresh container has a browse list immediately
+	// rather than an empty panel until the first weekly pass. This is the one
+	// case that costs the full ~110 requests, because there is nothing on disk
+	// to carry titles from — every later refresh reuses them by slug and costs
+	// one request unless the season actually gained shows.
+	go refreshTimetable()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -249,6 +326,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			poll()
 		case <-daily.C:
 			refreshSchedule()
+		case <-weekly.C:
+			refreshTimetable()
 		case <-sweep.C:
 			// Finalise finished downloads: rename into the library layout,
 			// record file_path, advance the latch. This is what makes the
@@ -273,4 +352,20 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			}
 		}
 	}
+}
+
+// countEnglish is how many entries carry an English title.
+//
+// Reported after a refresh so the log says whether enrichment actually landed.
+// A refresh that returns 110 shows and 0 English titles is a different problem
+// from one that returns 110 and 110, and neither is visible from the count
+// alone.
+func countEnglish(tt *schedule.Timetable) int {
+	n := 0
+	for _, e := range tt.Entries {
+		if e.EnglishTitle != "" {
+			n++
+		}
+	}
+	return n
 }

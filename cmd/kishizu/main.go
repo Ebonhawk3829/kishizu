@@ -214,7 +214,7 @@ func runServe(st *store.Store, cfg *config.File, f *flags) {
 	// downloader until -dry-run=false. The user switches it on deliberately.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go runLoop(ctx, st, artCache, dl, scheme, cfg, n)
+	go runLoop(ctx, st, artCache, dl, scheme, cfg, n, ttCache)
 	if err := srv.ListenAndServe(ctx, f.serve); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 		os.Exit(1)

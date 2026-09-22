@@ -235,9 +235,14 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // handleTimetable serves the seasonal timetable for the browse list.
 //
-// ?q= filters by substring, ?refresh=1 forces a re-fetch. Filtering happens
-// server-side so the same list works from the command line, and so the client
-// does not have to hold the whole season to search it.
+// Reads the cache and nothing else. The snapshot is written by a weekly
+// background job, so opening browse costs no network I/O and the list is
+// available when animeschedule is unreachable. ?refresh=1 is the manual
+// exception, for when the user wants it now.
+//
+// ?q= filters by substring. Filtering happens server-side so the same list
+// works from the command line, and so the client does not have to hold the
+// whole season to search it.
 //
 // A show already being tracked is marked, so the browse list does not offer
 // something the user is already watching.
@@ -254,10 +259,15 @@ func (s *Server) handleTimetable(w http.ResponseWriter, r *http.Request) {
 	if force {
 		tt, err = s.timetable.Refresh(nil)
 	} else {
-		tt, err = s.timetable.Get(nil)
+		tt, err = s.timetable.Get()
 	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	if tt == nil {
+		writeErr(w, http.StatusServiceUnavailable,
+			fmt.Errorf("the season list has not been fetched yet"))
 		return
 	}
 
@@ -271,21 +281,37 @@ func (s *Server) handleTimetable(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Which name the list displays. The filter matches both regardless, so
+	// this never changes what is findable — only what is on screen.
+	pref := schedule.BrowseRomaji
+	if s.configPath != "" {
+		if cfg, cerr := config.Load(s.configPath); cerr == nil {
+			if p, perr := schedule.ParseBrowseTitle(cfg.Server.Browse.Title); perr == nil {
+				pref = p
+			}
+		}
+	}
+
 	entries := tt.Search(r.URL.Query().Get("q"))
 	out := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, map[string]any{
-			"slug":    e.Slug,
-			"title":   e.Title,
-			"image":   e.ImageURL,
-			"airs_at": airsAtString(e.AirsAt),
-			"tracked": tracked[e.Slug],
+			"slug":          e.Slug,
+			"title":         e.DisplayTitle(pref),
+			"romaji":        e.Title,
+			"english":       e.EnglishTitle,
+			"image":         e.ImageURL,
+			"airs_at":       airsAtString(e.AirsAt),
+			"tracked":       tracked[e.Slug],
+			"english_known": e.EnglishTitle != "",
 		})
 	}
 	writeJSON(w, map[string]any{
-		"fetched": tt.Fetched.Format(time.RFC3339),
-		"count":   len(out),
-		"entries": out,
+		"fetched":  tt.Fetched.Format(time.RFC3339),
+		"enriched": tt.Enriched.Format(time.RFC3339),
+		"title":    string(pref),
+		"count":    len(out),
+		"entries":  out,
 	})
 }
 
@@ -442,6 +468,9 @@ func validateServer(s *config.Server) error {
 			return err
 		}
 	}
+	if _, err := schedule.ParseBrowseTitle(s.Browse.Title); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -488,10 +517,14 @@ func configView(s *config.Server) map[string]any {
 			"pattern":       s.Naming.Pattern,
 			"season_folder": boolVal(s.Naming.SeasonFolder),
 		},
+		"browse": map[string]any{
+			"title": s.Browse.Title,
+		},
 		"choices": map[string]any{
-			"downloaders": download.Kinds,
-			"notifiers":   notify.Kinds,
-			"presets":     naming.Presets,
+			"downloaders":   download.Kinds,
+			"notifiers":     notify.Kinds,
+			"presets":       naming.Presets,
+			"browse_titles": schedule.BrowseTitles,
 		},
 	}
 	return view
@@ -1151,8 +1184,37 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 // refresh matches exactly; enrichment fills in season length, aliases and
 // art. Best-effort throughout — a partial record is still a usable show.
 func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode int) (*store.Show, error) {
+	// The cache is the fast path: the browse list already holds the title, the
+	// English name, the season length and the art, so adding from browse costs
+	// no network I/O and works when animeschedule is unreachable.
+	if e := s.lookupTimetable(slug); e != nil {
+		name := e.Title
+		if name == "" {
+			name = slug
+		}
+		sh, err := s.st.CreateShow(name, aliases, maxEpisode)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.st.SetSlug(sh.ID, slug); err != nil {
+			log.Printf("add-show: set slug %s: %v", slug, err)
+		} else {
+			sh.Slug = slug
+		}
+		s.applyTimetableEntry(sh, e)
+		return sh, nil
+	}
+
+	// Not on this season's list. That is not an error on its own — the cache
+	// only covers the current cour, and a show can be added by URL from any
+	// season — so fall back to the page.
 	info, err := schedule.FetchShow(nil, slug)
 	if err != nil {
+		// A 404 is evidence the slug is not a show; anything else is the
+		// absence of evidence. Only the first is worth reporting as a finding.
+		if errors.Is(err, schedule.ErrNotFound) {
+			return nil, fmt.Errorf("no show at that URL: %w", err)
+		}
 		return nil, fmt.Errorf("could not read that show's page: %w", err)
 	}
 	name := info.Title
@@ -1170,6 +1232,47 @@ func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode in
 	}
 	s.enrichFromSchedule(sh)
 	return sh, nil
+}
+
+// lookupTimetable finds a slug in the cached season list. Nil when browsing is
+// not configured, or the cache has not been populated yet.
+func (s *Server) lookupTimetable(slug string) *schedule.Entry {
+	if s.timetable == nil {
+		return nil
+	}
+	tt, err := s.timetable.Get()
+	if err != nil || tt == nil {
+		return nil
+	}
+	return tt.Lookup(slug)
+}
+
+// applyTimetableEntry fills a new show in from its cached timetable entry.
+//
+// The cache carries the same fields the show page does, so this is the
+// offline equivalent of enrichFromSchedule. Season length uses the same
+// SeasonLength rule: a Movie reports "Episodes: 1", and capping a season at
+// one episode would mark it complete after a single download.
+func (s *Server) applyTimetableEntry(sh *store.Show, e *schedule.Entry) {
+	if e.Episodes > 0 && e.Type != "Movie" && e.Episodes != sh.MaxEpisode {
+		if err := s.st.SetMaxEpisode(sh.ID, e.Episodes); err != nil {
+			log.Printf("add-show: set max %s: %v", e.Slug, err)
+		} else {
+			sh.MaxEpisode = e.Episodes
+		}
+	}
+	if e.EnglishTitle != "" {
+		if err := s.st.AddAliasFrom(sh.ID, e.EnglishTitle, "schedule"); err != nil {
+			log.Printf("add-show: add english alias %s: %v", e.Slug, err)
+		}
+	}
+	if e.ImageURL != "" {
+		if err := s.st.SetImageURL(sh.ID, e.ImageURL); err != nil {
+			log.Printf("add-show: set image %s: %v", e.Slug, err)
+		} else {
+			sh.ImageURL = e.ImageURL
+		}
+	}
 }
 
 // enrichFromSchedule fills a show in from its animeschedule page: the season

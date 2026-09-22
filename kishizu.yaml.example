@@ -100,6 +100,13 @@ server:
     # File into a Season NN folder. Implied by sonarr and plex.
     season_folder: false
 
+  browse:
+    # Which name the browse list shows: romaji or english.
+    # Display only — the filter always matches both, so switching this never
+    # hides a show you could have found. Shows with no separate English name
+    # fall back to the romaji one.
+    title: romaji
+
 # ── the show list ──────────────────────────────────────────────────────────
 # Seeds a fresh database. In practice you will add shows from the web UI by
 # browsing the season or pasting an animeschedule.net URL, which fills in the

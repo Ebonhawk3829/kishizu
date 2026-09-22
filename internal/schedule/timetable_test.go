@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,6 +145,179 @@ func TestTimetableSearch(t *testing.T) {
 	}
 }
 
+// TestGetNeverFetches: serving the browse list must be a disk read and nothing
+// else. The snapshot is written by a background job on its own schedule, so a
+// request that reaches the network would put ~110 requests in the request path
+// and leave the modal empty while they ran.
+func TestGetNeverFetches(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(sampleTimetable))
+	}))
+	defer srv.Close()
+	defer PinTimetableURL(srv.URL)()
+
+	dir := t.TempDir()
+	c, err := NewCache(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing cached yet, and Get must not go and get it: an empty list is the
+	// honest answer until the background job has run.
+	tt, err := c.Get()
+	if err != nil {
+		t.Fatalf("Get on an empty cache: %v", err)
+	}
+	if tt != nil {
+		t.Errorf("Get on an empty cache = %d entries, want nil", len(tt.Entries))
+	}
+	if calls != 0 {
+		t.Errorf("fetches = %d, want 0 (Get must never fetch)", calls)
+	}
+}
+
+// TestUpdateLeavesListEnriched: a refresh must leave the list in a usable
+// state, not merely fetched.
+//
+// This is the bug the deferral caused: after a list refresh the entries had no
+// English titles, and because Enriched was recent, NeedsEnrich() said no — so
+// the list stayed unenriched for up to a week. Someone reading it in English
+// saw romaji for days after every refresh, which is the one thing the feature
+// exists to prevent.
+func TestUpdateLeavesListEnriched(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(sampleTimetable))
+	}))
+	defer srv.Close()
+	defer PinTimetableURL(srv.URL)()
+
+	dir := t.TempDir()
+	c, err := NewCache(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tt, err := c.Update(nil)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(tt.Entries) == 0 {
+		t.Fatal("no entries")
+	}
+	// Enrichment must have been attempted in this pass, not deferred to a
+	// later one. Whether it succeeded depends on the upstream — this stub
+	// serves the timetable page for show pages too, so no English names come
+	// back — but the attempt is what the deferral bug removed.
+	if tt.Enriched.IsZero() {
+		t.Error("Enriched is zero: enrichment was deferred, want it attempted in this pass")
+	}
+	// And it must not be skipped on the next pass either: a list with gaps
+	// still needs enriching however recently it was tried.
+	if !tt.NeedsEnrich() {
+		t.Error("NeedsEnrich = false with entries still missing titles, want true")
+	}
+}
+
+// TestCarryTitlesReusesKnownNames: a refresh must not re-fetch titles it
+// already knows. Most shows persist between snapshots, so carrying them
+// forward by slug is what keeps a mid-season refresh to one request.
+func TestCarryTitlesReusesKnownNames(t *testing.T) {
+	prev := &Timetable{Entries: []Entry{
+		{Slug: "a", Title: "A Romaji", EnglishTitle: "A English"},
+		{Slug: "b", Title: "B Romaji", EnglishTitle: "B English"},
+	}}
+	next := &Timetable{Entries: []Entry{
+		{Slug: "a", Title: "A Romaji"},
+		{Slug: "b", Title: "B Romaji"},
+		{Slug: "c", Title: "C Romaji"}, // new this season
+	}}
+
+	missing := next.CarryTitles(prev)
+	if missing != 1 {
+		t.Errorf("missing = %d, want 1 (only the new show needs a fetch)", missing)
+	}
+	if next.Entries[0].EnglishTitle != "A English" {
+		t.Errorf("a = %q, want the carried English title", next.Entries[0].EnglishTitle)
+	}
+	if next.Entries[2].EnglishTitle != "" {
+		t.Errorf("c = %q, want empty (it is new)", next.Entries[2].EnglishTitle)
+	}
+	// A list with one gap still needs enriching, even though the rest are done.
+	if !next.NeedsEnrich() {
+		t.Error("NeedsEnrich = false with an entry still missing a title, want true")
+	}
+}
+
+// TestFetchShowDistinguishesNotFound: a 404 is evidence the page is gone; a
+// 500 or a timeout is the absence of evidence. Callers use the difference to
+// decide whether a failed lookup is a finding or a retry, so conflating them
+// would let a transient outage be reported as a show having finished.
+func TestFetchShowDistinguishesNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	defer PinShowURL(srv.URL)()
+
+	_, err := FetchShow(srv.Client(), "gone-show")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("404: err = %v, want ErrNotFound", err)
+	}
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer down.Close()
+	defer PinShowURL(down.URL)()
+
+	_, err = FetchShow(down.Client(), "some-show")
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("500: err = %v, must NOT be ErrNotFound (the site is up)", err)
+	}
+}
+
+// TestDropFinishedOnlyTrustsExplicitStatus: absence from the page is not
+// evidence that a show finished. Only an explicit "Finished" status is, so a
+// partial fetch or a parse failure cannot delete the whole browse list.
+func TestDropFinishedOnlyTrustsExplicitStatus(t *testing.T) {
+	tt := &Timetable{Entries: []Entry{
+		{Slug: "a", Status: "Ongoing"},
+		{Slug: "b", Status: "Finished"},
+		{Slug: "c", Status: ""}, // not enriched yet
+		{Slug: "d", Status: "Upcoming"},
+	}}
+	dropped := tt.DropFinished()
+	if dropped != 1 {
+		t.Errorf("dropped = %d, want 1", dropped)
+	}
+	slugs := []string{}
+	for _, e := range tt.Entries {
+		slugs = append(slugs, e.Slug)
+	}
+	// c has no status, and an unknown status must keep the entry: dropping it
+	// would mean a failed enrichment silently emptied the list.
+	if len(slugs) != 3 || slugs[0] != "a" || slugs[1] != "c" || slugs[2] != "d" {
+		t.Errorf("kept %v, want [a c d]", slugs)
+	}
+}
+
+// TestLookupFindsBySlug: the cache is the fast path for adding a show, so a
+// hit must return the entry and a miss must be nil rather than an error — a
+// miss just means the show is not on this season's list.
+func TestLookupFindsBySlug(t *testing.T) {
+	tt := &Timetable{Entries: []Entry{
+		{Slug: "a", Title: "A", Episodes: 12, Status: "Ongoing"},
+	}}
+	if e := tt.Lookup("a"); e == nil || e.Episodes != 12 {
+		t.Errorf("Lookup(a) = %+v, want the entry with 12 episodes", e)
+	}
+	if e := tt.Lookup("nope"); e != nil {
+		t.Errorf("Lookup(nope) = %+v, want nil", e)
+	}
+}
+
 // TestCacheReusesFreshSnapshot: the point of the cache is one request for the
 // whole season instead of one per show.
 func TestCacheReusesFreshSnapshot(t *testing.T) {
@@ -161,14 +335,26 @@ func TestCacheReusesFreshSnapshot(t *testing.T) {
 	}
 	defer PinTimetableURL(srv.URL)()
 
+	// Update is the write half: it fetches once, then no more while fresh.
 	for i := 0; i < 3; i++ {
-		if _, err := c.Get(nil); err != nil {
-			t.Fatalf("Get: %v", err)
+		if _, err := c.Update(nil); err != nil {
+			t.Fatalf("Update: %v", err)
 		}
 	}
 	// One fetch for the whole season, not one per call.
 	if calls != 1 {
 		t.Errorf("fetches = %d, want 1 (the rest served from cache)", calls)
+	}
+
+	// Get is the read half: it must not fetch at all, so serving the browse
+	// list costs no network I/O.
+	for i := 0; i < 3; i++ {
+		if _, err := c.Get(); err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("fetches = %d after 3 Gets, want still 1 (Get never fetches)", calls)
 	}
 }
 
@@ -245,9 +431,14 @@ func TestCacheFallsBackToStale(t *testing.T) {
 	defer srv.Close()
 	defer PinTimetableURL(srv.URL)()
 
-	got, err := c.Get(srv.Client())
+	// A failed refresh must leave the existing snapshot in place rather than
+	// clearing it: a stale list is more useful than an empty one.
+	if _, err := c.Update(srv.Client()); err == nil {
+		t.Fatal("expected an error when the fetch fails")
+	}
+	got, err := c.Get()
 	if err != nil {
-		t.Fatalf("Get must fall back to the stale snapshot, got: %v", err)
+		t.Fatalf("Get must still serve the stale snapshot, got: %v", err)
 	}
 	if len(got.Entries) != 1 || got.Entries[0].Slug != "old" {
 		t.Errorf("got %+v, want the stale entry", got.Entries)

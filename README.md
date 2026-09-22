@@ -23,6 +23,20 @@ files it in your library, and deletes it once you have watched it.
 Air times come from animeschedule.net. If that site goes down, kishizu keeps
 working with the air times it already has.
 
+Two background jobs keep that current, each writing to its own store so the UI
+only ever reads: air times for your tracked shows, daily; the seasonal browse
+list, weekly.
+
+The weekly job is the only thing that talks to animeschedule about shows you
+are not tracking. It pulls the season, drops shows that have finished, and fills
+in each entry's English title, season length and art. Adding a show then copies
+from that cache rather than fetching the page, so it is instant and works when
+the site is down. A show not on the current season falls back to its own page.
+
+A page that 404s is not treated as finished on the strength of one sighting —
+pages vanish transiently during a site update. Three consecutive daily misses
+is the threshold, and a page that comes back clears the count.
+
 | Stage | What happens |
 |---|---|
 | **Declare** | Add shows by browsing the season, pasting an animeschedule.net URL, or listing them in the config file |
@@ -225,11 +239,22 @@ watch signal would never match.
 
 Everything lives under **Add a show**.
 
-**Browse the season.** The cached timetable is right there in the panel —
+**Browse the season.** Open **Browse this season** for the cached timetable —
 every show on the current season, with the filter narrowing it. Pick one and
 the slug is an exact identity, so the season length, cover art and every
 alternative name are filled in for you. The list loads the first time you open
 the panel, not on page load.
+
+The list shows either the romaji or the English name: switch with the toggle in
+the panel, or set `browse.title` in the config file. The filter matches both
+either way, so switching never hides a show you could have found. Shows with no
+separate English name fall back to the romaji one.
+
+Browsing reads from a cache on disk and never touches the network, so the list
+is there even when animeschedule is down. A background job refreshes it weekly
+and fills in the English titles; a fresh container fetches once at startup, so
+the panel is never empty. **Refresh** in the panel forces it now.
+
 
 **Paste a URL.** An animeschedule.net URL (or a bare slug) does the same thing:
 

@@ -70,6 +70,8 @@ type Server struct {
 	Quality QualityConfig `yaml:"quality"`
 	// Naming is how files are named in the library.
 	Naming NamingConfig `yaml:"naming"`
+	// Browse is how the seasonal browse list is presented.
+	Browse BrowseConfig `yaml:"browse"`
 }
 
 // DownloaderConfig selects and configures the torrent client.
@@ -133,6 +135,16 @@ type QualityConfig struct {
 	PenaltyUncensored *int `yaml:"penalty_uncensored"`
 	// RejectBatch excludes batches and season packs.
 	RejectBatch *bool `yaml:"reject_batch"`
+}
+
+// BrowseConfig is how the seasonal browse list is presented.
+type BrowseConfig struct {
+	// Title is which name the browse list shows: "romaji" or "english".
+	//
+	// Display only. The filter always matches both, so switching this never
+	// hides a show the user could have found — it changes which of the two
+	// names is on screen, not what is searchable.
+	Title string `yaml:"title"`
 }
 
 // NamingConfig is how files are named in the library.
@@ -324,6 +336,9 @@ func mergeServer(dst, src *Server) {
 	if src.Naming.SeasonFolder != nil {
 		dst.Naming.SeasonFolder = src.Naming.SeasonFolder
 	}
+	if src.Browse.Title != "" {
+		dst.Browse.Title = src.Browse.Title
+	}
 }
 
 // DefaultServer is the configuration kishizu runs with when nothing is set.
@@ -364,6 +379,9 @@ func DefaultServer() *Server {
 		Naming: NamingConfig{
 			Preset:       "kishizu",
 			SeasonFolder: &seasonFolder,
+		},
+		Browse: BrowseConfig{
+			Title: "romaji",
 		},
 	}
 }

@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,12 +141,37 @@ func hasJapanese(s string) bool {
 	return false
 }
 
-const URL = "https://animeschedule.net"
+// URL is the site root. A variable rather than a constant so tests can point
+// it at a stub, the same way PinTimetableURL does for the season list.
+var URL = "https://animeschedule.net"
 
 // ShowURL is the canonical page for a slug.
 func ShowURL(slug string) string { return URL + "/anime/" + slug }
 
+// PinShowURL fixes the site root, for tests. It returns a function that
+// restores the real one.
+func PinShowURL(u string) func() {
+	old := URL
+	URL = u
+	return func() { URL = old }
+}
+
 // FetchShow retrieves one show's page by slug.
+// ErrNotFound is a show page that does not exist.
+//
+// Distinct from a transport failure, because the two mean opposite things. A
+// 404 is evidence: the site is up and says this slug is not a show. A timeout
+// or a 500 is the absence of evidence — the site may be down, the network may
+// be broken, and nothing about the show has been established either way.
+//
+// Callers use this to decide whether a failed lookup is a finding or a retry.
+var ErrNotFound = errors.New("no such show page")
+
+// FetchShow retrieves one show's page by slug.
+//
+// Returns ErrNotFound (wrapped) when the page is genuinely absent, so callers
+// can tell "this show is not there" from "we could not check". Conflating them
+// is how a transient outage gets reported as a show having finished airing.
 func FetchShow(client *http.Client, slug string) (*Show, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -155,6 +181,9 @@ func FetchShow(client *http.Client, slug string) (*Show, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w: %q", ErrNotFound, slug)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("animeschedule returned %d for %q", resp.StatusCode, slug)
 	}
