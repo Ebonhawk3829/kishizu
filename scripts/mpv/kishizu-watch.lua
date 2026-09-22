@@ -42,6 +42,12 @@ local o = {
 }
 options.read_options(o)
 
+-- Announce the effective config on every mpv start: if the script is stale,
+-- in the wrong directory, or pointing at the wrong host, the first line of
+-- the console says so instead of leaving silence that looks like a bug.
+mp.msg.info('kishizu-watch loaded: endpoint=' .. o.endpoint .. ' root=' ..
+            (o.root == '' and '(none)' or o.root))
+
 -- norm folds a path for comparison: backslashes to forward slashes, and
 -- lowercased, because Windows is case-insensitive and mpv may hand back
 -- either separator.
@@ -146,6 +152,9 @@ local function flush_spool()
 end
 
 local function check_position(_, pos)
+    -- time-pos is unavailable before playback starts and at file transitions;
+    -- the observer still fires then, with nil.
+    if not pos then return end
     local path = mp.get_property('path')
     if not path or not under_root(path) then return end
     if pending[path] then return end
