@@ -76,9 +76,10 @@ func TestParseChineseEpisodeNumber(t *testing.T) {
 	}
 }
 
-// TestParseCodec is the regression test for a bug where "H.264" and "H.265"
-// were not recognised: the original pattern used \b before "h", which fails
-// because the following character is a dot, not a word character.
+// TestParseCodec pins codec recognition across spellings: "H.264"/"H.265"
+// (dot-separated) as well as x264/x265/h264. The boundary matters: a pattern
+// using \b before "h" fails here, because the following character is a dot,
+// not a word character.
 func TestParseCodec(t *testing.T) {
 	cases := map[string]string{
 		"[ToonsHub] Show S01E09 1080p CR WEB-DL AAC2.0 H.264": "h.264",
@@ -197,8 +198,8 @@ func TestBareNumberAllowsVersionSuffix(t *testing.T) {
 	}
 }
 
-// TestSanitise: names must be safe on both Linux and Windows, since Syncthing
-// moves files between them.
+// TestSanitise: names must be safe on both Linux and Windows, since files
+// may be moved or synced between the two.
 func TestSanitise(t *testing.T) {
 	cases := map[string]string{
 		"Show: The Sequel": "Show The Sequel",
@@ -216,7 +217,8 @@ func TestSanitise(t *testing.T) {
 }
 
 // TestSanitiseKeepsNamesUsable: sanitising must not mangle ordinary names, only
-// the characters that break on Windows (Syncthing crosses to the user's PC).
+// the characters that break on Windows (the filesystem a synced or moved file
+// may land on).
 func TestSanitiseKeepsNamesUsable(t *testing.T) {
 	if got := Sanitise("Tomb Raider King"); got != "Tomb Raider King" {
 		t.Errorf("Sanitise = %q, want it unchanged", got)

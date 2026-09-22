@@ -44,7 +44,7 @@ var (
 	reBare = regexp.MustCompile(`[-–]\s*(\d{1,4})(?:v\d+)?(?:\s|$|[\[(.])`)
 	// The form kishizu itself writes on completion: "<Show> - E09.mkv".
 	// Without this the tool cannot read the episode number from its own
-	// renamed files, which is exactly what the mpv watch signal sends back.
+	// renamed files, which is exactly what the watch signal sends back.
 	reLibrary = regexp.MustCompile(`(?i)\s-\sE(\d{1,4})(?:\s|\.|$)`)
 	// Bilibili's Chinese episode marker, e.g. "第43话". Bilibili-sourced
 	// releases (Doomdos and similar) number episodes this way, and without
@@ -75,6 +75,11 @@ var (
 	// Trailing group: "H.264-VARYG", "...AAC2.0-Group". Some uploaders put the
 	// group at the end after a hyphen instead of in brackets at the front.
 	reTrailingGroup = regexp.MustCompile(`[-–]\s*([A-Za-z0-9._]{2,20})\s*(?:\(|\||$)`)
+	// Bare resolutions and episode-ish numbers are not groups either. Package
+	// level rather than compiled per call: looksLikeQuality runs for every
+	// candidate group in every title, and MustCompile inside a function body
+	// recompiles on each one.
+	reQualityToken = regexp.MustCompile(`(?i)^(?:2160p|1080p|720p|480p|4k|\d{1,4}(?:\.\d)?)$`)
 )
 
 // Exported for the trainer, which needs to cut a title at its episode marker
@@ -232,7 +237,7 @@ func looksLikeQuality(s string) bool {
 		return true
 	}
 	// Bare resolutions and episode-ish numbers are not groups either.
-	if regexp.MustCompile(`(?i)^(?:2160p|1080p|720p|480p|4k|\d{1,4}(?:\.\d)?)$`).MatchString(s) {
+	if reQualityToken.MatchString(s) {
 		return true
 	}
 	return false
@@ -265,21 +270,25 @@ func Normalise(s string) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
+// noiseWords are the words that carry no identity signal. Package level so
+// the map is built once rather than on every call — Tokens runs per alias per
+// title in the matcher's hot path.
+var noiseWords = map[string]bool{
+	"the": true, "a": true, "an": true, "of": true, "to": true, "in": true,
+	"and": true, "or": true, "wa": true, "ga": true, "no": true, "ni": true,
+	"wo": true, "de": true, "kara": true, "season": true, "s": true,
+	"part": true, "ep": true, "episode": true, "ova": true, "ona": true,
+	"tv": true, "movie": true, "special": true, "complete": true,
+	"batch": true, "raw": true, "sub": true, "subs": true, "subbed": true,
+	"dub": true, "dubbed": true, "multi": true, "dual": true, "audio": true,
+}
+
 // Tokens splits a normalised string into a set of meaningful tokens, dropping
 // words that carry no identity signal.
 func Tokens(s string) map[string]bool {
-	noise := map[string]bool{
-		"the": true, "a": true, "an": true, "of": true, "to": true, "in": true,
-		"and": true, "or": true, "wa": true, "ga": true, "no": true, "ni": true,
-		"wo": true, "de": true, "kara": true, "season": true, "s": true,
-		"part": true, "ep": true, "episode": true, "ova": true, "ona": true,
-		"tv": true, "movie": true, "special": true, "complete": true,
-		"batch": true, "raw": true, "sub": true, "subs": true, "subbed": true,
-		"dub": true, "dubbed": true, "multi": true, "dual": true, "audio": true,
-	}
 	out := map[string]bool{}
 	for _, t := range strings.Fields(Normalise(s)) {
-		if !noise[t] {
+		if !noiseWords[t] {
 			out[t] = true
 		}
 	}

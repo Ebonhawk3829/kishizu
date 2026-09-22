@@ -4,9 +4,9 @@
 // It exists to keep the dependency direction honest. The matcher defines a
 // narrow interface (match.Show) so it can be tested without a database — but
 // the type that satisfies it needs a database to answer, so it cannot live in
-// match. It used to live in store, which made the persistence layer import the
-// domain logic it was supposed to be decoupled from: touching the matching
-// model recompiled the store.
+// match, and it must not live in store: the persistence layer would then
+// import the domain logic it is meant to be decoupled from, and touching the
+// matching model would recompile the store.
 //
 // Putting the adapter here leaves both sides independent. store knows nothing
 // about matching, match knows nothing about SQLite, and this package is the
@@ -14,8 +14,6 @@
 package adapt
 
 import (
-	"strings"
-
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -76,38 +74,11 @@ func (s *Show) MaxEpisode() int { return s.sh.MaxEpisode }
 // evidence than one group on its own.
 func (s *Show) GroupOffsets() map[string]int { return s.off }
 
-// GroupOffset looks up a group's offset.
-//
-// Exact match first, then a punctuation-normalised comparison. Substring
-// matching is deliberately restricted to names of four characters or more: a
-// group named "A" would otherwise match almost anything, and an unrelated group
-// silently borrowing another's offset both mis-resolves the episode and
-// inflates confidence, since the offset would look known.
+// GroupOffset looks up a group's offset. The three-tier lookup (exact,
+// normalised, substring) lives in match.LookupOffset so there is exactly one
+// implementation of it.
 func (s *Show) GroupOffset(group string) (int, bool) {
-	if group == "" {
-		group = "(none)"
-	}
-	if v, ok := s.off[group]; ok {
-		return v, true
-	}
-	want := release.NormaliseGroup(group)
-	if want == "" {
-		return 0, false
-	}
-	for k, v := range s.off {
-		if release.NormaliseGroup(k) == want {
-			return v, true
-		}
-	}
-	if len(want) >= 4 {
-		for k, v := range s.off {
-			have := release.NormaliseGroup(k)
-			if len(have) >= 4 && (strings.Contains(want, have) || strings.Contains(have, want)) {
-				return v, true
-			}
-		}
-	}
-	return 0, false
+	return match.LookupOffset(group, s.off)
 }
 
 // KnownOffsets returns the distinct offsets this show has exhibited, so an

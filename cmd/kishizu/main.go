@@ -186,6 +186,9 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+	// The client's web address backs the link the UI shows when a download
+	// needs manual attention. Empty for a client without a web UI.
+	srv.SetDownloaderURL(dl.URL())
 
 	// The naming scheme must be the one the reconciler writes with, or
 	// the watch signal cannot recognise kishizu's own filenames.

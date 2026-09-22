@@ -295,6 +295,6 @@ func TestEpisodesByState(t *testing.T) {
 	}
 }
 
-// The matcher adapter used to live in this package, which made the
-// persistence layer import the domain logic it was meant to be decoupled
-// from. It now lives in internal/adapt, along with these tests.
+// The matcher adapter lives in internal/adapt, along with these tests: the
+// persistence layer must not import the domain logic it is meant to be
+// decoupled from.

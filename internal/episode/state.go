@@ -48,9 +48,9 @@ func ParseState(s string) State {
 
 // Terminal reports whether the episode has been consumed: watched or deleted.
 //
-// This is the guard against the resurrection bug. Once an episode is watched and
-// deleted, a late or re-release must not bring it back — the user finished with
-// it, and re-downloading would push the file to the PC again via Syncthing.
+// This is the guard against resurrection. Once an episode is watched and
+// deleted, a late or re-release must not bring it back — the user finished
+// with it, and re-downloading would put the file back on their disk.
 func (s State) Terminal() bool {
 	return s == Watched || s == Deleted
 }

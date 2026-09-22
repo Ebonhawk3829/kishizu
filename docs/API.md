@@ -122,6 +122,39 @@ Mark everything up to an episode watched.
 `force` overrides the in-flight guard, for a download that got stuck and will
 never complete.
 
+### `POST /api/webhook`
+
+Watch events from media servers: Jellyfin, Plex and Emby. Same effect as
+`/api/watched`, translated from each server's payload shape.
+
+Jellyfin and Emby post JSON:
+
+```json
+{"Event":"item.markplayed","Item":{"SeriesName":"Tomb Raider King","IndexNumber":9}}
+```
+
+Plex posts `multipart/form-data` with a `payload` field holding JSON:
+
+```json
+{"event":"media.scrobble","Metadata":{"grandparentTitle":"Tomb Raider King","index":9}}
+```
+
+A plain hand-written POST also works:
+
+```json
+{"show":"Tomb Raider King","episode":9}
+```
+
+Show names match canonical names and aliases, case-insensitively. Events that
+are not watch completions (playback started, paused, …) are answered 200 with
+`{"marked":false}` rather than an error. An unknown show or an unusable
+payload is answered 422 — nothing is guessed.
+
+Point the media server's webhook at `http://<kishizu-host>:8098/api/webhook`.
+In Jellyfin/Emby the plugin is "Webhook"; in Plex it is "Webhooks" under
+Settings → Extras. Note kishizu has no authentication, so only expose the
+port on a network you trust.
+
 ---
 
 ## Episode state
@@ -241,8 +274,12 @@ Shaped for a dashboard widget.
 ```json
 {"status":"3 to watch","ready":3,"downloading":1,"hunting":2,"missing":0,
  "upToDate":false,"next":{"show":"...","episode":18,"airs_at":"..."},
- "version":"v1.0.0"}
+ "version":"v1.0.0","downloader_url":"http://transmission:9091/transmission/rpc"}
 ```
+
+`downloader_url` is the torrent client's web address, for linking a user to
+the client's own UI when a download needs manual attention. Empty when the
+client has no web UI.
 
 ### `GET /api/stats`
 

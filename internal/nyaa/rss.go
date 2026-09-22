@@ -63,11 +63,10 @@ func DefaultIndexer() Indexer {
 
 // Client queries one indexer.
 //
-// The indexer and the rate limiter are fields rather than package state. They
-// used to be package-level, set once at startup by SetIndexer, which made
-// every call site depend on an ordering that nothing enforced: a query issued
-// before the call silently used the default indexer. It also made the tests
-// order-sensitive, since each one mutated shared state the others read.
+// The indexer and the rate limiter are fields rather than package state.
+// Package state would make every call site depend on an ordering nothing
+// enforces: a query issued before configuration silently used the default
+// indexer, and tests mutating shared state could not run in parallel.
 //
 // As fields, a Client is constructed with its configuration and cannot be
 // half-configured. Two clients with different indexers can coexist, which is

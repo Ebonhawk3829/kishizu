@@ -34,7 +34,13 @@ type Decision struct {
 	Episode    int
 	Grab       bool
 	Reason     string
-	Confidence float64
+	Confidence float64 // parsed is the title parsed once, with the learned vocabulary applied.
+	// It is carried rather than re-derived because the ranking path needs the
+	// same reading the reject gate used: ranking from a raw re-parse made a
+	// release whose resolution was only readable via a learned token rank as
+	// if it had a perfect one, since the empty-resolution penalty lookup
+	// misses and contributes zero.
+	parsed *release.Release
 }
 
 // Listener polls feeds and produces grab decisions.
@@ -96,6 +102,10 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 	for _, sh := range shows {
 		eps, err := l.st.EpisodesForShow(sh.ID)
 		if err != nil {
+			// One bad show is skipped, but a systemic failure would skip all
+			// of them and the poller would log "nothing due" — which looks
+			// exactly like a quiet week. Logged so the difference is visible.
+			debug.Log("due shows: %s: %v", sh.CanonicalName, err)
 			continue
 		}
 		// A finished season adopted from SeaDex is never polled. It has no air
@@ -245,7 +255,13 @@ func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decisio
 	// parser does not know still reads. These hold for every show and are the
 	// whole quality policy: batch and unreadable/sub-floor resolutions are
 	// rejected; codec, dub and uncensored are ranked later.
+	//
+	// The parse is kept on the decision: the ranking path reads the same
+	// release, and re-parsing there without the vocabulary would rank a
+	// learned-token release as if its attributes were empty — which scores
+	// better than anything the parser read correctly.
 	r := m.Parse(it.Title)
+	d.parsed = &r
 	if rejected, why := l.Policy.Reject(&r); rejected {
 		d.Reason = why
 		return d
@@ -296,7 +312,14 @@ func (l *Listener) airDateOK(sh *store.Show, it nyaa.Item) bool {
 	if it.PubDate.IsZero() {
 		return true
 	}
-	n, at, _ := l.st.NextEpisode(sh.ID)
+	n, at, err := l.st.NextEpisode(sh.ID)
+	if err != nil {
+		// Fail open — the guard is diagnostic-quality data and must never
+		// block a good grab — but a database error is not the same as "no
+		// schedule point", and treating it as one hides the failure.
+		debug.Log("%s: next episode lookup: %v", sh.CanonicalName, err)
+		return true
+	}
 	if at == nil || n <= 0 {
 		return true
 	}
@@ -361,8 +384,7 @@ func (l *Listener) better(a, b Decision) bool {
 // Unlisted groups sort last but are not excluded — the order is a ranking,
 // not an allowlist.
 func (l *Listener) groupRankOf(d Decision) int {
-	r := release.Parse(d.Item.Title)
-	return l.Policy.GroupRank(r.Group)
+	return l.Policy.GroupRank(d.parsedRelease().Group)
 }
 
 // ruleRank scores a release against the global rules: codec, resolution, dub
@@ -371,8 +393,21 @@ func (l *Listener) groupRankOf(d Decision) int {
 // These are constants, not per-release grades. Nobody wants a batch or a dub,
 // and x264 beats a re-encoded x265, so asking per release was wasted effort.
 func (l *Listener) ruleRank(d Decision) int {
-	r := release.Parse(d.Item.Title)
+	r := d.parsedRelease()
 	return l.Policy.Rank(&r)
+}
+
+// parsedRelease returns the decision's vocab-applied parse, parsing on demand
+// for decisions built without one — tests construct Decisions by hand, and a
+// hand-built decision has no parse attached. The vocabulary is not available
+// here, so such a decision ranks on the raw parse; every decision that went
+// through evaluate carries the real one.
+func (d Decision) parsedRelease() release.Release {
+	if d.parsed != nil {
+		return *d.parsed
+	}
+	r := release.Parse(d.Item.Title)
+	return r
 }
 
 // Best reduces grab decisions to one per episode, keeping the best-ranked

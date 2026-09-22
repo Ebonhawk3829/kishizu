@@ -4,3 +4,8 @@ testdata
 *.db-shm
 *.db-wal
 kishizu
+
+# Docs and repo metadata are not needed inside the build image.
+docs
+concepts
+.github

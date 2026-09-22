@@ -123,6 +123,9 @@
     font-variant-numeric: tabular-nums;
   }
   .row .sub b { color: var(--t2); font-weight: 450; }
+  /* Link to the torrent client's own UI, shown on a downloading card. */
+  .row .sub .dl-link { color: var(--accent); text-decoration: none; }
+  .row .sub .dl-link:hover { text-decoration: underline; }
 
   /* ── status: dot + word, own column so they align down the page ─────── */
   .st { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; white-space: nowrap; }
@@ -436,9 +439,9 @@
 <details class="disc" id="disc-add">
   <summary><span class="chev">&rsaquo;</span> Add a show</summary>
   <div class="body">
-    <p class="hint">Pick from the current season, or paste an animeschedule.net URL. Either way the season length, cover art and every alternative name are filled in for you. Typing a name works too — whatever you'd search Nyaa for.</p>
+    <p class="hint">Two ways to add a show, both anchored to the schedule: paste the show's animeschedule.net URL, or pick it from the season list. The page is fetched on add, so the season length, cover art and every alternative name are filled in for you.</p>
     <div class="fields">
-      <div><label for="add-name">Name or URL</label><input id="add-name" type="text" placeholder="https://animeschedule.net/anime/... or show name"></div>
+      <div><label for="add-name">animeschedule.net URL</label><input id="add-name" type="url" placeholder="https://animeschedule.net/anime/..."></div>
       <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
       <div><label for="add-max">Episodes</label><input id="add-max" type="number" min="0" value="0"></div>
       <div><button class="btn" id="btn-add">Add</button></div>
@@ -595,6 +598,9 @@
 <script>
 let state = { active: false };
 let shows = [];
+// The torrent client's web address, from /api/summary. Empty means the client
+// has no web UI, so downloading cards show no link rather than a dead one.
+let downloaderURL = '';
 
 function el(id) { return document.getElementById(id); }
 function show(id, yes) { el(id).classList.toggle('hidden', !yes); }
@@ -626,6 +632,7 @@ async function api(path, body, method) {
 async function loadSummary() {
   try {
     const s = await api('/api/summary');
+    downloaderURL = s.downloader_url || '';
     const next = s.next
       ? `<b>${escapeHtml(s.next.show)}</b> ep ${s.next.episode} <span>· ${when(s.next.airs_at)} (${rel(s.next.airs_at)})</span>`
       : '<span>nothing scheduled</span>';
@@ -695,18 +702,35 @@ async function loadShows() {
   loadSummary();
 }
 
-// Add a show by name. Aliases are optional; the canonical name is always an
-// alias of itself, so matching never special-cases it.
+// Add a show by URL. The slug is an exact identity, so the season length,
+// cover art and every alternative name are filled in from the schedule page.
+//
+// The URL is validated here as well as server-side: a non-URL is rejected
+// before the request, so the error appears next to the field rather than
+// after a round-trip. The server still checks — the client is a convenience,
+// not the gate.
+function isScheduleURL(s) {
+  try {
+    const u = new URL(s);
+    return (u.hostname === 'animeschedule.net' || u.hostname.endsWith('.animeschedule.net'))
+      && u.pathname.startsWith('/anime/');
+  } catch { return false; }
+}
+
 async function addShow() {
   const name = el('add-name').value.trim();
-  if (!name) { fieldError('add-error', 'Give the show a name first.'); return; }
+  if (!name) { fieldError('add-error', 'Paste an animeschedule.net URL, or use Browse this season.'); return; }
+  if (!isScheduleURL(name)) {
+    fieldError('add-error', 'That is not an animeschedule.net show URL. It should look like https://animeschedule.net/anime/...');
+    return;
+  }
   fieldError('add-error', '');
   const aliases = el('add-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
   const max = parseInt(el('add-max').value, 10) || 0;
   try {
     const r = await api('/api/shows', { name, aliases, max_episode: max });
     el('add-name').value = ''; el('add-aliases').value = ''; el('add-max').value = '0';
-    toast(`Added ${r.name}. It picks up an air date at the next schedule refresh.`);
+    toast(`Added ${r.name}.`);
     loadShows();
   } catch (e) { fieldError('add-error', e.message); }
 }
@@ -1002,6 +1026,14 @@ function card(s) {
     air = `Ep ${s.next}${s.max ? ' of ' + s.max : ''}`;
   }
 
+  // A downloading episode may need manual intervention — a dead swarm, a
+  // stalled torrent, a file the client is stuck on. kishizu cannot fix those,
+  // so the card links straight to the client's own UI where the user can.
+  // Only shown when the client has an addressable web UI.
+  const dlLink = (st === 'downloading' && downloaderURL)
+    ? ` <a class="dl-link" href="${escapeHtml(downloaderURL)}" target="_blank" rel="noopener">client ↗</a>`
+    : '';
+
   // One primary action, context-dependent. Offsets are diagnostic detail and
   // live in the training panel, not on the landing page.
   let acts = `<button data-act="watched" data-id="${s.id}" data-next="${s.next}">Watched</button>`;
@@ -1041,7 +1073,7 @@ function card(s) {
     ${art}
     <div>
       <div class="name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</div>
-      <div class="sub">${air}${untrained}</div>
+      <div class="sub">${air}${dlLink}${untrained}</div>
     </div>
     <span class="st ${cls}"><span class="dot"></span>${escapeHtml(st)}</span>
     <span class="acts">${acts}</span>

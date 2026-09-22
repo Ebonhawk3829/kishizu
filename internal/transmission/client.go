@@ -26,10 +26,15 @@ type Client struct {
 }
 
 // New builds a client. url is the RPC endpoint, e.g.
-// http://<tailnet-ip>:9091/transmission/rpc
+// http://transmission:9091/transmission/rpc
 func New(url string) *Client {
 	return &Client{url: url, hc: &http.Client{Timeout: 30 * time.Second}}
 }
+
+// URL is the RPC endpoint this client was built with. Transmission serves
+// its web UI from the same address, so this is also where a user goes to
+// look at a download directly.
+func (c *Client) URL() string { return c.url }
 
 // call performs one RPC request, handling the CSRF session token.
 //

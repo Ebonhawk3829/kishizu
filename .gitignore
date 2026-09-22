@@ -7,10 +7,6 @@
 *.db-shm
 *.db-wal
 
-# Scratch
-__pycache__/
-*.pyc
-
 # Design mockups — scratch, not part of the shipped app
 concepts/
 

@@ -77,8 +77,13 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 	}
 
 	if existing == nil {
-		_, err := s.db.Exec(`INSERT INTO episode (show_id, number, state, infohash, release_title)
-			VALUES (?, ?, ?, ?, ?)`, showID, number, string(next), infohash, releaseTitle)
+		// downloaded_at is stamped on insert for every state. For "downloaded"
+		// it is the completion time; for "downloading" it is the grab time,
+		// which is what the stall check measures from. An episode with no
+		// timestamp cannot be measured, so stamping on insert is what makes
+		// stall detection possible at all.
+		_, err := s.db.Exec(`INSERT INTO episode (show_id, number, state, infohash, release_title, downloaded_at)
+			VALUES (?, ?, ?, ?, ?, datetime('now'))`, showID, number, string(next), infohash, releaseTitle)
 		return err
 	}
 
@@ -354,9 +359,9 @@ func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 // at a question already answered, and a wrong guess deletes a file the user
 // may still want.
 //
-// Comparison is on base name only, because the path mpv sees on the user's
-// PC differs from the path the server stored: Syncthing moves the file, and
-// the two machines mount it differently.
+// Comparison is on base name only, because the path the player sees on the
+// user's machine differs from the path the server stored: the file may have
+// been moved or synced, and the two machines may mount it differently.
 func (s *Store) FindByFileName(name string) (*Episode, error) {
 	if name == "" {
 		return nil, nil

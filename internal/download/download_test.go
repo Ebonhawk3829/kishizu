@@ -129,8 +129,9 @@ func TestQBittorrentSendsSavepath(t *testing.T) {
 // the client has a jar. Without one the add request goes out unauthenticated
 // and the WebUI answers 403, which surfaces only as an add failure.
 //
-// This is the regression test for that: the server here records whether the
-// cookie actually arrived, rather than answering 200 to everything.
+// The server here records whether the cookie actually arrived, rather than
+// answering 200 to everything — a jar-less client would otherwise pass every
+// assertion.
 func TestQBittorrentSendsTheSessionCookie(t *testing.T) {
 	var gotSID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

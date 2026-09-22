@@ -21,6 +21,10 @@ func NewTransmission(rpcURL string) Downloader {
 
 func (t *transmissionDownloader) Name() string { return "Transmission" }
 
+// URL is the RPC endpoint, which is also the WebUI root: Transmission serves
+// its web client from the same address the RPC lives on.
+func (t *transmissionDownloader) URL() string { return t.c.URL() }
+
 func (t *transmissionDownloader) Add(ctx context.Context, magnet, dir string) error {
 	return t.c.AddWithDir(ctx, magnet, dir)
 }

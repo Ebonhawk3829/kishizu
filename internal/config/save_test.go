@@ -44,14 +44,15 @@ func TestSaveRoundTrips(t *testing.T) {
 	if got.Server.Downloader.QBittorrentPass != "hunter2" {
 		t.Errorf("password = %q", got.Server.Downloader.QBittorrentPass)
 	}
-	// The show list survived.
+	// The show list is preserved verbatim.
 	if len(got.Shows) != 1 || got.Shows[0].Name != "Tomb Raider King" {
 		t.Errorf("shows = %+v, want the original list", got.Shows)
 	}
 }
 
-// TestSaveIndentsUnderServer: the server keys must be nested, not siblings.
-// This is the specific shape the bug produced.
+// TestSaveIndentsUnderServer: the server keys must be nested, not siblings —
+// sibling keys parse as a different document, and the show parser would then
+// reject the file kishizu itself just wrote.
 func TestSaveIndentsUnderServer(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "kishizu.yaml")
 	if err := Save(p, &File{Server: DefaultServer()}, DefaultServer()); err != nil {

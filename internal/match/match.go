@@ -72,6 +72,48 @@ const (
 	wAgreement  = 0.4 // do the known offsets agree with each other
 )
 
+// LookupOffset finds a group's offset in a per-show offset map.
+//
+// Exact match first, then a punctuation-normalised comparison, then a
+// substring fallback restricted to names of four characters or more.
+//
+// Substring matching is deliberately restricted: a group named "A" would
+// otherwise match almost anything, and an unrelated group silently borrowing
+// another's offset both mis-resolves the episode and inflates confidence,
+// since the offset would look known.
+//
+// One implementation, shared by every Show implementation. Duplicating it in
+// an adapter would let the two copies drift — the logic must have one home.
+func LookupOffset(group string, offsets map[string]int) (int, bool) {
+	if offsets == nil {
+		return 0, false
+	}
+	if group == "" {
+		group = "(none)"
+	}
+	if v, ok := offsets[group]; ok {
+		return v, true
+	}
+	want := release.NormaliseGroup(group)
+	if want == "" {
+		return 0, false
+	}
+	for k, v := range offsets {
+		if release.NormaliseGroup(k) == want {
+			return v, true
+		}
+	}
+	if len(want) >= 4 {
+		for k, v := range offsets {
+			have := release.NormaliseGroup(k)
+			if len(have) >= 4 && (strings.Contains(want, have) || strings.Contains(have, want)) {
+				return v, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // offsetAgreement is how strongly the known offsets concur, 0..1.
 //
 // It is what makes confidence improve with context: as more groups are learned
@@ -240,37 +282,7 @@ func (m *MemShow) Aliases() []string {
 func (m *MemShow) MaxEpisode() int { return m.Max }
 
 func (m *MemShow) GroupOffset(group string) (int, bool) {
-	if m.Offsets == nil {
-		return 0, false
-	}
-	want := release.NormaliseGroup(group)
-	if want == "" {
-		return 0, false
-	}
-	// Exact match first. Substring matching is a fallback for "[SubsPlease]"
-	// versus "SubsPlease", but it must not let an unrelated group inherit
-	// another's offset: "BrandNewGroup" contains "A", and silently borrowing
-	// group A's offset would both mis-resolve the episode and inflate
-	// confidence, since the offset would look known.
-	if v, ok := m.Offsets[group]; ok {
-		return v, true
-	}
-	for k, v := range m.Offsets {
-		if release.NormaliseGroup(k) == want {
-			return v, true
-		}
-	}
-	// Substring fallback, but only for reasonably long names: a one or two
-	// character group would match almost anything.
-	if len(want) >= 4 {
-		for k, v := range m.Offsets {
-			have := release.NormaliseGroup(k)
-			if len(have) >= 4 && (strings.Contains(want, have) || strings.Contains(have, want)) {
-				return v, true
-			}
-		}
-	}
-	return 0, false
+	return LookupOffset(group, m.Offsets)
 }
 
 func (m *MemShow) GroupOffsets() map[string]int { return m.Offsets }

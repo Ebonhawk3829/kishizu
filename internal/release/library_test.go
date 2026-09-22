@@ -5,7 +5,7 @@ import "testing"
 // TestParseLibraryForm: kishizu must be able to read the episode number from
 // the filenames it writes itself.
 //
-// On completion it renames a download to "<Show> - E<NN>.mkv", and the mpv
+// On completion it renames a download to "<Show> - E<NN>.mkv", and the
 // watch signal sends that filename back. The parser did not recognise the
 // "- E09" form, so every watch signal failed with "no confident match" —
 // the tool could not read its own output.

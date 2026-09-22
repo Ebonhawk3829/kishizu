@@ -378,6 +378,11 @@ server. Failed posts are spooled and retried on the next start, and also raise
 a notification. A missed signal leaves a file on disk, which is the safe
 direction.
 
+Media servers are supported directly: `POST /api/webhook` accepts watch
+events from Jellyfin, Plex and Emby in their native payload shapes — point
+the server's webhook at it and no plugin or script is needed. See
+[`API`](docs/API.md) for the payload formats.
+
 ## Flags
 
 | Flag | Default | Purpose |

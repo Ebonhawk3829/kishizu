@@ -121,9 +121,6 @@ CREATE TABLE IF NOT EXISTS seen (
 -- UI writes it, it is per-user rather than per-deployment, and writing it to
 -- the config file meant the UI had to read-modify-write a file the operator
 -- also edits — with no locking, so a toggle could lose a concurrent edit.
---
--- A table was here before and was dropped as unused; it is back because the
--- thing it was for (a UI-owned setting) now exists.
 CREATE TABLE IF NOT EXISTS preference (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,

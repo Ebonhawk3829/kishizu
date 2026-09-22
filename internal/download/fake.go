@@ -26,6 +26,10 @@ type FakeAdd struct {
 
 func (f *Fake) Name() string { return "fake" }
 
+// URL is empty: the fake has no UI to link to, which is also what a
+// downloader without an addressable web client reports.
+func (f *Fake) URL() string { return "" }
+
 func (f *Fake) Add(ctx context.Context, magnet, dir string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

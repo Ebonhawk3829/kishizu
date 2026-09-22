@@ -83,11 +83,11 @@ type Server struct {
 	// polls: offsets learned from a different indexer would describe
 	// releases the pipeline never sees.
 	indexer *nyaa.Client
+	// downloaderURL is the torrent client's web address, shown as a link
+	// when a download needs manual attention. Empty means no link.
+	downloaderURL string
 }
 
-// SetIndexer attaches the indexer the training endpoints query.
-//
-// Without one the training endpoints report that they are not configured
 // rather than silently querying the default indexer, which would teach
 // offsets from releases the configured pipeline never sees.
 func (s *Server) SetIndexer(c *nyaa.Client) { s.indexer = c }
@@ -132,6 +132,10 @@ func (s *Server) SetWatch(h *watch.Handler) { s.watch = h }
 // SetNotifier attaches the notifier for user-visible alerts.
 func (s *Server) SetNotifier(c notify.Notifier) { s.notifier = c }
 
+// SetDownloaderURL records the torrent client's web address, for the link the
+// UI shows when a download needs manual attention. Empty disables the link.
+func (s *Server) SetDownloaderURL(u string) { s.downloaderURL = u }
+
 // SetArt attaches the cover-art cache. Without it the UI falls back to the
 // remote URLs, which works but keeps the CDN dependency.
 func (s *Server) SetArt(c *art.Cache) { s.art = c }
@@ -174,9 +178,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/train/grade", s.handleTrainGrade)
 	mux.HandleFunc("POST /api/train/accept-all", s.handleTrainAcceptAll)
 
-	// Watch signal from the mpv script, and manual marking from the UI.
+	// Watch signal from a player script, and manual marking from the UI.
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
 	mux.HandleFunc("POST /api/watched-up-to", s.handleWatchedUpTo)
+	// Watch events from media servers: Jellyfin, Plex and Emby. Same core
+	// as /api/watched, translated from each server's payload shape.
+	mux.HandleFunc("POST /api/webhook", s.handleWebhook)
 	// Manual state override, for episodes obtained outside kishizu.
 	// Adopting a finished season from releases.moe. Preview returns the
 	// proposed plan; adopt performs a confirmed one.
@@ -293,9 +300,10 @@ func (s *Server) handleTimetable(w http.ResponseWriter, r *http.Request) {
 	// Which name the list displays. The filter matches both regardless, so
 	// this never changes what is findable — only what is on screen.
 	//
-	// Read from the database, where the toggle writes it. Reading it from the
-	// config file was the bug: the file still held the old value, so the
-	// server re-asserted it and reset the control the user had just clicked.
+	// Read from the database, where the toggle writes it. The config file
+	// is the wrong source: it still holds the old value after a toggle, so
+	// reading from it would re-assert stale values and reset the control
+	// the user just clicked.
 	pref := s.browseTitle()
 
 	entries := tt.Search(r.URL.Query().Get("q"))
@@ -536,6 +544,10 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		// Reported here as well as on /healthz so a widget can show which
 		// build it is talking to without a second request.
 		"version": version.String(),
+		// The torrent client's address, for the link the UI shows on a
+		// downloading card. Empty when the client has no web UI, in which
+		// case the UI shows no link rather than a dead one.
+		"downloader_url": s.downloaderURL,
 	}
 	if next.Name != "" {
 		out["next"] = map[string]any{
@@ -677,7 +689,7 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleWatched records a watch signal from the mpv script or the UI.
+// handleWatched records a watch signal from a player script or the UI.
 //
 // The filename is matched server-side: the PC sends the raw path, and the
 // server — which has the aliases, the per-group offsets and the confidence
@@ -688,8 +700,8 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 // episode is ambiguous, nothing is marked. Failure never deletes.
 func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		// Path is the full file path as mpv saw it. Only the base name is used
-		// for matching, so the PC's directory layout does not matter.
+		// Path is the full file path as the player saw it. Only the base name is used
+		// for matching, so the player's directory layout does not matter.
 		Path string `json:"path"`
 		// ShowID and Episode are the manual path from the UI. When both are
 		// set they take precedence over matching the path.
@@ -715,7 +727,7 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 		showID, epNum = sh.ID, req.Episode
 		source = "manual"
 	} else {
-		// mpv path: match the filename against tracked shows.
+		// Player path: match the filename against tracked shows.
 		base := baseName(req.Path)
 		matched, ep, err := s.matchFile(base)
 		if err != nil {
@@ -723,51 +735,12 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		showID, epNum = matched, ep
-		source = "mpv"
+		source = "player"
 	}
 
-	// A file that vanished before the watch signal is worth knowing about:
-	// either the deletion was an accident, or the signal is late. Checked
-	// before marking, so the episode is still in "downloaded" and detectable.
-	if s.watch != nil {
-		if missing, err := s.watch.CheckMissing(); err != nil {
-			log.Printf("watch: check missing: %v", err)
-		} else if len(missing) > 0 {
-			log.Printf("watch: %d episode(s) missing from disk", len(missing))
-			if s.notifier != nil {
-				// alert() is not used here because the server has no
-				// package-level helper; a failed send is logged by the
-				// notifier itself, and the episode stays flagged in the UI.
-				if err := s.notifier.Send("kishizu: file missing",
-					fmt.Sprintf("%d episode(s) vanished before the watch signal", len(missing)),
-					notify.PriorityHigh); err != nil {
-					log.Printf("notify: %v", err)
-				}
-			}
-		}
-	}
-
-	if err := s.st.UpsertEpisode(showID, epNum, episode.Watched, "", ""); err != nil {
+	if err := s.recordWatched(showID, epNum, source); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
-	}
-	// Watching is progress just as a download is: if the watch point has
-	// reached the schedule's pointer, the pointer must move, or the UI
-	// keeps announcing an air date that is already in the past. Best-effort:
-	// a failed advance leaves the pointer where it was, and the daily
-	// schedule refresh corrects it anyway.
-	if err := s.st.AdvanceSchedule(showID, epNum); err != nil {
-		log.Printf("watched: advance schedule: %v", err)
-	}
-	if err := s.st.ProjectAirDates(showID); err != nil {
-		log.Printf("watched: project air dates: %v", err)
-	}
-	if s.watch != nil {
-		if deleted, kept, err := s.watch.Sweep(); err != nil {
-			log.Printf("watch sweep: %v", err)
-		} else if len(deleted) > 0 {
-			log.Printf("watch: %d deleted, %d kept", len(deleted), len(kept))
-		}
 	}
 
 	writeJSON(w, map[string]any{
@@ -777,9 +750,10 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 
 // baseName extracts the filename from a path that may come from any OS.
 //
-// filepath.Base is not enough: the server runs on Linux, and mpv on the user's
-// PC sends Windows paths whose separator is backslash. Splitting on both
-// separators keeps the matching independent of where mpv ran.
+// filepath.Base is not enough: the server runs on Linux, and a player on the
+// user's machine may send Windows paths whose separator is backslash.
+// Splitting on both separators keeps the matching independent of where the
+// player ran.
 func baseName(path string) string {
 	if i := strings.LastIndexAny(path, `/\`); i >= 0 {
 		return path[i+1:]
@@ -835,8 +809,6 @@ func (s *Server) matchFile(base string) (int64, int, error) {
 	return 0, 0, fmt.Errorf("no confident match for %q", base)
 }
 
-// isLibraryForm reports whether a filename looks like one kishizu wrote:
-// "<Show> - E<NN>.<ext>".
 // isLibraryForm reports whether a filename was written by kishizu.
 //
 // Delegates to the naming scheme, which is the same one that wrote the file.
@@ -895,18 +867,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // ---------- shows ----------
 
-// handleAddShow creates a show from the UI. The canonical name is stored as
-// an alias of itself, so matching needs no special case. Max episode 0 means
-// the season length is unknown; the cycle then uses a generous window.
+// handleAddShow creates a show from the UI.
 //
-// The name field accepts EITHER a plain name or an animeschedule.net URL. A
-// URL is the better input: the slug is an exact identity for the show, and
-// the page it points at carries the title, the season length and every name
-// the season is known by. Those are otherwise typed by hand and go stale.
+// The only accepted input is an animeschedule.net URL (or a slug passed by
+// the browse modal, which is the same identity). A plain name is rejected:
+// the tool's matching, air dates and season length all come from the
+// schedule, so a show without a slug cannot be hunted correctly — it would
+// poll with no air-date anchor and train on nothing. The browse modal is the
+// easy path; pasting the URL is the manual one.
 //
-// When the input is a URL, the show's NAME comes from the fetched page — the
-// URL itself is never stored as a name. A bare slug is accepted too and
-// treated the same way.
+// The show's NAME comes from the fetched page — the URL itself is never
+// stored as a name. The canonical name is stored as an alias of itself, so
+// matching needs no special case. Max episode 0 means the season length is
+// unknown; the cycle then uses a generous window.
 func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string   `json:"name"`
@@ -927,33 +900,34 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A URL (or bare slug) is the identity-bearing input. Resolve it FIRST so
-	// the show is created under its real title, and so enrichment fills in
-	// what the user would otherwise have to type.
+	// The URL is the identity-bearing input. Resolve it FIRST so the show is
+	// created under its real title, and so enrichment fills in what the user
+	// would otherwise have to type.
 	slug := schedule.SlugFromURL(req.Name)
-	if slug != "" {
-		sh, err := s.createShowFromSlug(slug, req.Aliases, req.MaxEpisode)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
+	if slug == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf(
+			"add shows by pasting an animeschedule.net URL, or from the browse list — a plain name has no schedule identity, so air dates and matching would not work"))
+		return
+	}
+	sh, err := s.createShowFromSlug(slug, req.Aliases, req.MaxEpisode)
+	if err != nil {
+		// A 404 from the schedule is the user's typo, not a server failure:
+		// the site is up and says this slug is not a show. That is a bad
+		// request, and the message should say what to do next — check the
+		// spelling, or find the show in the browse list. A transport failure
+		// is different: nothing was established, so it stays a 502.
+		if errors.Is(err, schedule.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf(
+				"no show at %q — check the spelling, or find it in Browse this season", req.Name))
 			return
 		}
-		log.Printf("add-show: %s (max %d, %d aliases, slug %q)",
-			sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases), sh.Slug)
-		writeJSON(w, map[string]any{
-			"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "max_episode": sh.MaxEpisode,
-		})
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that show's page: %v", err))
 		return
 	}
-
-	sh, err := s.st.CreateShow(req.Name, req.Aliases, req.MaxEpisode)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	log.Printf("add-show: %s (max %d, %d aliases)",
-		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases))
+	log.Printf("add-show: %s (max %d, %d aliases, slug %q)",
+		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases), sh.Slug)
 	writeJSON(w, map[string]any{
-		"id": sh.ID, "name": sh.CanonicalName, "max_episode": sh.MaxEpisode,
+		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "max_episode": sh.MaxEpisode,
 	})
 }
 
@@ -961,6 +935,12 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 // own title becomes the canonical name; the slug is recorded so the daily
 // refresh matches exactly; enrichment fills in season length, aliases and
 // art. Best-effort throughout — a partial record is still a usable show.
+//
+// The timetable cache is the fast path for shows on the current season's
+// list, but it carries no air dates — those come from the show's own page.
+// So the cache-hit path also fetches the page in the background: without it,
+// a show added from browse sat with no air-date anchor until the next daily
+// refresh, polling blind for up to a day.
 func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode int) (*store.Show, error) {
 	// The cache is the fast path: the browse list already holds the title, the
 	// English name, the season length and the art, so adding from browse costs
@@ -980,6 +960,11 @@ func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode in
 			sh.Slug = slug
 		}
 		s.applyTimetableEntry(sh, e)
+		// The cache has no air dates, and the daily refresh is up to a day
+		// away. Fetch the page now so the show's hunt window starts from real
+		// air times rather than waiting for the tick. Best-effort: the show
+		// exists either way, and the refresh will fill it in tomorrow.
+		go s.enrichFromSchedule(sh)
 		return sh, nil
 	}
 

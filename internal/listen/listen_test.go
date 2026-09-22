@@ -99,7 +99,7 @@ func TestDownloadedEpisodeIsNotRegrabbed(t *testing.T) {
 }
 
 // TestResolutionFloor: the global floor. 720p is rejected; 2160p passes. The
-// floor is hardcoded in rules.go — training cannot change it.
+// floor comes from the quality policy — training cannot change it.
 func TestResolutionFloor(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
@@ -226,6 +226,54 @@ func TestBestBreaksTiesOnSeeders(t *testing.T) {
 	best := New(nil, nil).Best([]Decision{a, b})
 	if len(best) != 1 || best[0].Item.InfoHash != "HB" {
 		t.Errorf("best = %+v, want HB (more seeders)", best)
+	}
+}
+
+// TestRankUsesTheVocabAppliedParse: the ranking path must read the same
+// parse the reject gate used.
+//
+// If the rankers re-parsed raw while evaluate used the learned vocabulary, a
+// release whose resolution was only readable via a learned token would rank
+// with an empty resolution — the empty-resolution penalty lookup misses,
+// contributing 0, which ties with 1080p for the best possible score. A
+// learned-token release would then outrank a real 1080p release from a
+// less-preferred group.
+func TestRankUsesTheVocabAppliedParse(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+	_ = st.SetGroupOffset(sh.ID, "OtherGroup", 0, "training")
+
+	// Teach the vocabulary that "QHD" means 1440p, as a training run would.
+	vocab := adapt.NewVocab(st)
+	if err := vocab.Learn(st, "resolution", "QHD", "1440p"); err != nil {
+		t.Fatal(err)
+	}
+
+	l := New(st, nil)
+	l.vocab = vocab
+
+	// Both releases carry a resolution the raw parser cannot read. With the
+	// vocabulary applied both read as 1440p, which carries a penalty — so
+	// the group order must decide, and ToonsHub wins.
+	decisions := []Decision{
+		{Grab: true, ShowID: sh.ID, Episode: 9,
+			Item: item("H1", "[OtherGroup] Show S01E09 QHD H.264")},
+		{Grab: true, ShowID: sh.ID, Episode: 9,
+			Item: item("H2", "[ToonsHub] Show S01E09 QHD H.264")},
+	}
+	// Attach the vocab-applied parse the way evaluate does.
+	for i := range decisions {
+		r := vocab.Parse(decisions[i].Item.Title)
+		decisions[i].parsed = &r
+	}
+
+	best := l.Best(decisions)
+	if len(best) != 1 {
+		t.Fatalf("got %d best, want 1", len(best))
+	}
+	if best[0].Item.InfoHash != "H2" {
+		t.Errorf("best = %s, want H2 (preferred group): the learned resolution was not honoured in ranking", best[0].Item.InfoHash)
 	}
 }
 

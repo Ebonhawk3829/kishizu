@@ -33,7 +33,7 @@ func testServer(t *testing.T) *Server {
 	return srv
 }
 
-// TestWatchedByPath: an mpv signal carries only the file path; the server does
+// TestWatchedByPath: a player signal carries only the file path; the server does
 // the matching, since it has the aliases and offsets.
 func TestWatchedByPath(t *testing.T) {
 	srv := testServer(t)
@@ -94,7 +94,7 @@ func TestWatchedManualOverridesMatching(t *testing.T) {
 	}
 }
 
-// TestWatchedIsIdempotent: a duplicate mpv signal must not fail or rewind.
+// TestWatchedIsIdempotent: a duplicate watch signal must not fail or rewind.
 func TestWatchedIsIdempotent(t *testing.T) {
 	srv := testServer(t)
 	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)

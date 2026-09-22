@@ -44,7 +44,7 @@ func NormaliseGroup(s string) string {
 }
 
 // Sanitise makes a name safe as a directory or file name on both Linux and
-// Windows, since Syncthing moves files between them.
+// Windows, since files may be moved or synced between the two.
 //
 // It lives here rather than in watch because both the writer (which names
 // files) and the matcher (which reads them back) need the same rule, and

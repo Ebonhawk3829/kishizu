@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -71,7 +72,7 @@ func ClassifyFiles(files []File) []FileClass {
 			continue
 		}
 		if m := reEpisode.FindStringSubmatch(body); m != nil {
-			n, err := parseInt(m[2])
+			n, err := strconv.Atoi(m[2])
 			if err == nil {
 				out = append(out, FileClass{
 					Name:    f.Name,
@@ -240,15 +241,4 @@ func Episodes(sel []Selected) []int {
 	}
 	sort.Ints(out)
 	return out
-}
-
-func parseInt(s string) (int, error) {
-	var n int
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, fmt.Errorf("not a number: %q", s)
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n, nil
 }

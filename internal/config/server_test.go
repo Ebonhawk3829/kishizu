@@ -162,7 +162,7 @@ shows:
 		t.Errorf("naming preset = %q", f.Server.Naming.Preset)
 	}
 
-	// The show list survived alongside the server block.
+	// The show list is preserved alongside the server block.
 	if len(f.Shows) != 1 {
 		t.Fatalf("got %d shows, want 1", len(f.Shows))
 	}

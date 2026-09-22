@@ -31,8 +31,8 @@ type qBittorrent struct {
 // The client carries a cookie jar. Without one the SID cookie that login
 // obtains is discarded by Go's http.Client, so the following /torrents/add
 // is unauthenticated and the WebUI answers 403 — which surfaces only as an
-// add failure with no obvious cause. The bug is invisible on a localhost
-// deployment with auth bypassed, which is why it survived.
+// add failure with no obvious cause. The failure is invisible on a localhost
+// deployment with auth bypassed, so a missing jar here would be silent.
 func NewQBittorrent(base, user, pass string) Downloader {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -53,6 +53,9 @@ func NewQBittorrent(base, user, pass string) Downloader {
 }
 
 func (q *qBittorrent) Name() string { return "qBittorrent" }
+
+// URL is the WebUI root, where a user goes to look at a download directly.
+func (q *qBittorrent) URL() string { return q.base }
 
 // Add starts a download from a magnet link into dir.
 //

@@ -19,10 +19,9 @@ import (
 // reviewable per show and resettable from the training panel.
 //
 // The group order is global and set in advance, so it is read from the
-// quality policy rather than taken as an argument. It used to be overridable
-// with -prefer, but that flag only ever reached this function: the listener
-// reads the policy directly, so the flag silently did nothing for the
-// pipeline that actually grabs.
+// quality policy rather than taken as an argument. A flag that only reached
+// this function would do nothing for the pipeline that actually grabs: the
+// listener reads the policy directly.
 func inferOffsets(ctx context.Context, st *store.Store, indexer *nyaa.Client) error {
 	shows, err := st.ListShows()
 	if err != nil {

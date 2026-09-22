@@ -106,15 +106,16 @@ func (s *Store) migrateSteps() error {
 	}
 	steps := []step{
 		{1, "drop superseded filter/rejected tables", func(s *Store) error {
-			// Release quality policy is global and hardcoded (rules.go);
-			// the per-show rule tables were superseded and nothing reads
-			// them. The rejected table was write-only.
+			// Release quality policy is global and hardcoded
+			// (quality.Default); the per-show rule tables were
+			// superseded and nothing reads them. The rejected table
+			// was write-only.
 			//
-			// "preference" was dropped here too, and is deliberately not
-			// any more: the schema now creates it for UI-owned settings,
-			// and this step runs after the schema, so dropping it here
-			// would delete the table on every fresh database. A step that
-			// undoes the schema is a step that can never be correct.
+			// "preference" is deliberately NOT dropped here: the schema
+			// creates it for UI-owned settings, and this step runs after
+			// the schema, so dropping it here would delete the table on
+			// every fresh database. A step that undoes the schema is a
+			// step that can never be correct.
 			for _, t := range []string{"filter", "rejected"} {
 				if _, err := s.db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
 					return fmt.Errorf("drop %s: %w", t, err)
@@ -178,8 +179,6 @@ func (s *Store) addColumns() error {
 	}
 	return nil
 }
-
-// ---------- seen infohashes ----------
 
 // ---------- shows ----------
 
@@ -466,10 +465,8 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 	return err
 }
 
-// SetImageURL records the season's cover art, scraped from the schedule.
-// Empty string clears it, so a show that loses its art falls back cleanly.
-// nullIfEmpty keeps an absent value NULL rather than storing "", so "unknown"
-// stays distinguishable from "known to be empty".
+// nullIfEmpty maps an empty string to SQL NULL, so "unknown" stays
+// distinguishable from "known to be empty".
 func nullIfEmpty(s string) any {
 	if strings.TrimSpace(s) == "" {
 		return nil
@@ -654,7 +651,7 @@ func (s *Store) GroupOffsets(showID int64) (map[string]int, error) {
 	return out, rows.Err()
 }
 
-// ---------- group offsets ----------
+// ---------- seen infohashes ----------
 
 // MarkSeen records an infohash we have acted on. Persisted separately from
 // episode rows so a release that reappears after its episode is deleted is

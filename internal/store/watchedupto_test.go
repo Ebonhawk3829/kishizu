@@ -70,8 +70,8 @@ func TestMarkWatchedUpToLeavesInFlightAlone(t *testing.T) {
 	}
 	// Only ep 3 is markable: ep 1 is terminal, ep 2 is in flight. An episode
 	// sitting on disk ("downloaded") is exactly what "watched up to" is for —
-	// it used to be skipped, which left a ready-to-watch episode stuck there
-	// after the user said they had watched it.
+	// skipping it would leave a ready-to-watch episode stuck there after the
+	// user said they had watched it.
 	if marked != 1 {
 		t.Errorf("marked %d, want 1 (only the downloaded episode)", marked)
 	}

@@ -13,14 +13,14 @@ import (
 //
 // A library name has no release group, so it scores only 0.5 — below the
 // 0.75 threshold. Requiring confidence here rejected every watch signal,
-// since the mpv script sends back exactly the name kishizu wrote.
+// since the player sends back exactly the name kishizu wrote.
 func TestWatchedAcceptsLibraryFilename(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
 	sh, _ := st.CreateShow("Clevatess Season 2", []string{"Clevatess"}, 13)
 	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "H", "rel")
 
-	// A Windows path, as mpv on the user's PC would send it.
+	// A Windows path, as a player on the user's machine would send it.
 	body := `{"path":"D:\\Anime\\Clevatess Season 2\\Clevatess Season 2 - E09.mkv"}`
 	rec := post(t, srv, "/api/watched", body)
 	if rec.Code != 200 {

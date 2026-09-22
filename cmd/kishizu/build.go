@@ -103,9 +103,9 @@ func buildScheme(n config.NamingConfig) (*naming.Scheme, error) {
 
 // buildIndexer turns the configured indexer section into a nyaa client.
 //
-// The client is returned rather than installed as package state. It used to be
-// the latter, which meant every query depended on this having run first, and a
-// call site that ran earlier silently queried the default indexer instead of
+// The client is returned rather than installed as package state. Package
+// state would make every query depend on this having run first, and a call
+// site that ran earlier would silently query the default indexer instead of
 // the configured one. Returning it makes that impossible: a caller cannot
 // query without a client, and the client carries its own configuration.
 func buildIndexer(ix config.IndexerConfig) (*nyaa.Client, error) {

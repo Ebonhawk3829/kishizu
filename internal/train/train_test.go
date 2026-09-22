@@ -120,7 +120,7 @@ func TestProposeRanksUncertaintyFirst(t *testing.T) {
 // TestProposeSkipsAsked: the same release must not be proposed twice.
 //
 // Uses an UNSEEN group so the candidate is genuinely uncertain. A release from
-// a group whose offset is already known is no longer proposed at all (see
+// a group whose offset is already known is never proposed at all (see
 // TestProposeSkipsConfident), so it would not exercise the asked-set here.
 func TestProposeSkipsAsked(t *testing.T) {
 	st := testStore(t)

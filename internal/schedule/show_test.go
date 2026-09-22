@@ -305,13 +305,15 @@ func TestSlugFromURL(t *testing.T) {
 			"re-zero-kara-hajimeru-isekai-seikatsu-4"},
 		{"animeschedule.net/anime/foo-bar", "foo-bar"},
 		{"/anime/foo-bar", "foo-bar"},
-		{"anime/foo-bar", "foo-bar"},
-		{"foo-bar", "foo-bar"},
 		{"https://animeschedule.net/anime/foo-bar?x=1", "foo-bar"},
 		{"https://animeschedule.net/anime/foo-bar#frag", "foo-bar"},
 		{"  https://animeschedule.net/anime/foo-bar/  ", "foo-bar"},
-		// Not a schedule URL: a plain show name. Callers fall back to the
-		// name path when this returns "".
+		// A bare slug is NOT a URL: it is indistinguishable from a plain
+		// show name like "Bleach", which would go down the slug path and
+		// 404. The browse modal passes slugs directly and never calls this.
+		{"foo-bar", ""},
+		// Not a schedule URL: a plain show name. Callers reject with a
+		// message pointing at the two supported inputs.
 		{"BLEACH: Thousand-Year Blood War - The Calamity", ""},
 		{"", ""},
 	}

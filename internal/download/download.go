@@ -40,6 +40,11 @@ type Downloader interface {
 
 	// Name is the client's name, for logs and error messages.
 	Name() string
+
+	// URL is the client's web address, for linking a user to the client's
+	// own UI when a download needs manual attention. Empty means the
+	// client has no addressable UI and no link should be shown.
+	URL() string
 }
 
 // Kind identifies a downloader implementation, for configuration.

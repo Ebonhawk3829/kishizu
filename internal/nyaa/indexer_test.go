@@ -10,9 +10,8 @@ import (
 )
 
 // The tests here construct their own Client rather than mutating package
-// state. They used to call SetIndexer and restore it afterwards, which made
-// every test depend on the ones before it having cleaned up, and made the
-// whole suite unrunnable in parallel.
+// state: shared mutable state would make every test depend on the ones
+// before it having cleaned up, and make the suite unrunnable in parallel.
 
 // TestClientIsConfigurable: the base URL and category are configurable so a
 // mirror, or another indexer with the same RSS shape, can be used.

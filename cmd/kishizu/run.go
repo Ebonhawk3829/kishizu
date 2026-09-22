@@ -79,6 +79,20 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	// Pruning deletes data, so it is opt-in and comes from configuration
 	// rather than being on by default.
 	rec.PruneUnselected = s.PruneUnselected
+	// A download that produces nothing for two days is a dead swarm. The
+	// reconciler detects it; the alert is what makes it visible. Latched so
+	// a stalled episode pings once rather than every 15 minutes.
+	stalled := map[string]bool{}
+	rec.OnStall = func(show, title string, ep int) {
+		key := fmt.Sprintf("%s:%d", show, ep)
+		if stalled[key] {
+			return
+		}
+		stalled[key] = true
+		alert(n, "kishizu: download stalled",
+			fmt.Sprintf("%s ep%d has been downloading for over 48h with no file — the swarm may be dead. Unlatch to retry.", show, ep),
+			notify.PriorityHigh)
+	}
 
 	log.Printf("listener: polling every %s (dry-run=%v, downloader=%s)",
 		interval, dryRun, dl.Name())
@@ -196,6 +210,11 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	refreshSchedule := func() {
 		shows, err := st.ListShows()
 		if err != nil {
+			// The refresh is what moves air dates when a show is delayed; a
+			// silent no-op here means every hunt window drifts on stale
+			// timing with no signal. Logged even though the caller retries
+			// tomorrow, because a systemic failure should be visible.
+			log.Printf("schedule refresh: list shows: %v", err)
 			return
 		}
 		updated, finished := 0, 0
@@ -240,8 +259,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			} else {
 				// No countdown on the page: the season has finished. This is
 				// the page saying so directly, rather than absence from a
-				// weekly timetable — which was also true of breaks, premieres
-				// and hiatuses, and stripping art for those was wrong.
+				// weekly timetable — which is also true of breaks, premieres
+				// and hiatuses, and stripping art for those would be wrong.
 				finished++
 			}
 			if info.ImageURL != "" && info.ImageURL != sh.ImageURL {

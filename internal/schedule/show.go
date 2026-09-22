@@ -327,18 +327,28 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 	return sh, nil
 }
 
-// SlugFromURL extracts the animeschedule slug from a URL or bare slug.
+// SlugFromURL extracts the animeschedule slug from a URL.
 //
 // Accepts the forms a user is likely to paste:
 //
 //	https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 //	animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 //	/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
-//	re-zero-kara-hajimeru-isekai-seikatsu-4
 //
-// Query strings and fragments are dropped. Returns "" when there is no slug to
-// be found, which the caller treats as "not a schedule URL" and falls back to
-// the plain-name path.
+// A bare slug is deliberately NOT accepted: a bare word cannot be
+// distinguished from an ordinary title, so accepting one would make adding a
+// single-word show by plain name impossible — "Bleach" would go down the
+// slug path, the page fetch would 404, and the user would see "no show at
+// that URL". The only unambiguous inputs are ones carrying the /anime/
+// marker. Adding from the browse list passes the slug directly and does not
+// go through here.
+//
+// Query strings and fragments are dropped. Returns "" when there is no slug
+// to be found, which the caller treats as "not a schedule URL" and rejects.
+//
+// The host is NOT checked: any URL carrying /anime/ is accepted. The slug is
+// then verified by fetching the page, which is the real check — a URL on the
+// wrong host fails there with "no show at that URL" rather than here.
 func SlugFromURL(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -348,12 +358,14 @@ func SlugFromURL(raw string) string {
 	if i := strings.IndexAny(s, "?#"); i >= 0 {
 		s = s[:i]
 	}
-	// Strip any scheme and host.
-	if i := strings.Index(s, "/anime/"); i >= 0 {
-		s = s[i+len("/anime/"):]
-	} else {
-		s = strings.TrimPrefix(s, "anime/")
+	// The /anime/ marker is what makes the input unambiguous. Without it a
+	// bare word is indistinguishable from a show title, and treating it as a
+	// slug made plain-name adds fail with a confusing 404.
+	i := strings.Index(s, "/anime/")
+	if i < 0 {
+		return ""
 	}
+	s = s[i+len("/anime/"):]
 	s = strings.Trim(s, "/")
 	// A slug is a path segment: no slashes, no spaces.
 	if s == "" || strings.ContainsAny(s, "/ \t") {

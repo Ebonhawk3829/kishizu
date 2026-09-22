@@ -181,11 +181,10 @@ func TestGetNeverFetches(t *testing.T) {
 // TestUpdateLeavesListEnriched: a refresh must leave the list in a usable
 // state, not merely fetched.
 //
-// This is the bug the deferral caused: after a list refresh the entries had no
-// English titles, and because Enriched was recent, NeedsEnrich() said no — so
-// the list stayed unenriched for up to a week. Someone reading it in English
-// saw romaji for days after every refresh, which is the one thing the feature
-// exists to prevent.
+// Without this a refresh can leave entries unenriched for up to a week: the
+// refreshed list has no English titles, and because Enriched is recent,
+// NeedsEnrich() says no. Someone reading in English then sees romaji for
+// days after every refresh — the one thing the feature exists to prevent.
 func TestUpdateLeavesListEnriched(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(sampleTimetable))

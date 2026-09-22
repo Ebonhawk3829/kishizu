@@ -16,6 +16,7 @@
 package grab
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -23,6 +24,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
@@ -49,6 +52,19 @@ type Reconciler struct {
 	// and only ever removes files inside staging that resolved to no
 	// in-flight episode.
 	PruneUnselected *bool
+	// StallAfter is how long an episode may sit in "downloading" with no
+	// file appearing in staging before it is reported as stalled. Zero means
+	// the default of 48h.
+	//
+	// Without this a dead swarm is invisible forever: the episode is not
+	// hunting (so it is never re-grabbed), it never goes "no release found"
+	// (that is only for "wanted"), and nothing alerts. The staging directory
+	// is the only witness to a download, so its silence is the signal.
+	StallAfter time.Duration
+	// OnStall, when set, is called for each stalled episode. The reconciler
+	// does not alert itself: notifying is the caller's concern, and the
+	// caller may want to batch or debounce.
+	OnStall func(show, title string, ep int)
 }
 
 // New builds a Reconciler.
@@ -67,7 +83,7 @@ func NewWithScheme(st *store.Store, staging, library string, s *naming.Scheme) *
 	if s == nil {
 		s, _ = naming.Resolve(naming.PresetKishizu, "", nil)
 	}
-	return &Reconciler{st: st, Staging: staging, Library: library, Scheme: s}
+	return &Reconciler{st: st, Staging: staging, Library: library, Scheme: s, StallAfter: 48 * time.Hour}
 }
 
 // seasonOf is the season number to file an episode under.
@@ -123,6 +139,7 @@ func (r *Reconciler) Reconcile() error {
 			// Missing directory is normal: nothing has completed for this
 			// show yet.
 			if os.IsNotExist(err) {
+				r.reportStalled(sh, inFlight, nil)
 				continue
 			}
 			log.Printf("grab: scan %s: %v", dir, err)
@@ -133,9 +150,17 @@ func (r *Reconciler) Reconcile() error {
 			log.Printf("grab: offsets for %s: %v", sh.CanonicalName, err)
 			continue
 		}
+		// The raw-number fallback is for adopted seasons only: the release was
+		// chosen by hand, so the user confirmed which file is which episode.
+		// It is keyed on the show's SOURCE, not on offsets being empty — an
+		// airing show whose offsets were cleared (Reset in the UI) must not
+		// have raw numbers trusted for it, or a file numbered 47 files against
+		// a nonexistent row while the episode it should resolve to stays
+		// downloading.
+		trustRaw := sh.Source == store.SourceSeaDex
 		var unresolved []string
 		for _, f := range files {
-			num, ok := episodeOf(f, offsets)
+			num, ok := episodeOf(f, offsets, trustRaw)
 			if !ok {
 				unresolved = append(unresolved, f)
 				debug.Log("%s: cannot resolve episode from %q", sh.CanonicalName, filepath.Base(f))
@@ -156,6 +181,10 @@ func (r *Reconciler) Reconcile() error {
 		// Once every episode in flight has landed, the pack is complete and
 		// anything left in staging was not selected. Prune it.
 		r.pruneUnselected(sh, dir, unresolved, inFlight)
+		// A download that has produced nothing for days is a dead swarm, and
+		// without this check it is invisible: not hunting, never re-grabbed,
+		// never alerted.
+		r.reportStalled(sh, inFlight, files)
 	}
 	return nil
 }
@@ -185,6 +214,9 @@ func (r *Reconciler) pruneUnselected(sh *store.Show, dir string, unresolved []st
 	// was downloading may now be downloaded.
 	eps, err := r.st.EpisodesForShow(sh.ID)
 	if err != nil {
+		// Logged rather than silently skipped: pruning deletes files, and a
+		// database error here must not look like "nothing to prune".
+		log.Printf("grab: prune re-read %s: %v", sh.CanonicalName, err)
 		return
 	}
 	for _, ep := range eps {
@@ -245,19 +277,66 @@ func pruneEmptyDirs(root string) {
 	}
 }
 
+// reportStalled flags episodes that have been "downloading" for longer than
+// the stall window with no file in staging to show for it.
+//
+// The state is deliberately left alone. Rewinding a downloading episode to
+// wanted would re-grab it, and the first grab may still be seeding or
+// slow rather than dead — the user decides, via unlatch, whether to retry.
+// What was missing was the signal, not the state change: nothing anywhere
+// looked at how long an episode had been in flight, so a dead swarm sat
+// silently in "downloading" forever.
+//
+// The grab time is downloaded_at, which UpsertEpisode stamps when the magnet
+// is handed off. An episode with no timestamp (adopted seasons write none)
+// is skipped: there is no evidence of when it started, so there is nothing
+// to measure.
+func (r *Reconciler) reportStalled(sh *store.Show, inFlight map[int]*store.Episode, files []string) {
+	if r.StallAfter <= 0 || len(inFlight) == 0 {
+		return
+	}
+	window := r.StallAfter
+	now := time.Now()
+	for num, ep := range inFlight {
+		if ep.DownloadedAt == nil || now.Sub(*ep.DownloadedAt) < window {
+			continue
+		}
+		// A file for this episode may have landed but not yet resolved —
+		// only report when nothing in staging could be it. Offsets are not
+		// consulted here: a pending file is identified by its raw number,
+		// which is a superset of what the offset-corrected resolution would
+		// accept, so nothing pending is missed.
+		pending := false
+		for _, f := range files {
+			if n, ok := episodeOf(f, nil, true); ok && n == ep.Number {
+				pending = true
+				break
+			}
+		}
+		if pending {
+			continue
+		}
+		log.Printf("grab: %s ep%d stalled: downloading since %s with no file in staging",
+			sh.CanonicalName, num, ep.DownloadedAt.Format(time.DateOnly))
+		if r.OnStall != nil {
+			r.OnStall(sh.CanonicalName, ep.ReleaseTitle, num)
+		}
+	}
+}
+
 // episodeOf resolves a staged file to an episode number.
 //
 // The raw number comes from the filename; the group's offset corrects it to
 // the local numbering. Everything else in the name — resolution, codec,
 // service, subtitle tags — is noise and is ignored.
 //
-// A show with NO offsets at all falls back to the raw number. That is an
-// adopted season: the release was chosen by hand, so there was never a
-// training run to learn offsets from, and requiring one meant every file in
-// the pack failed to resolve and the episodes stayed "downloading" forever.
-// The raw number is right for such a release because the user confirmed which
-// file is which episode at adoption time.
-func episodeOf(path string, offsets map[string]int) (int, bool) {
+// trustRaw enables the raw-number fallback for shows with no offsets. It is
+// the caller's decision because the condition is about the show, not the
+// offsets: an adopted season (source seadex) had its mapping confirmed by the
+// user at adoption time, so the raw number is right. An airing show whose
+// offsets were cleared is NOT that case — trusting raw numbers there files
+// against nonexistent rows and leaves the real episode stuck in flight.
+func episodeOf(path string, offsets map[string]int, trustRaw bool) (int, bool) {
 	// Strip the extension before parsing: the trailing-group regex otherwise
 	// captures "ToonsHub.mkv" as the group name, which matches no offset.
 	base := filepath.Base(path)
@@ -267,8 +346,9 @@ func episodeOf(path string, offsets map[string]int) (int, bool) {
 		return 0, false
 	}
 	if len(offsets) == 0 {
-		// No offsets known: trust the raw number. See the note above.
-		if raw <= 0 {
+		// No offsets known. Only trust the raw number when the caller says the
+		// mapping was confirmed by hand — see the note above.
+		if !trustRaw || raw <= 0 {
 			return 0, false
 		}
 		return raw, true
@@ -365,6 +445,12 @@ func (r *Reconciler) finalise(sh *store.Show, ep *store.Episode, src string) err
 	// Same filesystem, so this is an atomic rename rather than a copy. The
 	// file appears in the library complete and correctly named, or not at all.
 	if err := os.Rename(src, finalPath); err != nil {
+		// EXDEV means staging and the library are on different filesystems,
+		// which the README warns about. The raw error name means nothing to
+		// someone who did not write the code, so say what to do instead.
+		if errors.Is(err, syscall.EXDEV) {
+			return fmt.Errorf("staging and library must be on the same filesystem (see the README note about one mount): %s -> %s", src, finalPath)
+		}
 		return fmt.Errorf("move %s -> %s: %w", src, finalPath, err)
 	}
 

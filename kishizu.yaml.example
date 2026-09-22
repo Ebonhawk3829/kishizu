@@ -70,9 +70,10 @@ server:
       - SubsPlease
       - Erai-Raws
     # Advanced: override the built-in rankings. Lower is better. Omit these
-    # to use the defaults, which order codecs by generational loss (x264
-    # before a re-encoded x265 or AV1) and penalise 2160p as acceptable but
-    # not preferred.
+    # to use the defaults — these are preferences, not facts, so change them
+    # freely. The shipped defaults prefer x264 over a re-encoded x265 or AV1
+    # (a re-encode of an existing encode loses quality twice) and rank 2160p
+    # as acceptable but not preferred (upscaling and bitrate churn).
     # codec_rank:
     #   x264: 0
     #   x265: 20

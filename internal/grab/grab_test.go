@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -39,7 +40,7 @@ func TestEpisodeOfResolvesRealFilenames(t *testing.T) {
 		{"[Feibanyama] Bleach Thousand Year Blood War S01E48 [IQIYI WebRip 2160p H265 Vesyslow AAC Multi-Subs].mkv", 8},
 	}
 	for _, c := range cases {
-		got, ok := episodeOf(c.file, offsets)
+		got, ok := episodeOf(c.file, offsets, false)
 		if !ok {
 			t.Errorf("episodeOf(%q) did not resolve", c.file)
 			continue
@@ -59,7 +60,7 @@ func TestEpisodeOfRejectsUnresolvable(t *testing.T) {
 		"[Erai-raws] Show - 00 [1080p].mkv":    "resolves to episode 0",
 	}
 	for file, why := range cases {
-		if got, ok := episodeOf(file, offsets); ok {
+		if got, ok := episodeOf(file, offsets, false); ok {
 			t.Errorf("episodeOf(%q) = %d, want no match (%s)", file, got, why)
 		}
 	}
@@ -242,10 +243,10 @@ func newTestStore(t *testing.T) *store.Store {
 // it asserts the weaker but still useful property that finalise relies on a
 // plain rename and does not silently fall back to copying.
 //
-// The failure it protects against: os.Rename returned "invalid cross-device
-// link" and the episode stayed in "downloading" forever. Note that `mv` would
-// NOT have caught this — coreutils falls back to copy-then-delete on EXDEV,
-// which is exactly why the original check passed and the bug shipped.
+// The failure it protects against: os.Rename returning "invalid cross-device
+// link" leaves the episode in "downloading" forever. Note that `mv` would
+// NOT catch this — coreutils falls back to copy-then-delete on EXDEV, so a
+// check built on mv passes while the code is broken.
 func TestFinaliseUsesRenameNotCopy(t *testing.T) {
 	st := newTestStore(t)
 	sh, err := st.CreateShow("EXDEV Show", nil, 12)
@@ -331,5 +332,53 @@ func TestSweepDeletesAllWhenKeepZero(t *testing.T) {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("%s should have been deleted, stat err = %v", p, err)
 		}
+	}
+}
+
+// TestStallDetection: an episode in "downloading" for longer than the stall
+// window with no file in staging must be reported.
+//
+// Without this a dead swarm sits silently in "downloading" forever — not
+// hunting, never re-grabbed, never alerted. Nothing else looks at how long
+// an episode has been in flight.
+func TestStallDetection(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	sh, err := st.CreateShow("Show", nil, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One episode, just grabbed. UpsertEpisode stamps downloaded_at, which
+	// is the timestamp the stall check measures from.
+	if err := st.UpsertEpisode(sh.ID, 1, episode.Downloading, "H1", "[G] Show - 01"); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := st.EpisodesForShow(sh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(eps) != 1 || eps[0].DownloadedAt == nil {
+		t.Fatalf("expected a downloading episode with a grab timestamp, got %+v", eps)
+	}
+
+	staging := t.TempDir()
+	var stalled []string
+	rec := NewWithScheme(st, staging, filepath.Join(t.TempDir(), "lib"), nil)
+	rec.StallAfter = 48 * time.Hour
+	rec.OnStall = func(show, title string, ep int) {
+		stalled = append(stalled, fmt.Sprintf("%s:%d", show, ep))
+	}
+
+	// The episode was just grabbed, so nothing should be reported yet.
+	if err := rec.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if len(stalled) != 0 {
+		t.Errorf("freshly-grabbed episode reported as stalled: %v", stalled)
 	}
 }

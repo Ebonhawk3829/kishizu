@@ -8,7 +8,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
-// Stage 4: after adoption, does the mpv watch signal resolve?
+// Stage 4: after adoption, does the player watch signal resolve?
 // matchFile tries FindByFileName (exact, on the stored path) first, then
 // falls back to parsing. The library form is exempt from the confidence gate.
 func TestSimWatchSignal(t *testing.T) {

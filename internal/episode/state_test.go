@@ -18,8 +18,8 @@ func TestTerminalStates(t *testing.T) {
 	}
 }
 
-// TestDeletedEpisodeIsNeverRegrabbed is the regression test for the resurrection
-// bug: an episode watched and deleted last week must not be re-grabbed when a
+// TestDeletedEpisodeIsNeverRegrabbed pins the resurrection guard: an episode
+// watched and deleted last week must not be re-grabbed when a
 // late or re-release appears inside the RSS window (14-33 days).
 func TestDeletedEpisodeIsNeverRegrabbed(t *testing.T) {
 	if Deleted.MayAutoGrab() {

@@ -10,11 +10,14 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
-// Does marking an episode "downloading" avoid the hunting label?
-// StateOf's switch does not list Downloading, so it falls through to the
-// "wanted or downloading" branch, which needs an air date to say anything
-// other than hunting.
-func TestDownloadingStillReadsAsHunting(t *testing.T) {
+// TestAdoptedEpisodeStatesRender: every lifecycle state an adoption creates,
+// with NO air date, must render as something other than "hunting" for the
+// states that are not hunting.
+//
+// StateOf handles Downloading explicitly; the fallthrough to hunting is real
+// only for "wanted" episodes with no air date, which is deliberate — an
+// untrained show must not silently disappear from the UI.
+func TestAdoptedEpisodeStatesRender(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "sim.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -24,14 +27,23 @@ func TestDownloadingStillReadsAsHunting(t *testing.T) {
 	sh, _ := st.CreateShow("DanMachi III", nil, 12)
 
 	// Every lifecycle state, with NO air date, as adoption would create it.
-	for _, s := range []episode.State{
-		episode.Wanted, episode.Downloading, episode.Downloaded,
-		episode.Watched, episode.Deleted,
-	} {
+	cases := map[episode.State]cycle.State{
+		episode.Wanted:      cycle.Hunting, // deliberate: no air date means hunting, so the show stays visible
+		episode.Downloading: cycle.Downloading,
+		episode.Downloaded:  cycle.ReadyToWatch,
+		episode.Watched:     cycle.UpToDate,
+		episode.Deleted:     cycle.UpToDate,
+	}
+	for s, want := range cases {
 		if err := st.SetEpisodeState(sh.ID, 1, s); err != nil {
 			t.Fatal(err)
 		}
-		ep, _ := st.GetEpisode(sh.ID, 1)
-		t.Logf("%-12s -> %s", s, cycle.StateOf(ep, time.Now()))
+		ep, err := st.GetEpisode(sh.ID, 1)
+		if err != nil || ep == nil {
+			t.Fatalf("episode for state %s: %v", s, err)
+		}
+		if got := cycle.StateOf(ep, time.Now()); got != want {
+			t.Errorf("state %s with no air date renders as %q, want %q", s, got, want)
+		}
 	}
 }

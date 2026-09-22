@@ -13,11 +13,10 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
-// These cover the browse-title preference, which used to live in the config
-// file. The bug that motivated moving it: the UI toggled the preference, the
-// server re-read it from the file, the file still held the old value, so the
-// server re-asserted it and reset the control. The preference is now in the
-// database, and the file is only a default for a value never set.
+// These cover the browse-title preference. It lives in the database, not
+// the config file: the file is only a default for a value never set, and a
+// server that re-read a file-backed preference on every list request would
+// re-assert stale values and reset the UI's toggle.
 
 // seededServer builds a server with a timetable cache holding one entry that
 // has both a romaji and an English name, so the display choice is observable.
@@ -51,9 +50,9 @@ func seededServer(t *testing.T) (*Server, *store.Store, string) {
 	return srv, st, path
 }
 
-// TestBrowseTitleToggleSticks: the regression. The toggle writes the
-// preference, and the next list request must honour it rather than
-// re-asserting the file's value.
+// TestBrowseTitleToggleSticks: the toggle writes the preference, and the
+// next list request must honour it rather than re-asserting the file's
+// value.
 func TestBrowseTitleToggleSticks(t *testing.T) {
 	srv, _, path := seededServer(t)
 	// The file says romaji, and is never rewritten by the toggle.

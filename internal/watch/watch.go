@@ -1,7 +1,8 @@
 // Package watch handles the watch signal and the deletion that follows it.
 //
-// The signal comes from a bespoke mpv script that POSTs when an episode
-// finishes. One hop on the tailnet, no third party involved.
+// The signal is a POST from whatever played the file: a player script, a
+// media-server webhook, or a manual mark from the UI. kishizu does not care
+// which — it only cares that the file was watched.
 //
 // Failure direction: if the signal never arrives, nothing is deleted. A missed
 // watch signal leaves files on disk; a false one would remove something the
@@ -66,16 +67,30 @@ func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
 		if err != nil {
 			return deleted, kept, err
 		}
-		// Only watched episodes with a file on disk, newest first.
+		// Only watched episodes with a file on disk, most recently watched
+		// first. Recency, not episode number: the Keep window protects what
+		// the user watched last, and a season watched out of order would
+		// otherwise delete the wrong end.
 		var watched []*store.Episode
 		for _, ep := range eps {
 			if ep.State == episode.Watched && ep.FilePath != "" {
 				watched = append(watched, ep)
 			}
 		}
-		// Newest watched first, so the Keep window protects the latest.
 		sort.Slice(watched, func(i, j int) bool {
-			return watched[i].Number > watched[j].Number
+			// WatchedAt is stamped on the watched transition. Episodes watched
+			// before the column existed have no timestamp; they sort last by
+			// number, which keeps the ordering stable for old rows. Same
+			// timestamp (a season marked watched in one pass) ties on number,
+			// highest first, which is the order they were watched in.
+			a, b := watched[i], watched[j]
+			if a.WatchedAt != nil && b.WatchedAt != nil && !a.WatchedAt.Equal(*b.WatchedAt) {
+				return a.WatchedAt.After(*b.WatchedAt)
+			}
+			if (a.WatchedAt != nil) != (b.WatchedAt != nil) {
+				return a.WatchedAt != nil
+			}
+			return a.Number > b.Number
 		})
 		for i, ep := range watched {
 			if i < h.Keep {

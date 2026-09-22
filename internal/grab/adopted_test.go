@@ -25,7 +25,7 @@ func TestEpisodeOfWithoutOffsets(t *testing.T) {
 		"[sam] Show - 22 [BD 1080p FLAC] [EEDBA47E].mkv": 22,
 	}
 	for name, want := range cases {
-		got, ok := episodeOf(filepath.Join("/staging", name), nil)
+		got, ok := episodeOf(filepath.Join("/staging", name), nil, true)
 		if !ok {
 			t.Errorf("episodeOf(%q) with no offsets: not resolved", name)
 			continue
@@ -36,18 +36,33 @@ func TestEpisodeOfWithoutOffsets(t *testing.T) {
 	}
 }
 
+// TestEpisodeOfRefusesRawWithoutTrust: the raw-number fallback is keyed on
+// the caller's say-so, not on offsets being empty.
+//
+// Empty offsets is also true of an airing show whose offsets were cleared
+// (Reset in the UI). Keying the fallback on emptiness alone would file a
+// file numbered 47 against a nonexistent episode row while the episode it
+// should have resolved to stayed downloading. The caller's confirmation is
+// what makes the raw number trustworthy.
+func TestEpisodeOfRefusesRawWithoutTrust(t *testing.T) {
+	// Same input as the adopted case, but trustRaw is false: no resolution.
+	if _, ok := episodeOf("/staging/[sam] Show - 09 [BD 1080p FLAC].mkv", nil, false); ok {
+		t.Error("raw numbers must not be trusted when the caller does not confirm the mapping")
+	}
+}
+
 // TestEpisodeOfStillUsesOffsetsWhenKnown: the fallback must not displace the
 // offset logic for a show that HAS been trained. Otherwise adopting one season
 // would silently break numbering for every other show.
 func TestEpisodeOfStillUsesOffsetsWhenKnown(t *testing.T) {
 	offsets := map[string]int{"VARYG": 40}
 	// Raw 47 with a VARYG offset of 40 is episode 7.
-	got, ok := episodeOf("/staging/[VARYG] Show - 47 [1080p].mkv", offsets)
+	got, ok := episodeOf("/staging/[VARYG] Show - 47 [1080p].mkv", offsets, false)
 	if !ok || got != 7 {
 		t.Errorf("episodeOf with offsets = %d, %v; want 7, true", got, ok)
 	}
 	// An unknown group still fails to resolve: guessing would be worse.
-	if _, ok := episodeOf("/staging/[Unknown] Show - 47 [1080p].mkv", offsets); ok {
+	if _, ok := episodeOf("/staging/[Unknown] Show - 47 [1080p].mkv", offsets, false); ok {
 		t.Error("an unknown group must not resolve when offsets exist")
 	}
 }
@@ -88,10 +103,9 @@ func TestMediaFilesIsRecursive(t *testing.T) {
 
 // TestReconcileAdoptedPack: the whole path, end to end. An adopted season with
 // no offsets, whose files land in a subdirectory, must be filed into the
-// library and marked downloaded.
-//
-// This is the bug as reported: the download finished in Transmission, the UI
-// still said "downloading", and nothing was moved or renamed.
+// library and marked downloaded — not left in "downloading" with nothing
+// moved or renamed, which is what a top-level-only scan or a missing
+// raw-number fallback produces.
 func TestReconcileAdoptedPack(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

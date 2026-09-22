@@ -111,12 +111,12 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 // toggle is a click-anywhere control: persisting it should be one small write,
 // not a round-trip of every setting with the secrets masked and unmasked.
 //
-// It writes to the database, not the config file. The preference used to live
-// in the file, which meant the UI read-modify-wrote a file the operator also
-// edits by hand, with no locking — and the server re-read it from there on
-// every list request, so a stale file re-asserted the old value and reset the
-// control. A display preference is not deployment configuration: it is
-// per-user, the UI owns it, and the database is already there.
+// It writes to the database, not the config file. A display preference is
+// not deployment configuration: it is per-user, the UI owns it, and the
+// database is already there. The config file is the wrong home — the UI
+// would have to read-modify-write a file the operator also edits by hand,
+// with no locking, and the server re-reading the file on every list request
+// would re-assert stale values and reset the control.
 func (s *Server) handleBrowseTitle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title string `json:"title"`

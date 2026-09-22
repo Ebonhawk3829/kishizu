@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
+	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -117,8 +119,10 @@ func TestWatchedUpToAdvancesSchedule(t *testing.T) {
 	}
 }
 
-// TestAddShow: the UI endpoint creates a show with its aliases, and the name
-// is an alias of itself.
+// TestAddShow: the endpoint requires a schedule URL. A plain name is
+// rejected — without a slug there is no air-date anchor, so the show could
+// never be hunted correctly. The browse modal passes slugs directly and is
+// covered by the adopt flow tests.
 func TestAddShow(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -127,26 +131,16 @@ func TestAddShow(t *testing.T) {
 	defer st.Close()
 
 	s := &Server{st: st}
-	body := `{"name": "New Show", "aliases": ["NS"], "max_episode": 12}`
-	req := httptest.NewRequest("POST", "/api/shows", strings.NewReader(body))
+
+	// A plain name is rejected with a message that says what to do instead.
+	req := httptest.NewRequest("POST", "/api/shows", strings.NewReader(`{"name": "New Show"}`))
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("add-show: status %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != 400 {
+		t.Errorf("plain name: status %d, want 400", rec.Code)
 	}
-
-	sh, err := st.GetShowByName("New Show")
-	if err != nil || sh == nil {
-		t.Fatalf("show not created: %v", err)
-	}
-	found := false
-	for _, a := range sh.Aliases {
-		if a == "New Show" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("canonical name not among aliases: %v", sh.Aliases)
+	if !strings.Contains(rec.Body.String(), "animeschedule.net") {
+		t.Errorf("plain name rejection does not say what to do instead: %s", rec.Body.String())
 	}
 
 	// A blank name is rejected.
@@ -155,5 +149,40 @@ func TestAddShow(t *testing.T) {
 	s.Handler().ServeHTTP(rec2, req2)
 	if rec2.Code != 400 {
 		t.Errorf("blank name: status %d, want 400", rec2.Code)
+	}
+}
+
+// TestAddShowMisspelledURL covers the well-formed-but-wrong case: the URL
+// passes every structural check (right host, /anime/ path) but the slug does
+// not exist. The schedule's 404 is evidence the site is up and the show is
+// not there — that is the user's typo, so it must come back as a 400 with a
+// message that says what to do next, not a 500 that reads as a server fault.
+func TestAddShowMisspelledURL(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+
+	s := &Server{st: st}
+
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer stub.Close()
+	restore := schedule.PinShowURL(stub.URL)
+	defer restore()
+
+	req := httptest.NewRequest("POST", "/api/shows",
+		strings.NewReader(`{"name": "https://animeschedule.net/anime/fooo-bar"}`))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Errorf("misspelled slug: status %d, want 400", rec.Code)
+	}
+	for _, want := range []string{"no show at", "Browse this season"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("misspelled slug rejection missing %q: %s", want, rec.Body.String())
+		}
 	}
 }
