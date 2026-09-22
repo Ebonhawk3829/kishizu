@@ -23,12 +23,8 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
-// notify sends an alert, logging any failure.
-//
-// Notifications are best-effort — a missed ping must never stop a download —
-// but a failure has to be visible. Discarding the error is how a wrong topic
-// URL went unnoticed: every ping failed silently and the only symptom was
-// that no notification arrived.
+// alert sends a notification, logging any failure. Best-effort: a missed
+// ping must never stop a download, but a failure has to be visible.
 func alert(n notify.Notifier, title, message string, priority notify.Priority) {
 	if n == nil {
 		return
@@ -38,12 +34,9 @@ func alert(n notify.Notifier, title, message string, priority notify.Priority) {
 	}
 }
 
-// runLoop polls Nyaa on a schedule and hands grabs to Transmission.
-//
-// dry-run is the default and matters: the machine is built and trained before
-// it is switched on, and the user decides when. In dry-run the loop logs every
-// decision with its reason, so the behaviour can be reviewed before anything
-// downloads.
+// runLoop polls the indexer on a schedule and hands grabs to the configured
+// torrent client. Dry-run is the default: the loop logs every decision with
+// its reason so behaviour can be reviewed before anything downloads.
 //
 // Two scheduled jobs run alongside the poller, each writing to its own store
 // so the UI only ever reads:
@@ -69,19 +62,11 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 		dryRun = *s.DryRun
 	}
 
-	// The quality policy is global and comes from configuration, so the
-	// listener ranks releases by what the user actually asked for. Only the
-	// fields that were set are applied, so a partial section keeps the
-	// shipped defaults.
 	l := listen.NewWithPolicy(st, indexer, buildQuality(s.Quality))
 	w := watch.New(st, s.Library, keep)
 	rec := grab.NewWithScheme(st, s.Staging, s.Library, scheme)
-	// Pruning deletes data, so it is opt-in and comes from configuration
-	// rather than being on by default.
 	rec.PruneUnselected = s.PruneUnselected
-	// A download that produces nothing for two days is a dead swarm. The
-	// reconciler detects it; the alert is what makes it visible. Latched so
-	// a stalled episode pings once rather than every 15 minutes.
+	// A stalled download pings once, not on every poll.
 	stalled := map[string]bool{}
 	rec.OnStall = func(show, title string, ep int) {
 		key := fmt.Sprintf("%s:%d", show, ep)
@@ -97,19 +82,15 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	log.Printf("listener: polling every %s (dry-run=%v, downloader=%s)",
 		interval, dryRun, dl.Name())
 
-	// lastPolled tracks when each show was last fetched, so per-show intervals
-	// are honoured: a hunting show polls every 3 minutes while an up-to-date
-	// one is never touched.
+	// lastPolled honours per-show intervals: a hunting show polls every 3
+	// minutes, an up-to-date one is never touched.
 	lastPolled := map[int64]time.Time{}
-	// downloaderDown latches the failure alert so a sustained outage pings
-	// once rather than on every poll.
 	downloaderDown := false
 
 	poll := func() {
-		// Poll only the shows that are due: hunting episodes get the aggressive
-		// rate, no-release-found keeps a slow safety net, and shows without any
-		// air date stay on the legacy interval. Everything else is dormant —
-		// zero requests.
+		// Hunting episodes get the aggressive rate, no-release-found keeps a
+		// slow safety net, shows without an air date stay on the legacy
+		// interval, and everything else is dormant.
 		due := l.DueShows(interval)
 		if len(due) == 0 {
 			log.Printf("listen: nothing due")
@@ -136,9 +117,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 					log.Printf("WOULD GRAB %s ep%d %s (%s)", d.Show, d.Episode, d.Item.Title, d.Reason)
 					continue
 				}
-				// One staging directory per show. The downloader creates it
-				// on add, but making it here means the path is known to exist
-				// and is owned by our uid rather than the downloader's.
+				// One staging directory per show, created here so the path
+				// exists and is owned by our uid.
 				dir := filepath.Join(s.Staging, release.Sanitise(d.Show))
 				if err := os.MkdirAll(dir, 0o775); err != nil {
 					log.Printf("staging mkdir %s: %v", dir, err)
@@ -146,8 +126,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 				}
 				if err := dl.Add(ctx, download.Magnet(d.Item.InfoHash, d.Item.Title), dir); err != nil {
 					log.Printf("%s add: %v", dl.Name(), err)
-					// Alert once, then stay quiet until it recovers. At a
-					// 3-minute poll, pinging every failure is ~480 a day.
+					// Alert once per outage; at a 3-minute poll, pinging
+					// every failure is ~480 a day.
 					if !downloaderDown {
 						downloaderDown = true
 						alert(n, "kishizu: "+dl.Name()+" unreachable",
@@ -169,8 +149,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 				alert(n, "kishizu: downloading", fmt.Sprintf("%s ep%d — %s", d.Show, d.Episode, d.Item.Title), notify.PriorityLow)
 			}
 		}
-		// Logged every tick, including when nothing was grabbed: silence in the
-		// log is otherwise indistinguishable from a stuck loop.
+		// Logged every tick: silence in the log is otherwise
+		// indistinguishable from a stuck loop.
 		log.Printf("listen: polled %d of %d due shows", polled, len(due))
 	}
 
@@ -183,28 +163,21 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	sweep := time.NewTicker(15 * time.Minute)
 	defer sweep.Stop()
 
-	// The schedule is re-checked daily: it is the source of the air times that
-	// drive the windows, and delays move them. One request per show, straight
-	// from each show's own page — the site publishes the same facts on a
-	// weekly timetable, but consulting a second view of the same data would
-	// mean matching tiles to shows, an exact-identity problem the slug
-	// otherwise makes unnecessary.
+	// The schedule is re-checked daily: it is the source of the air times
+	// that drive the hunt windows, and delays move them. One request per
+	// show, straight from each show's own page.
 	daily := time.NewTicker(24 * time.Hour)
 	defer daily.Stop()
 
-	// How many consecutive daily checks must find a show's page missing before
-	// it is treated as finished.
-	//
-	// One 404 is not proof of anything: pages vanish transiently during a site
-	// update, and a single bad response would otherwise mark a show complete
-	// and stop it being hunted. Three consecutive days is a pattern rather than
-	// a blip, and the cost of waiting is two days of polling a show that has
-	// ended — which is harmless, since nothing is due for it anyway.
+	// A show's page must be missing this many consecutive daily checks before
+	// it is treated as finished: pages vanish transiently during a site
+	// update, and one bad response would otherwise end a live season. The
+	// cost of waiting is two days of polling a show that has ended, which is
+	// harmless since nothing is due for it.
 	const missingThreshold = 3
 
-	// Consecutive not-found sightings per show, across runs. Held outside the
-	// closure so it survives between refreshes; a counter that reset each pass
-	// could never reach the threshold.
+	// Consecutive not-found sightings per show, held outside the closure so
+	// it survives between refreshes.
 	misses := map[int64]int{}
 
 	refreshSchedule := func() {
@@ -224,11 +197,9 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			}
 			info, err := schedule.FetchShow(nil, sh.Slug)
 			if err != nil {
-				// A 404 is evidence the page is gone; a timeout or a 5xx is the
-				// absence of evidence. Only the first says anything about the
-				// show, and even then one observation is not enough to claim it
-				// has finished — a page can 404 transiently during a site
-				// update. Count the sightings and act on the third.
+				// A 404 is evidence the page is gone; a timeout or a 5xx is
+				// the absence of evidence. Even a 404 needs three sightings
+				// before it is believed.
 				if errors.Is(err, schedule.ErrNotFound) {
 					misses[sh.ID]++
 					log.Printf("schedule refresh: %s: page not found (%d of %d)",
@@ -301,16 +272,10 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	// Refresh once at startup so the windows are current.
 	refreshSchedule()
 
-	// The seasonal browse list, on its own weekly schedule.
-	//
-	// Separate from the daily job above because the two have different costs
-	// and different cadences: this one is a whole season (~110 shows) rather
-	// than the handful being tracked, and English titles do not change once a
-	// season is under way.
-	//
-	// It writes to the cache and the browse modal only reads, so the list is
-	// available when animeschedule is unreachable and opening browse costs no
-	// network I/O.
+	// The seasonal browse list, on its own weekly schedule: it covers a whole
+	// season (~110 shows) rather than the handful tracked, and English titles
+	// do not change once a season is under way. It writes to the cache, which
+	// the browse panel only reads, so browsing costs no network I/O.
 	weekly := time.NewTicker(schedule.EnrichTTL)
 	defer weekly.Stop()
 
@@ -320,9 +285,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 		}
 		tt, err := ttCache.Update(nil)
 		if err != nil {
-			// Non-fatal: the existing snapshot stays, and browsing keeps
-			// working from it. Logged because a silent failure here would
-			// look like a list that simply never changes.
+			// Non-fatal: the existing snapshot stays and browsing keeps working
+			// from it.
 			log.Printf("timetable: refresh failed, keeping the cached list: %v", err)
 			return
 		}
@@ -330,11 +294,9 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			len(tt.Entries), countEnglish(tt))
 	}
 
-	// Warmed at startup, so a fresh container has a browse list immediately
-	// rather than an empty panel until the first weekly pass. This is the one
-	// case that costs the full ~110 requests, because there is nothing on disk
-	// to carry titles from — every later refresh reuses them by slug and costs
-	// one request unless the season actually gained shows.
+	// Warmed at startup so a fresh container has a browse list immediately.
+	// This is the one pass that costs the full ~110 requests; later refreshes
+	// reuse titles by slug.
 	go refreshTimetable()
 
 	for {
@@ -349,9 +311,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 		case <-weekly.C:
 			refreshTimetable()
 		case <-sweep.C:
-			// Finalise finished downloads: rename into the library layout,
-			// record file_path, advance the latch. This is what makes the
-			// watch signal deterministic.
+			// Finalise finished downloads and delete watched ones.
 			if !dryRun {
 				if err := rec.Reconcile(); err != nil {
 					log.Printf("reconcile: %v", err)
@@ -374,12 +334,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	}
 }
 
-// countEnglish is how many entries carry an English title.
-//
-// Reported after a refresh so the log says whether enrichment actually landed.
-// A refresh that returns 110 shows and 0 English titles is a different problem
-// from one that returns 110 and 110, and neither is visible from the count
-// alone.
+// countEnglish is how many entries carry an English title, reported after a
+// refresh so the log says whether enrichment actually landed.
 func countEnglish(tt *schedule.Timetable) int {
 	n := 0
 	for _, e := range tt.Entries {

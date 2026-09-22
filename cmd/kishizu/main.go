@@ -38,9 +38,6 @@ import (
 )
 
 func main() {
-	// Log in UTC so timestamps agree with the database, which stores UTC via
-	// SQLite's datetime('now'). Otherwise the two read 12 hours apart for the
-	// same event, and the container's TZ decides which one looks wrong.
 	log.SetFlags(log.LstdFlags | log.LUTC)
 
 	f := parseFlags()
@@ -50,18 +47,14 @@ func main() {
 		return
 	}
 
-	// Debug can also be set with KISHIZU_DEBUG=1, which the package reads at
-	// init; the flag wins when given.
+	// KISHIZU_DEBUG=1 also enables debug; the flag wins.
 	if f.debugOn {
 		debug.Set(true)
 	}
 
-	// The config file is the source of truth; flags override it.
-	//
-	// Loading it before anything else is what makes a mid-season migration
-	// work: the paths, the client and the quality policy are all in place
-	// before the database is seeded, so a pre-seeded library is filed the way
-	// the user's existing one already is.
+	// The config file is the source of truth; flags override it. Loading it
+	// first means a pre-seeded library is filed the way the user's existing
+	// one already is.
 	cfg, err := config.Load(f.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
@@ -69,20 +62,14 @@ func main() {
 	}
 	applyFlagOverrides(cfg, f.overrides())
 
-	// The indexer client is built once and threaded to everything that
-	// queries. It carries its own configuration, so there is no ordering to
-	// get wrong: a caller without a client cannot query at all, rather than
-	// silently querying the default indexer.
 	indexer, err := buildIndexer(cfg.Server.Indexer)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 
-	// Fail loudly on a missing endpoint. Both of these once defaulted to a
-	// placeholder hostname, which looked configured but never resolved: the
-	// listener polled happily and every grab or notification failed silently.
-	// An empty value is a deployment mistake, not a working default.
+	// An empty endpoint must fail at startup rather than surface as a failed
+	// grab later.
 	if !f.dryRun && cfg.Server.Downloader.TransmissionRPC == "" &&
 		cfg.Server.Downloader.Kind == string(download.KindTransmission) {
 		fmt.Fprintf(os.Stderr, "a Transmission RPC endpoint is required unless -dry-run is set\n")
@@ -94,9 +81,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "open store: %v\n", err)
 		os.Exit(1)
 	}
-	// os.Exit skips defers, but these paths all return through main normally;
-	// the close is for the ones that do. A failed close on exit is
-	// unreportable, so the error is dropped deliberately.
+	// os.Exit skips defers, so this close covers the paths that return
+	// normally.
 	defer func() { _ = st.Close() }()
 
 	switch {
@@ -121,10 +107,7 @@ func main() {
 	}
 }
 
-// runReconcile files whatever has already completed in staging, once, and
-// exits. For recovering from a bug that left episodes stuck in "downloading",
-// and for checking what the reconciler would do without waiting for the next
-// sweep.
+// runReconcile files completed downloads once and exits.
 func runReconcile(st *store.Store, cfg *config.File) {
 	scheme, err := buildScheme(cfg.Server.Naming)
 	if err != nil {
@@ -148,12 +131,9 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 		fmt.Fprintf(os.Stderr, "web: %v\n", err)
 		os.Exit(1)
 	}
-	// The training endpoints query the indexer, and must query the same one
-	// the listener does: a training run that searched a different indexer
-	// would teach offsets from releases the pipeline never sees.
+	// Training must query the same indexer the listener polls, or offsets
+	// would be learned from releases the pipeline never sees.
 	srv.SetIndexer(indexer)
-	// The watch handler lets /api/watched sweep files after marking. The
-	// library root also bounds deletion: paths outside it are refused.
 	srv.SetWatch(watch.New(st, f.library, f.keep))
 
 	n, err := buildNotifier(f.notifier, f.ntfyURL, f.gotifyURL, f.gotifyToken)
@@ -165,8 +145,8 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 		srv.SetNotifier(n)
 	}
 
-	// Cover art is cached next to the database, so the UI does not depend
-	// on the schedule's CDN at page-load time.
+	// Cover art is cached next to the database, so page loads stay off the
+	// schedule's CDN.
 	artCache, err := art.New(filepath.Join(filepath.Dir(f.dbPath), "art"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "art cache: %v\n", err)
@@ -174,9 +154,8 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	}
 	srv.SetArt(artCache)
 
-	// The downloader is built once and shared: the listener and the
-	// adoption endpoints must hand off to the same client, or an adopted
-	// season would land somewhere the reconciler never looks.
+	// One downloader shared by the listener and adoption, so an adopted
+	// season lands where the reconciler looks.
 	dl, err := buildDownloader(cfg.Server.Downloader.Kind,
 		cfg.Server.Downloader.TransmissionRPC,
 		cfg.Server.Downloader.QBittorrentURL,
@@ -186,12 +165,10 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	// The client's web address backs the link the UI shows when a download
-	// needs manual attention. Empty for a client without a web UI.
 	srv.SetDownloaderURL(dl.URL())
 
-	// The naming scheme must be the one the reconciler writes with, or
-	// the watch signal cannot recognise kishizu's own filenames.
+	// The naming scheme must match the reconciler's, or the watch signal
+	// cannot recognise kishizu's own filenames.
 	scheme, err := buildScheme(cfg.Server.Naming)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -199,9 +176,8 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	}
 	srv.SetNaming(scheme)
 
-	// The timetable cache backs the browse list. It lives next to the
-	// database so it survives a restart, and keeps browsing working when
-	// the schedule site is unreachable.
+	// The timetable cache lives next to the database so it survives a
+	// restart and browsing works when the schedule site is unreachable.
 	ttCache, err := schedule.NewCache(filepath.Join(filepath.Dir(f.dbPath), "cache"), schedule.DefaultTimetableTTL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "timetable cache: %v\n", err)
@@ -209,18 +185,9 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	}
 	srv.SetTimetable(ttCache)
 
-	// The settings UI reads and writes the same file the flags override,
-	// so there is one source of truth rather than two that can disagree.
 	srv.SetConfigPath(f.configPath)
-
-	// Adopting a finished season needs the same paths and downloader the
-	// listener uses. Without this the endpoints report that adoption is
-	// not configured rather than half-working.
 	srv.SetAdopt(cfg.Server.Staging, cfg.Server.Library, dl)
 
-	// The listener runs alongside the UI. It is dry-run by default: it
-	// polls, matches and logs decisions, but hands nothing to the
-	// downloader until -dry-run=false. The user switches it on deliberately.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go runLoop(ctx, st, artCache, dl, scheme, cfg, n, ttCache, indexer)
@@ -230,10 +197,8 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	}
 }
 
-// runAdopt adopts a finished season from a releases.moe entry. It is a
-// separate entry point from the airing pipeline: it reads one SeaDex entry,
-// proposes which files are which episode, and hands the result to the same
-// download-and-file machinery. Dry run unless -adopt-confirm is given.
+// runAdopt adopts a finished season from a releases.moe entry. Dry run
+// unless -adopt-confirm is given.
 func runAdopt(st *store.Store, cfg *config.File, f *flags) {
 	dl, err := buildDownloader(cfg.Server.Downloader.Kind,
 		cfg.Server.Downloader.TransmissionRPC,
@@ -334,13 +299,10 @@ func runReport(st *store.Store, f *flags, indexer *nyaa.Client) {
 	}
 }
 
-// reportShow prints what the listener WOULD grab for one show right now, with
-// the reason for every decision. It is the real pipeline — the same PollShow
-// and FilterPreferences the live loop runs — so the report cannot drift from
-// what -dry-run=false would actually do. Nothing is handed to the downloader.
-//
-// Kept deliberately as a simulation tool: it answers "what would kishizu do
-// and why" against live data without touching anything.
+// reportShow prints what the listener would grab for one show right now, with
+// the reason for every decision. It runs the same pipeline as the live loop,
+// so the report cannot drift from what -dry-run=false would do. Nothing is
+// handed to the downloader.
 func reportShow(ctx context.Context, st *store.Store, sh *store.Show, indexer *nyaa.Client) {
 	l := listen.New(st, indexer)
 
@@ -364,8 +326,8 @@ func reportShow(ctx context.Context, st *store.Store, sh *store.Show, indexer *n
 		}
 	}
 
-	// The refusals are the interesting part: "why was this not grabbed" is the
-	// question a dry run exists to answer.
+	// The refusals are the interesting part: "why was this not grabbed" is
+	// what a dry run exists to answer.
 	skipped := 0
 	for _, d := range decisions {
 		if !d.Grab {

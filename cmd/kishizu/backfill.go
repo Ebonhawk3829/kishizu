@@ -14,17 +14,12 @@ import (
 //
 // The mapping file is hand-maintained (see slugs.yaml): resolving a show name
 // to a slug needs a judgement about which season is meant, and the site's own
-// search is not reliable enough to do it automatically. Doing it once by hand
-// is cheaper than making the tool guess every day.
+// search is not reliable enough to do it automatically.
 //
-// For each mapped show this:
-//   - records the slug, so the daily refresh matches exactly instead of
-//     fuzzy-matching titles
-//   - fills max_episode when the database has 0 and the site knows the count
-//   - adds every alternative name as an alias, tagged with its provenance
-//
-// It never overwrites a max_episode the user set deliberately, and it never
-// removes anything. Safe to re-run.
+// For each mapped show this records the slug, fills max_episode when the
+// database has 0, and adds every alternative name as an alias. It never
+// overwrites a deliberate max_episode and never removes anything. Safe to
+// re-run.
 func backfillSlugs(st *store.Store, path string) error {
 	mapping, err := loadSlugMapping(path)
 	if err != nil {
@@ -58,10 +53,9 @@ func backfillSlugs(st *store.Store, path string) error {
 			continue
 		}
 
-		// Only fill a season length we do not have. A non-zero max was either
-		// set by the user or learned from a real release, and both outrank the
-		// site's estimate. SeasonLength (not Episodes) because a film reports
-		// "1", which would cap the season after one download.
+		// Only fill a season length we do not have: a non-zero max was set
+		// by the user or learned from a real release. SeasonLength rather
+		// than Episodes, because a film reports "1".
 		if n := info.SeasonLength(); n > 0 && sh.MaxEpisode == 0 {
 			if err := st.SetMaxEpisode(sh.ID, n); err != nil {
 				fmt.Fprintf(os.Stderr, "  %s: set max: %v\n", sh.CanonicalName, err)
@@ -79,10 +73,11 @@ func backfillSlugs(st *store.Store, path string) error {
 			added++
 		}
 
-		// The page's Release Time is episode 1's air slot, and for an unaired
-		// show it is the only air information available. Only fill it when the
-		// show has no schedule point yet, so a live season's real next-episode
-		// time is never overwritten with its premiere date.
+		// The page's Release Time is episode 1's air slot, and for an
+		// unaired show it is the only air information available. Fill it
+		// only when the show has no schedule point yet, so a live season's
+		// real next-episode time is never overwritten with its premiere
+		// date.
 		if !info.AirsAt.IsZero() {
 			if _, at, _ := st.NextEpisode(sh.ID); at == nil {
 				if err := st.SetNextEpisode(sh.ID, 1, info.AirsAt); err != nil {
@@ -107,12 +102,10 @@ func backfillSlugs(st *store.Store, path string) error {
 	return nil
 }
 
-// splitMapping separates a "name: slug" line into its two halves.
-//
-// The split is on the LAST colon, not the first, because show names contain
-// colons: "BLEACH: Thousand-Year Blood War - The Calamity" and
-// "Re:ZERO -Starting Life in Another World- Season 4" both do. A quoted name is
-// unquoted after splitting, which is why slugs.yaml quotes those entries.
+// splitMapping separates a "name: slug" line into its two halves, on the
+// LAST colon: show names contain colons ("BLEACH: Thousand-Year Blood War").
+// A quoted name is unquoted after splitting, which is why slugs.yaml quotes
+// those entries.
 func splitMapping(line string) (name, slug string) {
 	i := strings.LastIndex(line, ":")
 	if i <= 0 {
@@ -124,11 +117,9 @@ func splitMapping(line string) (name, slug string) {
 	return name, slug
 }
 
-// loadSlugMapping reads the hand-maintained name -> slug file.
-//
-// The format is a flat "name: slug" map under a "shows:" key, parsed by hand to
-// match the rest of the project's approach to its own config files. Quoted keys
-// are supported because show names contain colons.
+// loadSlugMapping reads the hand-maintained name -> slug file: a flat
+// "name: slug" map under a "shows:" key, parsed by hand because show names
+// contain colons.
 func loadSlugMapping(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

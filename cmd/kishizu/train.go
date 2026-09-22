@@ -30,11 +30,8 @@ func nextUnwatched(st *store.Store, sh *store.Show) int {
 	return next
 }
 
-// trainShowCmd runs the propose-and-confirm loop interactively.
-//
-// Flow: the user supplies one seed release for a known episode, then answers
-// yes/no (with a reason) for whatever the tool proposes. Each answer refits the
-// model. Nothing is downloaded.
+// trainShowCmd runs the propose-and-confirm loop interactively. Nothing is
+// downloaded.
 func trainShowCmd(ctx context.Context, st *store.Store, sh *store.Show, targetEp int, indexer *nyaa.Client) error {
 	items, err := indexer.Fetch(ctx, indexer.FeedURL(sh.CanonicalName))
 	if err != nil {

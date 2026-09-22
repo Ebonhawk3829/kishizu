@@ -6,10 +6,11 @@
 // worth. Keeping them apart is what lets the policy be configured without
 // touching the parser.
 //
-// The policy is global — it holds for every show — and is set in advance. It
-// is never written by training: training calibrates the parser (per-group
-// offsets and vocabulary), and a per-release answer that contradicted a
-// preference nobody was unsure about would be a regression, not a refinement.
+// The policy is global — it holds for every show — and is set in advance,
+// configured before any release is evaluated. Training is the parser's
+// domain: it teaches per-group offsets and vocabulary, and the policy stays
+// fixed while it runs, so a training answer can never contradict a
+// preference.
 package quality
 
 import (

@@ -15,22 +15,9 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
-// adoptSeason prepares an adoption of a finished season from a SeaDex entry
-// and either prints the plan or performs it.
-//
-// Without -adopt-confirm it is a dry run: it resolves the entry, classifies
-// every file, and reports exactly what would be handed to Transmission and
-// what episode rows would be created. Nothing is written.
-//
-// With -adopt-confirm it performs the adoption: creates the show, marks the
-// confirmed episodes downloading, and hands the magnet to Transmission into
-// the show's staging directory. From there the existing Reconcile takes
-// over — it finds the files, renames them into the library, and the sweeper
-// deletes them after watching.
-//
-// -adopt-episodes overrides the classifier's proposal, which is how the
-// review step is exercised before the UI exists: a comma-separated list of
-// the numbers to adopt, in the same order as the listed files.
+// adoptSeason adopts a finished season from a SeaDex entry. Dry run unless
+// confirm is given; episodeList (-adopt-episodes) overrides the classifier's
+// proposal.
 func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, staging, library string, dl download.Downloader, confirm bool) error {
 	id := seadex.AniListIDFromURL(rawURL)
 	if id == 0 {
@@ -102,8 +89,8 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 	libraryDir := filepath.Join(library, show)
 
 	fmt.Printf("Adopting %d episode(s): %s\n", len(eps), joinInts(eps))
-	// The magnet's display name is the torrent's own name, not the group:
-	// the client shows it in its list, and "sam" alone says nothing.
+	// The magnet's display name is the torrent's own name, which the client
+	// shows in its list.
 	fmt.Printf("Magnet:      %s\n", download.Magnet(plan.Torrent.InfoHash, title))
 	fmt.Printf("Staging dir: %s\n", stagingDir)
 	fmt.Printf("Library dir: %s\n", libraryDir)
@@ -114,8 +101,8 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 		return nil
 	}
 
-	// Create the show. Source is seadex so the airing pipeline skips it and
-	// the UI does not ask whether it has aired or needs training.
+	// Source seadex: the airing pipeline skips it and the UI does not ask
+	// whether it has aired or needs training.
 	sh, err := st.CreateShow(title, nil, maxOf(eps))
 	if err != nil {
 		return fmt.Errorf("create show: %w", err)
@@ -124,8 +111,8 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 		return fmt.Errorf("set source: %w", err)
 	}
 
-	// Mark the confirmed episodes downloading. This is what makes Reconcile
-	// pick the files up: it only finalises episodes already in flight.
+	// Marking downloading is what makes Reconcile pick the files up: it only
+	// finalises episodes already in flight.
 	for _, n := range eps {
 		if err := st.UpsertEpisode(sh.ID, n, episode.Downloading, plan.Torrent.InfoHash, plan.Torrent.ReleaseGroup); err != nil {
 			return fmt.Errorf("mark episode %d: %w", n, err)
@@ -136,8 +123,7 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 		return fmt.Errorf("mark seen: %w", err)
 	}
 
-	// One staging directory per show, created here so it is owned by our uid
-	// rather than the downloader's.
+	// One staging directory per show, created here so it is owned by our uid.
 	if err := os.MkdirAll(stagingDir, 0o775); err != nil {
 		return fmt.Errorf("staging mkdir %s: %w", stagingDir, err)
 	}

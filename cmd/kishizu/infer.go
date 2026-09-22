@@ -12,16 +12,7 @@ import (
 )
 
 // inferOffsets derives group offsets from the schedule and feed for every
-// show.
-//
-// This is the shortcut for a fresh season: instead of confirming parses by
-// hand, the air times already in the database do the work. Results are
-// reviewable per show and resettable from the training panel.
-//
-// The group order is global and set in advance, so it is read from the
-// quality policy rather than taken as an argument. A flag that only reached
-// this function would do nothing for the pipeline that actually grabs: the
-// listener reads the policy directly.
+// show. Results are reviewable and resettable per show in the UI.
 func inferOffsets(ctx context.Context, st *store.Store, indexer *nyaa.Client) error {
 	shows, err := st.ListShows()
 	if err != nil {

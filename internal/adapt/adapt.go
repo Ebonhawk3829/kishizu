@@ -58,8 +58,8 @@ func (s *Show) CanonicalName() string { return s.sh.CanonicalName }
 //
 // These are used to match Nyaa release titles, where fuzzy matching is the
 // whole point: release names are written by strangers and never match a
-// canonical name exactly. They are NOT used to resolve the watch signal —
-// that resolves by exact filename, because kishizu wrote the file itself.
+// canonical name exactly. The watch signal resolves by exact filename
+// instead, because kishizu wrote the file itself and needs no inference.
 func (s *Show) Aliases() []string {
 	if len(s.sh.Aliases) > 0 {
 		return s.sh.Aliases

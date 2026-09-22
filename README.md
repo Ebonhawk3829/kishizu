@@ -100,10 +100,14 @@ at your library and watch what it decides before it downloads anything.
 
 ### Docker Compose
 
+An example deployment, using Transmission as the client. Adjust the image tag,
+the client settings and the paths to your setup — qBittorrent works the same
+way (see the [flags](#flags) table).
+
 ```yaml
 services:
   kishizu:
-    image: ghcr.io/ebonhawk3829/kishizu:1.0.0
+    image: ghcr.io/ebonhawk3829/kishizu:1.1.2   # or :latest
     user: "1000:1000"             # your media user's uid:gid
     volumes:
       - ./config:/data            # database, config file, caches
@@ -124,7 +128,8 @@ services:
       - "/media/downloads/anime"
       - "-library"
       - "/media/anime"
-      - "-dry-run=false"          # remove to stay dry
+      - "-dry-run=false"          # kishizu is dry-run by default; this line
+                                  # is what switches downloading on
 ```
 
 Then open **http://localhost:8098**.
@@ -139,9 +144,9 @@ mounts for library and staging fail with `invalid cross-device link`.
 localhost by default, which Docker's port mapping cannot reach. The host side
 of the mapping (`127.0.0.1:8098:8098`) is what keeps it off your network.
 
-kishizu is dry-run by default: it polls, matches and logs what it would
-download, but hands nothing to your torrent client until you remove
-`-dry-run`.
+**Dry-run is the default.** With `-dry-run=false` in the command above, kishizu
+downloads for real. Drop that line to stay dry: it polls, matches and logs
+what it would download, and hands nothing to your torrent client.
 
 ### From source
 
@@ -262,12 +267,11 @@ the panel is never empty. **Refresh** in the panel forces it now.
 https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 ```
 
-**Or just type a name.** A plain name works, but such a show has no slug, so it
-never gets an air date from the schedule. It will sit until you train it and it
-picks up a release.
-
-**Or list them in the config file** and run `-seed`, which is how you pre-seed
-a fresh database in one go.
+A plain show name is rejected: the slug is the identity that fills in the
+season length, cover art and air dates, and a name alone carries none of that.
+To add a show by name, list it in the config file and run `-seed` — that is
+also how you pre-seed a fresh database in one go. A show seeded without a slug
+gets its air dates once you attach one with `-backfill-slugs`.
 
 Japanese names and abbreviations are not imported. Release titles are
 romanised, so a Japanese name can never appear in one, and a short one can
@@ -284,14 +288,14 @@ Offsets are learned either by training (confirm the parse of a few releases, one
 per numbering convention) or by `-infer`, which derives them from the structure
 of each group's numbering. Both are reviewable and resettable per show in the UI.
 
-Training calibrates the parser. It does not set preferences. Quality policy
-(resolution floor, codec ranking, batch rejection, dub demotion, group order) is
-global and set in advance, and is never written by training. A training run
-teaches two things: the per-group episode offset, and the vocabulary, meaning
-that a token in a title maps to a canonical value so every future release using
-that spelling is readable.
+Training calibrates the parser: a training run teaches the per-group episode
+offset and the vocabulary, meaning that a token in a title maps to a canonical
+value so every future release using that spelling is readable. Quality policy
+(resolution floor, codec ranking, batch rejection, dub demotion, group order)
+sits outside training entirely — it is global, set in advance in the config
+file, and applies to every show the same way.
 
-A show is not hunted until it has been trained. Without at least one known group
+A show starts hunting once it has been trained. Without at least one known group
 offset there is nothing to reason with, so polling would only burn requests.
 Untrained shows show as *needs training* in the UI.
 
@@ -311,9 +315,9 @@ scheduled slot; those stay *upcoming* until the site publishes a time.
 | *no release found* | The 72 hour window closed with nothing grabbed. |
 | *up to date* | Watched or deleted. |
 
-An episode in *downloading* is not polled. It cannot be re-grabbed, so polling
-would evaluate releases nothing can act on. Quality is settled before the grab
-instead, by the global rules and the group order.
+An episode in *downloading* sits outside polling: it cannot be re-grabbed, so
+polling would evaluate releases nothing can act on. Quality is settled before
+the grab instead, by the global rules and the group order.
 
 ## Adopting a finished season
 
@@ -338,20 +342,19 @@ are left unchecked by default. `-adopt-episodes` overrides the proposal, one
 number per file, where `0` means download it but do not track it as an episode.
 
 **The whole release is downloaded.** A magnet link carries no file list, so the
-checkboxes decide which files become *episodes*, not which files arrive. Files
-you leave unchecked are downloaded with the pack and then removed once the
-torrent completes, if `prune_unselected` is enabled. If you tick the wrong
-boxes, the wrong files are kept — that is your call.
+checkboxes decide which files become *episodes*; every file in the pack arrives
+regardless. Files you leave unchecked are removed once the torrent completes,
+if `prune_unselected` is enabled. If you tick the wrong boxes, the wrong files
+are kept — that is your call.
 
-Adopted seasons are not polled and are never trained: the release was chosen by
+Adopted seasons sit outside the airing pipeline: the release was chosen by
 hand, so there is nothing to hunt for and nothing to learn. They go straight to
 *downloading*, then *ready to watch*, and are deleted after watching like any
 other episode. They appear under **Complete** rather than Airing.
 
-Cover art comes from AniList. An adopted season never touches
-animeschedule.net, and SeaDex's API exposes no image, but the entry URL carries
-the AniList id and AniList serves the same poster the SeaDex page shows. If the
-lookup fails the adoption still succeeds, without a poster.
+Cover art comes from AniList: the entry URL carries the AniList id, and
+AniList serves the same poster the SeaDex page shows. If the lookup fails the
+adoption still succeeds, without a poster.
 
 From the command line, `-adopt` is a dry run that prints the plan and changes
 nothing; add `-adopt-confirm` to perform it.
@@ -366,7 +369,7 @@ player — anything that can POST JSON can send it.
 ```
 
 Only the **base name** is used for matching, so the client's directory layout
-does not matter. You can also be explicit:
+is irrelevant. You can also be explicit:
 
 ```json
 {"show_id": 1, "episode": 9}

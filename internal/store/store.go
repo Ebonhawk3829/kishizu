@@ -111,8 +111,8 @@ func (s *Store) migrateSteps() error {
 			// superseded and nothing reads them. The rejected table
 			// was write-only.
 			//
-			// "preference" is deliberately NOT dropped here: the schema
-			// creates it for UI-owned settings, and this step runs after
+			// "preference" stays: the schema creates it for
+			// UI-owned settings, and this step runs after
 			// the schema, so dropping it here would delete the table on
 			// every fresh database. A step that undoes the schema is a
 			// step that can never be correct.

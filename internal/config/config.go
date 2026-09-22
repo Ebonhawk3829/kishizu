@@ -217,7 +217,7 @@ func Parse(b []byte) (*File, error) {
 	// overwritten, everything else keeps its default.
 	//
 	// Only the server block is handed to the YAML library, never the whole
-	// file. The show list is NOT valid YAML: a show name may contain a colon
+	// file. The show list breaks YAML: a show name may contain a colon
 	// ("BLEACH: Thousand-Year Blood War"), which YAML reads as a key/value
 	// separator. The hand-written parser tolerates that, the library does
 	// not — so parsing the whole file would reject every kishizu.yaml that

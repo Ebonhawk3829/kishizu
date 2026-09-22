@@ -27,14 +27,10 @@ type flagOverrides struct {
 
 // applyFlagOverrides lets an explicitly-set flag win over the config file.
 //
-// Only flags the user actually typed are applied. Every flag has a default, so
-// applying them unconditionally would let a default silently overwrite a
-// configured value — the config file would appear to be ignored, which is
-// worse than either mechanism being broken on its own.
-//
-// This is why the check is flag.Visit rather than a comparison against the
-// default: a user who genuinely wants the default value has still "set" the
-// flag, and that intent must win.
+// Only flags the user actually typed are applied: every flag has a default,
+// so applying them unconditionally would let a default silently overwrite a
+// configured value. flag.Visit rather than a default comparison, because a
+// user who genuinely wants the default value has still "set" the flag.
 func applyFlagOverrides(cfg *config.File, o flagOverrides) {
 	set := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })

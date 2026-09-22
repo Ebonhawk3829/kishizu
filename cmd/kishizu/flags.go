@@ -8,12 +8,9 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/notify"
 )
 
-// flags holds every command-line flag kishizu accepts.
-//
-// Grouped in one struct so the flag definitions, the override application and
-// the dispatch all read the same names. A flag added here but not wired into
-// applyFlagOverrides is invisible in the config file, which is the failure
-// this shape makes obvious.
+// flags holds every command-line flag kishizu accepts, in one struct so the
+// definitions, the override application and the dispatch all read the same
+// names.
 type flags struct {
 	dbPath       string
 	show         string
@@ -48,11 +45,9 @@ type flags struct {
 	reconcile    bool
 }
 
-// parseFlags defines and parses the command line.
-//
-// Defaults here are the shipped defaults, not the configured ones: a flag
-// overrides the config file only when the user actually typed it, which
-// applyFlagOverrides enforces with flag.Visit.
+// parseFlags defines and parses the command line. Defaults here are the
+// shipped defaults; a flag overrides the config file only when the user
+// actually typed it, which applyFlagOverrides enforces with flag.Visit.
 func parseFlags() *flags {
 	f := &flags{}
 
@@ -64,9 +59,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.trainName, "train", "", "train a show (substring match on canonical name)")
 	flag.IntVar(&f.ep, "ep", 0, "episode number to train against (0 = next unwatched)")
 	flag.StringVar(&f.serve, "serve", "", "start the web UI on this address (e.g. 127.0.0.1:8098)")
-	// Empty by default. A placeholder hostname here silently broke downloads:
-	// the endpoint looked configured but never resolved, and nothing errored
-	// until a grab was attempted. An empty value fails loudly at startup.
+	// Empty by default: an empty value fails loudly at startup rather than
+	// surfacing as a failed grab later.
 	flag.StringVar(&f.rpc, "transmission", "", "Transmission RPC endpoint (required to download)")
 	flag.StringVar(&f.downloader, "downloader", string(download.KindTransmission), "torrent client: transmission or qbittorrent")
 	flag.StringVar(&f.qbitURL, "qbittorrent", "", "qBittorrent WebUI URL, e.g. http://localhost:8080")

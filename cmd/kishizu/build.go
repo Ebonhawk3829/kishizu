@@ -12,10 +12,8 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/quality"
 )
 
-// buildDownloader picks the torrent client from configuration.
-//
-// Transmission stays the default because it is what every existing deployment
-// uses; an unset value must keep working rather than fail to start.
+// buildDownloader picks the torrent client from configuration. Transmission
+// stays the default so an unset value keeps working.
 func buildDownloader(kind, rpcURL, qbitURL, qbitUser, qbitPass string) (download.Downloader, error) {
 	k, err := download.ParseKind(kind)
 	if err != nil {
@@ -32,12 +30,9 @@ func buildDownloader(kind, rpcURL, qbitURL, qbitUser, qbitPass string) (download
 	}
 }
 
-// buildNotifier picks the notification backend from configuration.
-//
-// Returns nil when notifications are disabled, which the caller treats as
-// "no notifier" rather than installing a no-op: the distinction matters
-// because a nil check is what keeps the UI from reporting a backend that
-// does not exist.
+// buildNotifier picks the notification backend from configuration, or nil
+// when notifications are disabled. The caller's nil check is what keeps the
+// UI from reporting a backend that does not exist.
 func buildNotifier(kind, ntfyURL, gotifyURL, gotifyToken string) (notify.Notifier, error) {
 	k, err := notify.ParseKind(kind)
 	if err != nil {
@@ -52,9 +47,8 @@ func buildNotifier(kind, ntfyURL, gotifyURL, gotifyToken string) (notify.Notifie
 		}
 		return notify.NewGotify(gotifyURL, gotifyToken), nil
 	default:
-		// ntfy is the default, but it needs a topic URL. An empty one means
-		// the user never configured it, which is not an error — it is the
-		// documented way to run without notifications.
+		// ntfy needs a topic URL; an empty one is the documented way to run
+		// without notifications.
 		if ntfyURL == "" {
 			return nil, nil
 		}
@@ -62,10 +56,9 @@ func buildNotifier(kind, ntfyURL, gotifyURL, gotifyToken string) (notify.Notifie
 	}
 }
 
-// buildQuality turns the configured quality section into a policy.
-//
-// Only the fields that were set are applied, so a partial section keeps the
-// shipped defaults. That is what makes a minimal config file work.
+// buildQuality turns the configured quality section into a policy. Only the
+// fields that were set are applied, so a partial section keeps the shipped
+// defaults.
 func buildQuality(q config.QualityConfig) *quality.Policy {
 	p := quality.Default()
 	if q.ResolutionFloor != "" {
@@ -101,13 +94,9 @@ func buildScheme(n config.NamingConfig) (*naming.Scheme, error) {
 	return naming.Resolve(preset, n.Pattern, n.SeasonFolder)
 }
 
-// buildIndexer turns the configured indexer section into a nyaa client.
-//
-// The client is returned rather than installed as package state. Package
-// state would make every query depend on this having run first, and a call
-// site that ran earlier would silently query the default indexer instead of
-// the configured one. Returning it makes that impossible: a caller cannot
-// query without a client, and the client carries its own configuration.
+// buildIndexer turns the configured indexer section into a nyaa client,
+// returned rather than installed as package state so a caller cannot query
+// without a configured client.
 func buildIndexer(ix config.IndexerConfig) (*nyaa.Client, error) {
 	out := nyaa.DefaultIndexer()
 	if ix.Base != "" {

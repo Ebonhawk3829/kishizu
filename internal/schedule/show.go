@@ -335,7 +335,7 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 //	animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 //	/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 //
-// A bare slug is deliberately NOT accepted: a bare word cannot be
+// A bare slug is rejected: a bare word cannot be
 // distinguished from an ordinary title, so accepting one would make adding a
 // single-word show by plain name impossible — "Bleach" would go down the
 // slug path, the page fetch would 404, and the user would see "no show at
@@ -346,8 +346,8 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 // Query strings and fragments are dropped. Returns "" when there is no slug
 // to be found, which the caller treats as "not a schedule URL" and rejects.
 //
-// The host is NOT checked: any URL carrying /anime/ is accepted. The slug is
-// then verified by fetching the page, which is the real check — a URL on the
+// Any URL carrying /anime/ is accepted, whatever its host. The slug is then
+// verified by fetching the page, which is the real check — a URL on the
 // wrong host fails there with "no show at that URL" rather than here.
 func SlugFromURL(raw string) string {
 	s := strings.TrimSpace(raw)

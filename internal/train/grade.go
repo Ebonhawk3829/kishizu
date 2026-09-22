@@ -150,11 +150,11 @@ func episodeHint(resolved, raw int) string {
 }
 
 // ApplyGrades applies a corrected parse to the working model. Training
-// calibrates the parser only: the episode and group attributes teach the
+// calibrates the parser: the episode and group attributes teach the
 // per-group offset, and corrections to other attributes are vocabulary
 // teaching, which the caller records via the vocab endpoint before calling
-// this. Quality verdicts (resolution, codec, batch, dub, uncensored) are
-// global rules set in advance and are never written here.
+// this. Quality verdicts (resolution, codec, batch, dub, uncensored) come
+// from the global policy, which owns them.
 //
 // Returns a summary of what changed, for display.
 func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep int) ([]string, error) {

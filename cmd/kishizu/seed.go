@@ -10,11 +10,6 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
-// seedShows populates the database from the hardcoded season lists.
-//
-// Watched episodes are marked watched (terminal), so only episodes after the
-// watched count are ever considered. Upcoming shows are matched against
-// animeschedule to show estimated air dates where known.
 // seedFromConfig populates the database from the user's seed file.
 //
 // Watched episodes are marked watched (terminal), so only episodes after the
@@ -24,9 +19,8 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 	for _, cs := range shows {
 		sh, err := st.CreateShow(cs.Name, cs.Aliases, cs.Max)
 		if err != nil {
-			// Already present: update its aliases rather than skipping, so
-			// editing kishizu.yaml actually takes effect on an existing
-			// database. Skipping silently meant alias fixes never landed.
+			// Already present: update its aliases so editing kishizu.yaml
+			// takes effect on an existing database.
 			existing, _ := st.GetShowByName(cs.Name)
 			if existing == nil {
 				return err
@@ -43,15 +37,13 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 				}
 			}
 		}
-		// Mark everything up to the watched count as watched. Terminal state,
-		// so those episodes are never re-grabbed.
+		// Watched is terminal, so those episodes are never re-grabbed.
 		for i := 1; i <= cs.Watched; i++ {
 			if err := st.UpsertEpisode(sh.ID, i, episode.Watched, "", ""); err != nil {
 				return err
 			}
 		}
-		// Matched by slug, straight from the show's own page. A seed entry
-		// without one gets no air date, which is correct: there is no page
+		// A seed entry without a slug gets no air date: there is no page
 		// to read it from.
 		if sh.Slug != "" {
 			if info, err := schedule.FetchShow(nil, sh.Slug); err == nil &&

@@ -334,8 +334,8 @@ func (r *Reconciler) reportStalled(sh *store.Show, inFlight map[int]*store.Episo
 // the caller's decision because the condition is about the show, not the
 // offsets: an adopted season (source seadex) had its mapping confirmed by the
 // user at adoption time, so the raw number is right. An airing show whose
-// offsets were cleared is NOT that case — trusting raw numbers there files
-// against nonexistent rows and leaves the real episode stuck in flight.
+// offsets were cleared lacks that confirmation — trusting raw numbers there
+// files against nonexistent rows and leaves the real episode stuck in flight.
 func episodeOf(path string, offsets map[string]int, trustRaw bool) (int, bool) {
 	// Strip the extension before parsing: the trailing-group regex otherwise
 	// captures "ToonsHub.mkv" as the group name, which matches no offset.
