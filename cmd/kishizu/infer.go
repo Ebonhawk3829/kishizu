@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,16 +23,20 @@ import (
 // with -prefer, but that flag only ever reached this function: the listener
 // reads the policy directly, so the flag silently did nothing for the
 // pipeline that actually grabs.
-func inferOffsets(st *store.Store) error {
+func inferOffsets(ctx context.Context, st *store.Store, indexer *nyaa.Client) error {
 	shows, err := st.ListShows()
 	if err != nil {
 		return err
 	}
 	for _, sh := range shows {
-		items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
+		urls := indexer.FeedURLsFor(sh.CanonicalName, sh.Aliases)
+		items, failed, err := indexer.FetchAll(ctx, urls)
 		if err != nil {
 			fmt.Printf("  %-50s feed unavailable: %v\n", truncate(sh.CanonicalName, 50), err)
 			continue
+		}
+		if failed > 0 {
+			fmt.Printf("  %-50s %d of %d feeds failed\n", truncate(sh.CanonicalName, 50), failed, len(urls))
 		}
 		offsets, err := train.InferOffsets(st, sh, items)
 		if err != nil {

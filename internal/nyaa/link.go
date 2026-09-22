@@ -1,6 +1,7 @@
 package nyaa
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,11 +22,15 @@ var (
 //
 // Lets the user paste a link instead of transcribing a title by hand, which is
 // the difference between grading a release being worth it and not.
-func ResolveLink(client *http.Client, rawURL string) (string, error) {
+func ResolveLink(ctx context.Context, client *http.Client, rawURL string) (string, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	resp, err := client.Get(rawURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

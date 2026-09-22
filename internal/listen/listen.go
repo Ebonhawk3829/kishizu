@@ -7,10 +7,12 @@
 package listen
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/adapt"
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
@@ -38,6 +40,14 @@ type Decision struct {
 // Listener polls feeds and produces grab decisions.
 type Listener struct {
 	st *store.Store
+	// indexer is where releases are searched for. Injected rather than read
+	// from package state, so two listeners can query different indexers and
+	// a test can point one at a local server.
+	indexer *nyaa.Client
+	// vocab is the learned title vocabulary, cached across shows and polls.
+	// It is global, so loading it per show per poll was a full table scan
+	// every tick for data that changes only when the user teaches it.
+	vocab *adapt.Vocab
 	// Policy is the quality policy applied to every release. It is global:
 	// the same rules hold for every show, so it is set once rather than per
 	// show.
@@ -47,16 +57,19 @@ type Listener struct {
 }
 
 // New builds a Listener with the default quality policy.
-func New(st *store.Store) *Listener {
-	return NewWithPolicy(st, quality.Default())
+func New(st *store.Store, indexer *nyaa.Client) *Listener {
+	return NewWithPolicy(st, indexer, quality.Default())
 }
 
 // NewWithPolicy builds a Listener that applies a specific quality policy.
-func NewWithPolicy(st *store.Store, p *quality.Policy) *Listener {
+func NewWithPolicy(st *store.Store, indexer *nyaa.Client, p *quality.Policy) *Listener {
 	if p == nil {
 		p = quality.Default()
 	}
-	return &Listener{st: st, Policy: p, Now: time.Now}
+	if indexer == nil {
+		indexer = nyaa.NewDefault()
+	}
+	return &Listener{st: st, indexer: indexer, vocab: adapt.NewVocab(st), Policy: p, Now: time.Now}
 }
 
 // DueShows returns the shows whose RSS should be polled right now, with the
@@ -151,13 +164,20 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 // Query on every alias, not just the canonical name: Nyaa's search is a plain
 // substring match, so a long specific name misses groups that write the title
 // differently. Results are merged and deduplicated on infohash.
-func (l *Listener) PollShow(sh *store.Show) ([]Decision, error) {
-	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
+func (l *Listener) PollShow(ctx context.Context, sh *store.Show) ([]Decision, error) {
+	urls := l.indexer.FeedURLsFor(sh.CanonicalName, sh.Aliases)
+	items, failed, err := l.indexer.FetchAll(ctx, urls)
 	if err != nil {
 		return nil, err
 	}
+	// A partial outage is not an error — the surviving feeds are still worth
+	// evaluating — but it is not silence either. Without this, a show whose
+	// only working alias failed looks identical to a show with no releases.
+	if failed > 0 {
+		debug.Log("%s: %d of %d feeds failed", sh.CanonicalName, failed, len(urls))
+	}
 
-	m, err := l.st.NewMatcher(sh)
+	m, err := l.vocab.Show(l.st, sh)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +205,7 @@ func truncate(s string, n int) string {
 
 // evaluate applies the full pipeline to one release: dedupe, match, episode
 // latch, global rules.
-func (l *Listener) evaluate(sh *store.Show, m *store.Matcher, it nyaa.Item) Decision {
+func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decision {
 	d := Decision{Item: it, ShowID: sh.ID, Show: sh.CanonicalName}
 
 	// 1. Dedupe on infohash. The identity of a release is its infohash, and it

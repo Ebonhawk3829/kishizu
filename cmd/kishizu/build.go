@@ -101,15 +101,14 @@ func buildScheme(n config.NamingConfig) (*naming.Scheme, error) {
 	return naming.Resolve(preset, n.Pattern, n.SeasonFolder)
 }
 
-// buildIndexer turns the configured indexer section into an indexer and makes
-// it the one the nyaa package uses.
+// buildIndexer turns the configured indexer section into a nyaa client.
 //
-// Applying it here rather than returning it is deliberate: the indexer is a
-// property of the deployment, not of any one query, so the nyaa package holds
-// it as package state. Returning it would leave every caller responsible for
-// threading it through, and one missed call site would silently query the
-// default indexer instead of the configured one.
-func buildIndexer(ix config.IndexerConfig) error {
+// The client is returned rather than installed as package state. It used to be
+// the latter, which meant every query depended on this having run first, and a
+// call site that ran earlier silently queried the default indexer instead of
+// the configured one. Returning it makes that impossible: a caller cannot
+// query without a client, and the client carries its own configuration.
+func buildIndexer(ix config.IndexerConfig) (*nyaa.Client, error) {
 	out := nyaa.DefaultIndexer()
 	if ix.Base != "" {
 		out.Base = ix.Base
@@ -123,10 +122,9 @@ func buildIndexer(ix config.IndexerConfig) error {
 	if ix.MinInterval != "" {
 		d, err := time.ParseDuration(ix.MinInterval)
 		if err != nil {
-			return fmt.Errorf("indexer.min_interval %q: %w", ix.MinInterval, err)
+			return nil, fmt.Errorf("indexer.min_interval %q: %w", ix.MinInterval, err)
 		}
 		out.MinInterval = d
 	}
-	nyaa.SetIndexer(out)
-	return nil
+	return nyaa.New(out), nil
 }

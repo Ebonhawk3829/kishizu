@@ -1,6 +1,7 @@
 package nyaa
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,28 +9,16 @@ import (
 	"time"
 )
 
-// TestMain disables rate limiting for the suite. The limiter sleeps between
-// requests by design, and a test that waits a second per fetch is a test
-// nobody runs.
-func TestMain(m *testing.M) {
-	current.MinInterval = 0
-	m.Run()
-}
+// The tests here construct their own Client rather than mutating package
+// state. They used to call SetIndexer and restore it afterwards, which made
+// every test depend on the ones before it having cleaned up, and made the
+// whole suite unrunnable in parallel.
 
-// restore puts the default indexer back, so one test cannot leak config into
-// the next.
-func restore(t *testing.T) {
-	t.Helper()
-	old := IndexerInUse()
-	t.Cleanup(func() { current = old })
-}
-
-// TestSetIndexerIsConfigurable: the base URL and category are configurable so
-// a mirror, or another indexer with the same RSS shape, can be used.
-func TestSetIndexerIsConfigurable(t *testing.T) {
-	restore(t)
-	SetIndexer(Indexer{Base: "https://mirror.example/", Category: "1_3"})
-	got := FeedURL("Show")
+// TestClientIsConfigurable: the base URL and category are configurable so a
+// mirror, or another indexer with the same RSS shape, can be used.
+func TestClientIsConfigurable(t *testing.T) {
+	c := New(Indexer{Base: "https://mirror.example/", Category: "1_3"})
+	got := c.FeedURL("Show")
 	if !strings.HasPrefix(got, "https://mirror.example/?page=rss") {
 		t.Errorf("url = %q, want the configured base", got)
 	}
@@ -38,36 +27,36 @@ func TestSetIndexerIsConfigurable(t *testing.T) {
 	}
 }
 
-// TestSetIndexerKeepsUnsetFields: a partial config must not blank out the
-// rest. Otherwise configuring only the category would silently drop the base
-// URL and every request would go nowhere.
-func TestSetIndexerKeepsUnsetFields(t *testing.T) {
-	restore(t)
-	SetIndexer(Indexer{Category: "1_4"})
-	ix := IndexerInUse()
-	if ix.Base != "https://nyaa.si" {
-		t.Errorf("base = %q, want it kept", ix.Base)
-	}
-	if ix.Category != "1_4" {
-		t.Errorf("category = %q, want 1_4", ix.Category)
+// TestClientTrimsTrailingSlash: a trailing slash on the base would produce
+// "//?page=rss", which some servers reject.
+func TestClientTrimsTrailingSlash(t *testing.T) {
+	c := New(Indexer{Base: "https://nyaa.si/"})
+	if got := c.FeedURL("Show"); strings.Contains(got, "si//?") {
+		t.Errorf("url = %q, want no doubled slash", got)
 	}
 }
 
-// TestSetIndexerTrimsTrailingSlash: a trailing slash on the base would
-// produce "//?page=rss", which some servers reject.
-func TestSetIndexerTrimsTrailingSlash(t *testing.T) {
-	restore(t)
-	SetIndexer(Indexer{Base: "https://nyaa.si/"})
-	if got := FeedURL("Show"); strings.Contains(got, "si//?") {
-		t.Errorf("url = %q, want no doubled slash", got)
+// TestClientsAreIndependent: two clients must not see each other's
+// configuration. This is the property the package-level indexer could not
+// offer, and the reason a test suite could not run two configurations at once.
+func TestClientsAreIndependent(t *testing.T) {
+	a := New(Indexer{Base: "https://a.example", Category: "1_2"})
+	b := New(Indexer{Base: "https://b.example", Category: "1_3"})
+	if got := a.FeedURL("S"); !strings.HasPrefix(got, "https://a.example") {
+		t.Errorf("a url = %q, want a.example", got)
+	}
+	if got := b.FeedURL("S"); !strings.HasPrefix(got, "https://b.example") {
+		t.Errorf("b url = %q, want b.example", got)
+	}
+	if !strings.Contains(a.FeedURL("S"), "c=1_2") || !strings.Contains(b.FeedURL("S"), "c=1_3") {
+		t.Error("categories leaked between clients")
 	}
 }
 
 // TestFetchSendsUserAgent: some indexers reject the Go default user agent
 // outright, and a descriptive one lets an admin see who is polling them.
 func TestFetchSendsUserAgent(t *testing.T) {
-	restore(t)
-	SetIndexer(Indexer{UserAgent: "kishizu/1.0", MinInterval: 0})
+	c := New(Indexer{UserAgent: "kishizu/1.0", MinInterval: 0})
 
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +65,7 @@ func TestFetchSendsUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := Fetch(nil, srv.URL); err != nil {
+	if _, err := c.Fetch(context.Background(), srv.URL); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if got != "kishizu/1.0" {
@@ -89,8 +78,7 @@ func TestFetchSendsUserAgent(t *testing.T) {
 // gets a caller blocked — and being blocked looks exactly like "no releases
 // found", which is a miserable thing to debug.
 func TestRateLimitSpacesRequests(t *testing.T) {
-	restore(t)
-	SetIndexer(Indexer{MinInterval: 150 * time.Millisecond})
+	c := New(Indexer{MinInterval: 150 * time.Millisecond})
 
 	var times []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +88,7 @@ func TestRateLimitSpacesRequests(t *testing.T) {
 	defer srv.Close()
 
 	for i := 0; i < 3; i++ {
-		if _, err := Fetch(nil, srv.URL); err != nil {
+		if _, err := c.Fetch(context.Background(), srv.URL); err != nil {
 			t.Fatalf("Fetch: %v", err)
 		}
 	}
@@ -116,11 +104,37 @@ func TestRateLimitSpacesRequests(t *testing.T) {
 	}
 }
 
+// TestRateLimitIsPerClient: one client's politeness must not depend on
+// another's traffic. A shared limiter would make a second client inherit the
+// first one's last-request time, which is wrong in both directions.
+func TestRateLimitIsPerClient(t *testing.T) {
+	fast := New(Indexer{MinInterval: 0})
+	slow := New(Indexer{MinInterval: 150 * time.Millisecond})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<rss><channel></channel></rss>`))
+	}))
+	defer srv.Close()
+
+	// Warm the slow client so it has a last-request time.
+	if _, err := slow.Fetch(context.Background(), srv.URL); err != nil {
+		t.Fatalf("slow Fetch: %v", err)
+	}
+
+	// The fast client must not wait for it.
+	start := time.Now()
+	if _, err := fast.Fetch(context.Background(), srv.URL); err != nil {
+		t.Fatalf("fast Fetch: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Errorf("fast client waited %v; rate limiting leaked between clients", elapsed)
+	}
+}
+
 // TestRateLimitDisabled: a zero interval means no waiting, which is what the
 // test suite and anyone running against their own indexer wants.
 func TestRateLimitDisabled(t *testing.T) {
-	restore(t)
-	SetIndexer(Indexer{MinInterval: 0})
+	c := New(Indexer{MinInterval: 0})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<rss><channel></channel></rss>`))
@@ -129,7 +143,7 @@ func TestRateLimitDisabled(t *testing.T) {
 
 	start := time.Now()
 	for i := 0; i < 3; i++ {
-		if _, err := Fetch(nil, srv.URL); err != nil {
+		if _, err := c.Fetch(context.Background(), srv.URL); err != nil {
 			t.Fatalf("Fetch: %v", err)
 		}
 	}
@@ -150,5 +164,22 @@ func TestDefaultIndexerIsUsable(t *testing.T) {
 	}
 	if ix.MinInterval <= 0 {
 		t.Error("min interval must default to something polite, not zero")
+	}
+}
+
+// TestWithHTTPClientDoesNotMutate: the copy must be independent of the
+// original. Swapping the transport underneath a client another goroutine is
+// using would be a data race.
+func TestWithHTTPClientDoesNotMutate(t *testing.T) {
+	base := New(Indexer{MinInterval: 0})
+	other := base.WithHTTPClient(&http.Client{Timeout: time.Second})
+	if base.hc != nil {
+		t.Error("WithHTTPClient mutated the original client")
+	}
+	if other.hc == nil {
+		t.Error("the copy did not receive the client")
+	}
+	if other.ix != base.ix {
+		t.Error("the copy lost the indexer configuration")
 	}
 }

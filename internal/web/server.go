@@ -13,12 +13,11 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/Ebonhawk3829/kishizu/internal/adapt"
 	"github.com/Ebonhawk3829/kishizu/internal/art"
-	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/cycle"
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/download"
@@ -26,7 +25,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/naming"
 	"github.com/Ebonhawk3829/kishizu/internal/notify"
-	"github.com/Ebonhawk3829/kishizu/internal/release"
+	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/version"
@@ -60,7 +59,7 @@ type Server struct {
 	art *art.Cache
 	// vocab holds the learned title vocabulary, so a release written in an
 	// unexpected spelling still resolves. Never nil after New.
-	vocab *release.Vocabulary
+	vocab *adapt.Vocab
 	// session is the in-flight training state. Single-flight by design; the
 	// mutex makes that real under concurrent requests.
 	session trainSession
@@ -79,7 +78,19 @@ type Server struct {
 	// configPath is the configuration file, for the settings UI. Empty means
 	// configuration cannot be read or written.
 	configPath string
+	// indexer is where releases are searched for, for the training
+	// endpoints. Injected so training queries the same indexer the listener
+	// polls: offsets learned from a different indexer would describe
+	// releases the pipeline never sees.
+	indexer *nyaa.Client
 }
+
+// SetIndexer attaches the indexer the training endpoints query.
+//
+// Without one the training endpoints report that they are not configured
+// rather than silently querying the default indexer, which would teach
+// offsets from releases the configured pipeline never sees.
+func (s *Server) SetIndexer(c *nyaa.Client) { s.indexer = c }
 
 // adoptConfig is the deployment-specific half of an adoption.
 type adoptConfig struct {
@@ -103,20 +114,13 @@ func New(st *store.Store) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	srv := &Server{st: st, tmpl: tmpl, vocab: release.NewVocabulary()}
+	srv := &Server{st: st, tmpl: tmpl, vocab: adapt.NewVocab(st)}
 	// A naming scheme is always present. Nil would mean the watch signal
 	// could not recognise kishizu's own filenames, which silently breaks
 	// deletion — so the default is installed here rather than left to the
 	// caller.
 	if sc, err := naming.Resolve(naming.PresetKishizu, "", nil); err == nil {
 		srv.naming = sc
-	}
-	// Seed the vocabulary from the database. A failure here is not fatal: the
-	// tool still works, it just reads fewer titles until it is taught again.
-	if entries, err := st.Vocabulary(); err == nil {
-		srv.vocab.Load(entries)
-	} else {
-		log.Printf("vocabulary: load: %v", err)
 	}
 	return srv, nil
 }
@@ -288,14 +292,11 @@ func (s *Server) handleTimetable(w http.ResponseWriter, r *http.Request) {
 
 	// Which name the list displays. The filter matches both regardless, so
 	// this never changes what is findable — only what is on screen.
-	pref := schedule.BrowseRomaji
-	if s.configPath != "" {
-		if cfg, cerr := config.Load(s.configPath); cerr == nil {
-			if p, perr := schedule.ParseBrowseTitle(cfg.Server.Browse.Title); perr == nil {
-				pref = p
-			}
-		}
-	}
+	//
+	// Read from the database, where the toggle writes it. Reading it from the
+	// config file was the bug: the file still held the old value, so the
+	// server re-asserted it and reset the control the user had just clicked.
+	pref := s.browseTitle()
 
 	entries := tt.Search(r.URL.Query().Get("q"))
 	out := make([]map[string]any, 0, len(entries))
@@ -326,273 +327,6 @@ func airsAtString(t time.Time) string {
 		return ""
 	}
 	return t.Format(time.RFC3339)
-}
-
-// ---------- configuration ----------
-
-// configPath is where the configuration file lives, set by SetConfigPath.
-// Empty means configuration cannot be read or written from the UI.
-func (s *Server) SetConfigPath(p string) { s.configPath = p }
-
-// handleGetConfig reports the effective configuration.
-//
-// Secrets are masked. The UI never needs to display a credential, and sending
-// one to the browser puts it in the page, in memory, and in any screenshot.
-// A masked value that is left untouched is preserved on save.
-func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	if s.configPath == "" {
-		writeErr(w, http.StatusNotImplemented,
-			fmt.Errorf("no configuration file is configured on this server"))
-		return
-	}
-	cfg, err := config.Load(s.configPath)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, configView(cfg.Server))
-}
-
-// handleSaveConfig writes the configuration back to the file.
-//
-// Secrets are preserved rather than overwritten when the submitted value is
-// the mask or empty: the UI cannot know a credential it never displayed, so
-// blank must mean "leave it alone" and not "clear it".
-func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
-	if s.configPath == "" {
-		writeErr(w, http.StatusNotImplemented,
-			fmt.Errorf("no configuration file is configured on this server"))
-		return
-	}
-	var req config.Server
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-
-	// Load the current file so untouched values — including secrets — survive.
-	cur, err := config.Load(s.configPath)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	if isMasked(req.Downloader.QBittorrentPass) {
-		req.Downloader.QBittorrentPass = cur.Server.Downloader.QBittorrentPass
-	}
-	if isMasked(req.Notifier.GotifyToken) {
-		req.Notifier.GotifyToken = cur.Server.Notifier.GotifyToken
-	}
-	// A credential supplied by environment variable must not be written into
-	// the file. Saving it would defeat the reason for using one.
-	qbitFromEnv, gotifyFromEnv := secretFromEnv(cur.Server)
-	if qbitFromEnv {
-		req.Downloader.QBittorrentPass = ""
-	}
-	if gotifyFromEnv {
-		req.Notifier.GotifyToken = ""
-	}
-
-	// Validate before writing: a config that cannot be loaded is worse than
-	// one that was never changed, because kishizu would refuse to start.
-	if err := validateServer(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-
-	if err := config.Save(s.configPath, cur, &req); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	log.Printf("config: saved %s (restart required for some settings)", s.configPath)
-	writeJSON(w, map[string]any{
-		"saved":            true,
-		"restart_required": true,
-	})
-}
-
-// handleBrowseTitle saves just the browse display preference.
-//
-// A separate endpoint rather than reusing the full settings save, because the
-// toggle is a click-anywhere control: persisting it should be one small write,
-// not a round-trip of every setting with the secrets masked and unmasked.
-func (s *Server) handleBrowseTitle(w http.ResponseWriter, r *http.Request) {
-	if s.configPath == "" {
-		writeErr(w, http.StatusNotImplemented,
-			fmt.Errorf("no configuration file is configured on this server"))
-		return
-	}
-	var req struct {
-		Title string `json:"title"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	pref, err := schedule.ParseBrowseTitle(req.Title)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-
-	// Load the current file so everything else survives untouched.
-	cur, err := config.Load(s.configPath)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	next := *cur.Server
-	next.Browse.Title = string(pref)
-	if err := config.Save(s.configPath, cur, &next); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, map[string]any{"saved": true, "title": string(pref)})
-}
-
-// SecretMask is what the UI sends back for a credential it did not display.
-const SecretMask = "••••••••"
-
-// isMasked reports whether a submitted value is the mask, meaning "unchanged".
-func isMasked(s string) bool {
-	return s == SecretMask || s == ""
-}
-
-// secretFromEnv reports whether a credential came from the environment rather
-// than the configuration file.
-//
-// Such a value must never be written back: the whole point of supplying it by
-// environment variable is to keep it out of the file, and saving it would
-// silently undo that. It is also never sent to the browser, for the same
-// reason any other secret is masked.
-func secretFromEnv(s *config.Server) (qbitPass, gotifyToken bool) {
-	if s == nil {
-		return false, false
-	}
-	qbitPass = strings.TrimSpace(os.Getenv(config.EnvQBittorrentPass)) != ""
-	gotifyToken = strings.TrimSpace(os.Getenv(config.EnvGotifyToken)) != ""
-	return qbitPass, gotifyToken
-}
-
-// validateServer rejects a configuration kishizu could not run with.
-//
-// Checked before writing, because a config file that cannot be loaded is
-// worse than one that was never edited: kishizu would refuse to start, and
-// the user would have to fix it by hand.
-func validateServer(s *config.Server) error {
-	if s.Library == "" {
-		return fmt.Errorf("library is required")
-	}
-	if s.Staging == "" {
-		return fmt.Errorf("staging is required")
-	}
-	if s.Keep != nil && *s.Keep < 0 {
-		return fmt.Errorf("keep must be >= 0")
-	}
-	if s.Interval != "" {
-		if _, err := time.ParseDuration(s.Interval); err != nil {
-			return fmt.Errorf("interval %q: %w", s.Interval, err)
-		}
-	}
-	if _, err := download.ParseKind(s.Downloader.Kind); err != nil {
-		return err
-	}
-	if _, err := notify.ParseKind(s.Notifier.Kind); err != nil {
-		return err
-	}
-	if s.Indexer.MinInterval != "" {
-		if _, err := time.ParseDuration(s.Indexer.MinInterval); err != nil {
-			return fmt.Errorf("indexer.min_interval %q: %w", s.Indexer.MinInterval, err)
-		}
-	}
-	if _, err := naming.ParsePreset(s.Naming.Preset); err != nil {
-		return err
-	}
-	if s.Naming.Preset == string(naming.PresetCustom) {
-		if err := naming.ValidatePattern(s.Naming.Pattern); err != nil {
-			return err
-		}
-	}
-	if _, err := schedule.ParseBrowseTitle(s.Browse.Title); err != nil {
-		return err
-	}
-	return nil
-}
-
-// configView is the configuration as the UI sees it: secrets masked, and the
-// choices offered so the form can render them without a second request.
-func configView(s *config.Server) map[string]any {
-	qbitFromEnv, gotifyFromEnv := secretFromEnv(s)
-	view := map[string]any{
-		"library":  s.Library,
-		"staging":  s.Staging,
-		"interval": s.Interval,
-		"dry_run":  boolVal(s.DryRun),
-		"keep":     intVal(s.Keep),
-		"downloader": map[string]any{
-			"kind":             s.Downloader.Kind,
-			"transmission_rpc": s.Downloader.TransmissionRPC,
-			"qbittorrent_url":  s.Downloader.QBittorrentURL,
-			"qbittorrent_user": s.Downloader.QBittorrentUser,
-			// Masked: the UI never needs to show a credential.
-			"qbittorrent_pass": mask(s.Downloader.QBittorrentPass),
-			// Set by environment variable, so the field is read-only and the
-			// value is never written back to the file.
-			"qbittorrent_pass_env": qbitFromEnv,
-		},
-		"notifier": map[string]any{
-			"kind":             s.Notifier.Kind,
-			"ntfy_topic":       s.Notifier.NtfyTopic,
-			"gotify_url":       s.Notifier.GotifyURL,
-			"gotify_token":     mask(s.Notifier.GotifyToken),
-			"gotify_token_env": gotifyFromEnv,
-		},
-		"indexer": map[string]any{
-			"base":         s.Indexer.Base,
-			"category":     s.Indexer.Category,
-			"user_agent":   s.Indexer.UserAgent,
-			"min_interval": s.Indexer.MinInterval,
-		},
-		"quality": map[string]any{
-			"resolution_floor": s.Quality.ResolutionFloor,
-			"group_order":      s.Quality.GroupOrder,
-		},
-		"naming": map[string]any{
-			"preset":        s.Naming.Preset,
-			"pattern":       s.Naming.Pattern,
-			"season_folder": boolVal(s.Naming.SeasonFolder),
-		},
-		"browse": map[string]any{
-			"title": s.Browse.Title,
-		},
-		"choices": map[string]any{
-			"downloaders":   download.Kinds,
-			"notifiers":     notify.Kinds,
-			"presets":       naming.Presets,
-			"browse_titles": schedule.BrowseTitles,
-		},
-	}
-	return view
-}
-
-func mask(s string) string {
-	if s == "" {
-		return ""
-	}
-	return SecretMask
-}
-
-func boolVal(b *bool) bool {
-	if b == nil {
-		return false
-	}
-	return *b
-}
-
-func intVal(i *int) int {
-	if i == nil {
-		return 0
-	}
-	return *i
 }
 
 // handleSetState forces an episode into a state, bypassing the latch.
@@ -1072,7 +806,7 @@ func (s *Server) matchFile(base string) (int64, int, error) {
 		return 0, 0, err
 	}
 	for _, sh := range shows {
-		m, err := s.st.NewMatcher(sh)
+		m, err := s.vocab.Show(s.st, sh)
 		if err != nil {
 			continue
 		}

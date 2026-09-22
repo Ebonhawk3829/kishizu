@@ -29,6 +29,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/grab"
 	"github.com/Ebonhawk3829/kishizu/internal/listen"
+	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 	"github.com/Ebonhawk3829/kishizu/internal/version"
@@ -68,11 +69,12 @@ func main() {
 	}
 	applyFlagOverrides(cfg, f.overrides())
 
-	// The indexer is package state in nyaa, so it has to be applied before
-	// anything queries. Without this the configured base URL, category, user
-	// agent and rate limit are silently ignored and every request goes to the
-	// default indexer.
-	if err := buildIndexer(cfg.Server.Indexer); err != nil {
+	// The indexer client is built once and threaded to everything that
+	// queries. It carries its own configuration, so there is no ordering to
+	// get wrong: a caller without a client cannot query at all, rather than
+	// silently querying the default indexer.
+	indexer, err := buildIndexer(cfg.Server.Indexer)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -101,11 +103,11 @@ func main() {
 	case f.reconcile:
 		runReconcile(st, cfg)
 	case f.serve != "":
-		runServe(st, cfg, f)
+		runServe(st, cfg, f, indexer)
 	case f.adopt != "":
 		runAdopt(st, cfg, f)
 	case f.infer:
-		runInfer(st)
+		runInfer(st, indexer)
 	case f.backfill:
 		runBackfill(st, f)
 	case f.seed:
@@ -113,9 +115,9 @@ func main() {
 	case f.list:
 		runList(st)
 	case f.trainName != "":
-		runTrain(st, f)
+		runTrain(st, f, indexer)
 	default:
-		runReport(st, f)
+		runReport(st, f, indexer)
 	}
 }
 
@@ -140,12 +142,16 @@ func runReconcile(st *store.Store, cfg *config.File) {
 
 // runServe starts the web UI and the polling loop together, and blocks until
 // the context is cancelled.
-func runServe(st *store.Store, cfg *config.File, f *flags) {
+func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client) {
 	srv, err := web.New(st)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "web: %v\n", err)
 		os.Exit(1)
 	}
+	// The training endpoints query the indexer, and must query the same one
+	// the listener does: a training run that searched a different indexer
+	// would teach offsets from releases the pipeline never sees.
+	srv.SetIndexer(indexer)
 	// The watch handler lets /api/watched sweep files after marking. The
 	// library root also bounds deletion: paths outside it are refused.
 	srv.SetWatch(watch.New(st, f.library, f.keep))
@@ -214,7 +220,7 @@ func runServe(st *store.Store, cfg *config.File, f *flags) {
 	// downloader until -dry-run=false. The user switches it on deliberately.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go runLoop(ctx, st, artCache, dl, scheme, cfg, n, ttCache)
+	go runLoop(ctx, st, artCache, dl, scheme, cfg, n, ttCache, indexer)
 	if err := srv.ListenAndServe(ctx, f.serve); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 		os.Exit(1)
@@ -235,14 +241,14 @@ func runAdopt(st *store.Store, cfg *config.File, f *flags) {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	if err := adoptSeason(st, f.adopt, f.adoptEps, cfg.Server.Staging, cfg.Server.Library, dl, f.adoptConfirm); err != nil {
+	if err := adoptSeason(context.Background(), st, f.adopt, f.adoptEps, cfg.Server.Staging, cfg.Server.Library, dl, f.adoptConfirm); err != nil {
 		fmt.Fprintf(os.Stderr, "adopt: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runInfer(st *store.Store) {
-	if err := inferOffsets(st); err != nil {
+func runInfer(st *store.Store, indexer *nyaa.Client) {
+	if err := inferOffsets(context.Background(), st, indexer); err != nil {
 		fmt.Fprintf(os.Stderr, "infer: %v\n", err)
 		os.Exit(1)
 	}
@@ -270,7 +276,7 @@ func runList(st *store.Store) {
 	}
 }
 
-func runTrain(st *store.Store, f *flags) {
+func runTrain(st *store.Store, f *flags, indexer *nyaa.Client) {
 	shows, err := st.ListShows()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list shows: %v\n", err)
@@ -292,7 +298,7 @@ func runTrain(st *store.Store, f *flags) {
 	if targetEp == 0 {
 		targetEp = nextUnwatched(st, target)
 	}
-	if err := trainShowCmd(st, target, targetEp); err != nil {
+	if err := trainShowCmd(context.Background(), st, target, targetEp, indexer); err != nil {
 		fmt.Fprintf(os.Stderr, "train: %v\n", err)
 		os.Exit(1)
 	}
@@ -300,7 +306,7 @@ func runTrain(st *store.Store, f *flags) {
 
 // runReport prints what the listener would grab right now, for every show or
 // just the one named by -show.
-func runReport(st *store.Store, f *flags) {
+func runReport(st *store.Store, f *flags, indexer *nyaa.Client) {
 	shows, err := st.ListShows()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list shows: %v\n", err)
@@ -317,7 +323,7 @@ func runReport(st *store.Store, f *flags) {
 			continue
 		}
 		any = true
-		reportShow(st, sh)
+		reportShow(context.Background(), st, sh, indexer)
 	}
 	if !any {
 		fmt.Fprintf(os.Stderr, "no show matched %q\n", f.show)
@@ -332,12 +338,12 @@ func runReport(st *store.Store, f *flags) {
 //
 // Kept deliberately as a simulation tool: it answers "what would kishizu do
 // and why" against live data without touching anything.
-func reportShow(st *store.Store, sh *store.Show) {
-	l := listen.New(st)
+func reportShow(ctx context.Context, st *store.Store, sh *store.Show, indexer *nyaa.Client) {
+	l := listen.New(st, indexer)
 
 	fmt.Printf("\n=== %s\n", sh.CanonicalName)
 
-	decisions, err := l.PollShow(sh)
+	decisions, err := l.PollShow(ctx, sh)
 	if err != nil {
 		fmt.Printf("    ERROR: %v\n", err)
 		return

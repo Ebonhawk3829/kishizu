@@ -58,6 +58,11 @@ type startRequest struct {
 // perfectly plausible episodes of the NEW season; without the time filter a
 // training run can anchor an offset to last season's file.
 func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
+	if s.indexer == nil {
+		writeErr(w, http.StatusNotImplemented,
+			fmt.Errorf("no indexer is configured on this server"))
+		return
+	}
 	var req startRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -74,10 +79,17 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 	// plain substring match, so a long specific name misses groups that write
 	// the title differently — and training is exactly where you need to see
 	// those groups, since learning their offsets is the point.
-	items, err := nyaa.FetchAll(nil, nyaa.FeedURLsFor(sh.CanonicalName, sh.Aliases))
+	urls := s.indexer.FeedURLsFor(sh.CanonicalName, sh.Aliases)
+	items, failed, err := s.indexer.FetchAll(r.Context(), urls)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("fetch feed: %w", err))
 		return
+	}
+	// Partial failures are worth saying out loud: training on a subset of the
+	// feeds teaches offsets from a subset of the groups, and the user would
+	// not know why some group is missing from the proposals.
+	if failed > 0 {
+		log.Printf("train: %s: %d of %d feeds failed", sh.CanonicalName, failed, len(urls))
 	}
 	items = filterToSeason(s.st, items, sh)
 	if len(items) == 0 {
@@ -306,7 +318,7 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 	title := input
 	if nyaa.IsLink(input) {
 		var err error
-		title, err = nyaa.ResolveLink(nil, input)
+		title, err = nyaa.ResolveLink(r.Context(), nil, input)
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that link: %w", err))
 			return
@@ -327,7 +339,7 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 	// panel shows what kishizu will actually see once taught — not what the
 	// dumb parser sees in isolation.
 	parsed := release.Parse(title)
-	s.vocab.ApplyVocabulary(&parsed)
+	s.vocab.Apply(&parsed)
 
 	writeJSON(w, map[string]any{
 		"release": train.InspectWithConfidence(title, resolved, res.Confidence),
@@ -361,11 +373,10 @@ func (s *Server) handleTrainVocab(w http.ResponseWriter, r *http.Request) {
 			fmt.Errorf("kind, token and canonical are all required"))
 		return
 	}
-	if err := s.st.LearnVocabulary(req.Kind, req.Token, req.Canonical); err != nil {
+	if err := s.vocab.Learn(s.st, req.Kind, req.Token, req.Canonical); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.vocab.Learn(req.Kind, req.Token, req.Canonical)
 	log.Printf("vocabulary: %s %q -> %q", req.Kind, req.Token, req.Canonical)
 	writeJSON(w, map[string]any{"learned": req.Token + " -> " + req.Canonical})
 }
@@ -543,7 +554,7 @@ type verifiedJSON struct {
 // verify re-matches the feed with the committed model and returns what would
 // now be grabbed for the trained episode.
 func (s *Server) verify(sh *store.Show, items []nyaa.Item) []verifiedJSON {
-	m, err := s.st.NewMatcher(sh)
+	m, err := s.vocab.Show(s.st, sh)
 	if err != nil {
 		return nil
 	}

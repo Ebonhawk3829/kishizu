@@ -1,6 +1,9 @@
 package download
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // Fake is a Downloader for tests: it records what it was asked to add instead
 // of talking to a real client.
@@ -23,7 +26,7 @@ type FakeAdd struct {
 
 func (f *Fake) Name() string { return "fake" }
 
-func (f *Fake) Add(magnet, dir string) error {
+func (f *Fake) Add(ctx context.Context, magnet, dir string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Adds = append(f.Adds, FakeAdd{Magnet: magnet, Dir: dir})

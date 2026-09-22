@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -104,11 +105,17 @@ func (s *Store) migrateSteps() error {
 		run     func(*Store) error
 	}
 	steps := []step{
-		{1, "drop superseded filter/preference/rejected tables", func(s *Store) error {
+		{1, "drop superseded filter/rejected tables", func(s *Store) error {
 			// Release quality policy is global and hardcoded (rules.go);
 			// the per-show rule tables were superseded and nothing reads
 			// them. The rejected table was write-only.
-			for _, t := range []string{"filter", "preference", "rejected"} {
+			//
+			// "preference" was dropped here too, and is deliberately not
+			// any more: the schema now creates it for UI-owned settings,
+			// and this step runs after the schema, so dropping it here
+			// would delete the table on every fresh database. A step that
+			// undoes the schema is a step that can never be correct.
+			for _, t := range []string{"filter", "rejected"} {
 				if _, err := s.db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
 					return fmt.Errorf("drop %s: %w", t, err)
 				}
@@ -339,6 +346,37 @@ func (s *Store) LearnVocabulary(kind, token, canonical string) error {
 		 ON CONFLICT(kind, token) DO UPDATE SET canonical = excluded.canonical`,
 		kind, token, strings.ToLower(canonical))
 	return err
+}
+
+// SetPreference records a user preference.
+//
+// Preferences are UI-owned settings, as distinct from deployment
+// configuration. They live in the database rather than the config file
+// because the UI writes them, they are per-user rather than per-deployment,
+// and writing them to the file meant a read-modify-write of a file the
+// operator also edits by hand — with no locking, so a toggle could silently
+// lose a concurrent edit.
+func (s *Store) SetPreference(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO preference (key, value, updated_at) VALUES (?, ?, datetime('now'))
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		key, value)
+	return err
+}
+
+// Preference reads a user preference. found is false when it has never been
+// set, which the caller treats as "use the default" rather than as an error:
+// an unset preference is the normal state of a fresh install.
+func (s *Store) Preference(key string) (value string, found bool, err error) {
+	var v string
+	err = s.db.QueryRow(`SELECT value FROM preference WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return v, true, nil
 }
 
 // Vocabulary loads every learned synonym, grouped by kind.

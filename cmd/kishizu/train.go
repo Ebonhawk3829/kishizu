@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -34,8 +35,8 @@ func nextUnwatched(st *store.Store, sh *store.Show) int {
 // Flow: the user supplies one seed release for a known episode, then answers
 // yes/no (with a reason) for whatever the tool proposes. Each answer refits the
 // model. Nothing is downloaded.
-func trainShowCmd(st *store.Store, sh *store.Show, targetEp int) error {
-	items, err := nyaa.Fetch(nil, nyaa.FeedURL(sh.CanonicalName))
+func trainShowCmd(ctx context.Context, st *store.Store, sh *store.Show, targetEp int, indexer *nyaa.Client) error {
+	items, err := indexer.Fetch(ctx, indexer.FeedURL(sh.CanonicalName))
 	if err != nil {
 		return fmt.Errorf("fetch feed: %w", err)
 	}

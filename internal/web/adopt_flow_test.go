@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -48,8 +49,17 @@ func TestAdoptEndToEnd(t *testing.T) {
 		t.Fatalf("downloader got %d adds, want 1", dl.Count())
 	}
 	added := dl.Last()
-	if added.Magnet != "magnet:?xt=urn:btih:HASH123&dn=DanMachi III" {
-		t.Errorf("magnet = %q", added.Magnet)
+	// The display name is query-escaped, so read it back the way a client
+	// would rather than matching the raw string.
+	magnet, err := url.Parse(added.Magnet)
+	if err != nil {
+		t.Fatalf("magnet %q does not parse: %v", added.Magnet, err)
+	}
+	if got := magnet.Query().Get("xt"); got != "urn:btih:HASH123" {
+		t.Errorf("xt = %q, want urn:btih:HASH123", got)
+	}
+	if got := magnet.Query().Get("dn"); got != "DanMachi III" {
+		t.Errorf("dn = %q, want DanMachi III", got)
 	}
 	if filepath.Base(added.Dir) != "DanMachi III" {
 		t.Errorf("download dir = %q, want a DanMachi III directory", added.Dir)

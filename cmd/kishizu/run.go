@@ -16,6 +16,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/listen"
 	"github.com/Ebonhawk3829/kishizu/internal/naming"
 	"github.com/Ebonhawk3829/kishizu/internal/notify"
+	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -52,7 +53,7 @@ func alert(n notify.Notifier, title, message string, priority notify.Priority) {
 //
 // The loop exits when ctx is cancelled, so SIGINT/SIGTERM stop the pollers,
 // the sweepers and the schedule refresh together with the HTTP server.
-func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl download.Downloader, scheme *naming.Scheme, cfg *config.File, n notify.Notifier, ttCache *schedule.Cache) {
+func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl download.Downloader, scheme *naming.Scheme, cfg *config.File, n notify.Notifier, ttCache *schedule.Cache, indexer *nyaa.Client) {
 	s := cfg.Server
 	interval, err := time.ParseDuration(s.Interval)
 	if err != nil {
@@ -72,7 +73,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	// listener ranks releases by what the user actually asked for. Only the
 	// fields that were set are applied, so a partial section keeps the
 	// shipped defaults.
-	l := listen.NewWithPolicy(st, buildQuality(s.Quality))
+	l := listen.NewWithPolicy(st, indexer, buildQuality(s.Quality))
 	w := watch.New(st, s.Library, keep)
 	rec := grab.NewWithScheme(st, s.Staging, s.Library, scheme)
 	// Pruning deletes data, so it is opt-in and comes from configuration
@@ -108,7 +109,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			}
 			lastPolled[sh.ID] = now
 			polled++
-			decisions, err := l.PollShow(sh)
+			decisions, err := l.PollShow(ctx, sh)
 			if err != nil {
 				log.Printf("listen: %s: %v", sh.CanonicalName, err)
 				continue
@@ -129,7 +130,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 					log.Printf("staging mkdir %s: %v", dir, err)
 					continue
 				}
-				if err := dl.Add(download.Magnet(d.Item.InfoHash, d.Item.Title), dir); err != nil {
+				if err := dl.Add(ctx, download.Magnet(d.Item.InfoHash, d.Item.Title), dir); err != nil {
 					log.Printf("%s add: %v", dl.Name(), err)
 					// Alert once, then stay quiet until it recovers. At a
 					// 3-minute poll, pinging every failure is ~480 a day.

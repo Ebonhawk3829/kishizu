@@ -2,6 +2,7 @@
 package nyaa
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -60,40 +61,78 @@ func DefaultIndexer() Indexer {
 	}
 }
 
-// current is the indexer used by the package-level helpers.
+// Client queries one indexer.
 //
-// A package-level default rather than a parameter on every call, because the
-// indexer is a property of the deployment, not of any one query. Set once at
-// startup from configuration.
-var current = DefaultIndexer()
-
-// SetIndexer sets the indexer used by the package-level helpers. Empty fields
-// in ix keep the current value, so a partial config does not blank it out.
-func SetIndexer(ix Indexer) {
-	if ix.Base != "" {
-		current.Base = strings.TrimRight(ix.Base, "/")
-	}
-	if ix.Category != "" {
-		current.Category = ix.Category
-	}
-	if ix.UserAgent != "" {
-		current.UserAgent = ix.UserAgent
-	}
-	if ix.MinInterval > 0 {
-		current.MinInterval = ix.MinInterval
-	}
+// The indexer and the rate limiter are fields rather than package state. They
+// used to be package-level, set once at startup by SetIndexer, which made
+// every call site depend on an ordering that nothing enforced: a query issued
+// before the call silently used the default indexer. It also made the tests
+// order-sensitive, since each one mutated shared state the others read.
+//
+// As fields, a Client is constructed with its configuration and cannot be
+// half-configured. Two clients with different indexers can coexist, which is
+// what a test wants and what a future multi-indexer deployment would need.
+type Client struct {
+	ix Indexer
+	// hc is the HTTP client. Nil means a default one is built per call, which
+	// is what the one-shot commands want; a long-lived caller should supply
+	// its own so connections are pooled.
+	hc *http.Client
+	// lim is the rate limiter, held by pointer so a Client can be copied
+	// without copying a mutex — and so copies share one budget. Sharing is
+	// the point: a copy that got its own limiter would be a way to bypass
+	// the politeness the original was configured with.
+	lim *limiter
 }
 
-// IndexerInUse returns the indexer the package-level helpers will use.
-func IndexerInUse() Indexer { return current }
+// limiter spaces requests out. A public indexer is a shared resource: polling
+// every show every tick with no floor between requests is the kind of traffic
+// that gets a caller blocked, and being blocked looks exactly like "no
+// releases found".
+//
+// Per client, not per package: two clients are two independent callers as far
+// as an indexer is concerned only if they are actually separate, and a shared
+// limiter would make one client's politeness depend on another's traffic.
+type limiter struct {
+	mu          sync.Mutex
+	lastRequest time.Time
+}
+
+// New builds a Client for an indexer.
+//
+// A trailing slash on the base is trimmed here rather than at each use, so
+// the stored indexer is always in the form the URL builder expects and no
+// call site has to remember to normalise it.
+func New(ix Indexer) *Client {
+	ix.Base = strings.TrimRight(ix.Base, "/")
+	return &Client{ix: ix, lim: &limiter{}}
+}
+
+// NewDefault builds a Client for the default indexer.
+func NewDefault() *Client { return New(DefaultIndexer()) }
+
+// WithHTTPClient returns a copy of c that uses hc for requests.
+//
+// A copy rather than a mutation: the caller that built c may still be using
+// it, and swapping its transport underneath it would be a data race. The
+// limiter is shared with the original, so the copy cannot be used to spend a
+// second request budget against the same indexer.
+func (c *Client) WithHTTPClient(hc *http.Client) *Client {
+	out := *c
+	out.hc = hc
+	return &out
+}
+
+// Indexer returns the indexer this client queries.
+func (c *Client) Indexer() Indexer { return c.ix }
 
 // FeedURL builds a per-show RSS URL.
 //
 // RSS accepts c (category) and q (search) but ignores p (pagination) and s/o
 // (sort). Per-show feeds are what make this work: 75 items covers 14-33 days of
 // a single show, so backfill after downtime is free.
-func FeedURL(alias string) string {
-	return current.Base + "/?page=rss&c=" + url.QueryEscape(current.Category) +
+func (c *Client) FeedURL(alias string) string {
+	return c.ix.Base + "/?page=rss&c=" + url.QueryEscape(c.ix.Category) +
 		"&q=" + url.QueryEscape(alias)
 }
 
@@ -106,7 +145,7 @@ func FeedURL(alias string) string {
 // name excludes groups that write the title differently.
 //
 // Callers should merge the results, deduplicating on infohash.
-func FeedURLsFor(canonical string, aliases []string) []string {
+func (c *Client) FeedURLsFor(canonical string, aliases []string) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(q string) {
@@ -115,7 +154,7 @@ func FeedURLsFor(canonical string, aliases []string) []string {
 			return
 		}
 		seen[q] = true
-		out = append(out, FeedURL(q))
+		out = append(out, c.FeedURL(q))
 	}
 	// Shortest alias first: broader queries match more groups.
 	cands := append([]string{}, aliases...)
@@ -128,16 +167,32 @@ func FeedURLsFor(canonical string, aliases []string) []string {
 }
 
 // FetchAll retrieves several feeds and merges them, deduplicating on infohash.
-func FetchAll(client *http.Client, urls []string) ([]Item, error) {
+//
+// A failing feed is skipped rather than aborting the rest — one bad alias
+// should not stop a show being hunted — but the failures are counted and
+// returned. Returning only the items made a total indexer outage
+// indistinguishable from a quiet week, which is the one case where the
+// difference matters most: the caller cannot tell "nothing aired" from
+// "nothing was asked".
+//
+// The error is non-nil only when every feed failed. Partial failures are
+// reported through failed, so a caller that wants to be strict can be.
+func (c *Client) FetchAll(ctx context.Context, urls []string) (items []Item, failed int, err error) {
 	seen := map[string]bool{}
 	var out []Item
 	for _, u := range urls {
-		items, err := Fetch(client, u)
+		// A cancelled context abandons the whole batch: there is no point
+		// fetching the remaining feeds of a poll that is being shut down.
+		if err := ctx.Err(); err != nil {
+			return out, failed, err
+		}
+		got, err := c.Fetch(ctx, u)
 		if err != nil {
+			failed++
 			// One bad query should not lose the rest.
 			continue
 		}
-		for _, it := range items {
+		for _, it := range got {
 			key := it.InfoHash
 			if key == "" {
 				key = it.Title
@@ -149,25 +204,29 @@ func FetchAll(client *http.Client, urls []string) ([]Item, error) {
 			out = append(out, it)
 		}
 	}
-	return out, nil
+	if failed > 0 && failed == len(urls) {
+		return out, failed, fmt.Errorf("all %d feeds failed", failed)
+	}
+	return out, failed, nil
 }
 
 // Fetch retrieves and parses a feed.
-func Fetch(client *http.Client, rawURL string) ([]Item, error) {
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+func (c *Client) Fetch(ctx context.Context, rawURL string) ([]Item, error) {
+	hc := c.hc
+	if hc == nil {
+		hc = &http.Client{Timeout: 30 * time.Second}
 	}
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	// A descriptive user agent: some indexers reject the Go default outright,
 	// and an admin reading their logs should be able to see who is polling.
-	if ua := current.UserAgent; ua != "" {
+	if ua := c.ix.UserAgent; ua != "" {
 		req.Header.Set("User-Agent", ua)
 	}
-	rateLimit()
-	resp, err := client.Do(req)
+	c.rateLimit()
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -178,27 +237,18 @@ func Fetch(client *http.Client, rawURL string) ([]Item, error) {
 	return Parse(resp.Body)
 }
 
-// Rate limiting state. A public indexer is a shared resource: polling every
-// show every tick with no floor between requests is the kind of traffic that
-// gets a caller blocked, and being blocked looks exactly like "no releases
-// found".
-var (
-	rateMu      sync.Mutex
-	lastRequest time.Time
-)
-
 // rateLimit waits out the minimum interval between indexer requests.
-func rateLimit() {
-	interval := current.MinInterval
+func (c *Client) rateLimit() {
+	interval := c.ix.MinInterval
 	if interval <= 0 {
 		return
 	}
-	rateMu.Lock()
-	defer rateMu.Unlock()
-	if wait := interval - time.Since(lastRequest); wait > 0 {
+	c.lim.mu.Lock()
+	defer c.lim.mu.Unlock()
+	if wait := interval - time.Since(c.lim.lastRequest); wait > 0 {
 		time.Sleep(wait)
 	}
-	lastRequest = time.Now()
+	c.lim.lastRequest = time.Now()
 }
 
 // ---------- XML shape ----------

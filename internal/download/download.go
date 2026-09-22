@@ -8,7 +8,9 @@
 package download
 
 import (
+	"context"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -30,7 +32,11 @@ type Downloader interface {
 	// An implementation MUST honour dir. One that ignores it and downloads
 	// to its own default will leave files where kishizu never looks, and
 	// every episode will sit in "downloading" forever.
-	Add(magnet, dir string) error
+	//
+	// ctx bounds the request. It is a parameter rather than a field on the
+	// client because the deadline belongs to the caller's operation — a
+	// shutdown mid-add should abandon that add, not every future one.
+	Add(ctx context.Context, magnet, dir string) error
 
 	// Name is the client's name, for logs and error messages.
 	Name() string
@@ -67,6 +73,12 @@ func ParseKind(s string) (Kind, error) {
 // The name is kept so the torrent has something readable in the client's list;
 // without it a client shows a bare hash, which makes a stuck download
 // impossible to identify.
+//
+// The name is query-escaped because release titles are full of spaces and
+// brackets, and occasionally an ampersand or a hash. Unescaped, an ampersand
+// terminates dn and injects a bogus parameter, and a space makes the magnet
+// malformed — clients tolerate it today, but the display name is silently
+// truncated at the first separator.
 func Magnet(infohash, title string) string {
-	return "magnet:?xt=urn:btih:" + infohash + "&dn=" + title
+	return "magnet:?xt=urn:btih:" + url.QueryEscape(infohash) + "&dn=" + url.QueryEscape(title)
 }

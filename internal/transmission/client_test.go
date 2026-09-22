@@ -1,6 +1,7 @@
 package transmission
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,7 +26,7 @@ func TestAddHandlesSessionHandshake(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL)
-	if err := c.AddWithDir("magnet:?xt=urn:btih:ABC123", "/downloads/x"); err != nil {
+	if err := c.AddWithDir(context.Background(), "magnet:?xt=urn:btih:ABC123", "/downloads/x"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if c.session != "TOKEN123" {
@@ -41,7 +42,7 @@ func TestAddReportsFailure(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL)
-	if err := c.AddWithDir("magnet:?xt=urn:btih:BAD", "/downloads/x"); err == nil {
+	if err := c.AddWithDir(context.Background(), "magnet:?xt=urn:btih:BAD", "/downloads/x"); err == nil {
 		t.Error("expected an error for a failed add")
 	}
 }

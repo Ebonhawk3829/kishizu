@@ -1,6 +1,8 @@
 package download
 
 import (
+	"context"
+
 	"github.com/Ebonhawk3829/kishizu/internal/transmission"
 )
 
@@ -19,6 +21,6 @@ func NewTransmission(rpcURL string) Downloader {
 
 func (t *transmissionDownloader) Name() string { return "Transmission" }
 
-func (t *transmissionDownloader) Add(magnet, dir string) error {
-	return t.c.AddWithDir(magnet, dir)
+func (t *transmissionDownloader) Add(ctx context.Context, magnet, dir string) error {
+	return t.c.AddWithDir(ctx, magnet, dir)
 }

@@ -114,3 +114,77 @@ func TestSweepRefusesOutsideLibrary(t *testing.T) {
 		t.Error("file outside the library was deleted")
 	}
 }
+
+// TestSweepRefusesSymlinkEscape: a symlink inside the library pointing at a
+// file outside it must not cause that file to be deleted.
+//
+// This is the case a string prefix check on the absolute path could not
+// catch: the link's own path is inside the library, so the prefix matched,
+// and the delete followed the link out. os.Root resolves each component
+// against the root and refuses to follow a link that escapes.
+func TestSweepRefusesSymlinkEscape(t *testing.T) {
+	base := t.TempDir()
+	lib := filepath.Join(base, "library")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The target, deliberately outside the library.
+	outside := filepath.Join(base, "precious.mkv")
+	if err := os.WriteFile(outside, []byte("do not delete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The link, inside the library by path.
+	link := filepath.Join(lib, "escape.mkv")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unsupported here: %v", err)
+	}
+
+	st := testStore(t)
+	sh, err := st.CreateShow("Show", nil, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Downloaded, "H", "rel")
+	_ = st.SetFilePath(sh.ID, 1, link)
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Watched, "H", "rel")
+
+	h := New(st, lib, 0)
+	if _, _, err := h.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Error("the file outside the library was deleted through a symlink")
+	}
+}
+
+// TestSweepRefusesParentTraversal: a path that climbs out of the library with
+// ".." must be refused, not resolved.
+func TestSweepRefusesParentTraversal(t *testing.T) {
+	base := t.TempDir()
+	lib := filepath.Join(base, "library")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "precious.mkv")
+	if err := os.WriteFile(outside, []byte("do not delete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st := testStore(t)
+	sh, err := st.CreateShow("Show", nil, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Downloaded, "H", "rel")
+	_ = st.SetFilePath(sh.ID, 1, filepath.Join(lib, "..", "precious.mkv"))
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Watched, "H", "rel")
+
+	h := New(st, lib, 0)
+	if _, _, err := h.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Error("the file outside the library was deleted via .. traversal")
+	}
+}

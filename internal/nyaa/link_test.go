@@ -1,6 +1,7 @@
 package nyaa
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -66,7 +67,7 @@ func TestResolveLink(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ResolveLink(nil, srv.URL)
+	got, err := ResolveLink(context.Background(), nil, srv.URL)
 	if err != nil {
 		t.Fatalf("ResolveLink: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestResolveLinkReportsNonOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := ResolveLink(nil, srv.URL); err == nil {
+	if _, err := ResolveLink(context.Background(), nil, srv.URL); err == nil {
 		t.Error("expected an error for a non-200 response")
 	}
 }

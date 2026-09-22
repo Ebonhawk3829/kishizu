@@ -212,7 +212,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("staging mkdir: %w", err))
 		return
 	}
-	if err := s.adopt.downloader.Add(download.Magnet(req.InfoHash, req.Title), stagingDir); err != nil {
+	if err := s.adopt.downloader.Add(r.Context(), download.Magnet(req.InfoHash, req.Title), stagingDir); err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("%s add: %w", s.adopt.downloader.Name(), err))
 		return
 	}

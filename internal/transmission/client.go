@@ -8,6 +8,7 @@ package transmission
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,13 +36,13 @@ func New(url string) *Client {
 // Transmission answers the first unauthenticated request with 409 and a fresh
 // X-Transmission-Session-Id; the token must then accompany every call. This is
 // the documented handshake, so it is handled here rather than by callers.
-func (c *Client) call(method string, args any, out any) error {
+func (c *Client) call(ctx context.Context, method string, args any, out any) error {
 	body, err := json.Marshal(map[string]any{"method": method, "arguments": args})
 	if err != nil {
 		return err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequest(http.MethodPost, c.url, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
@@ -85,8 +86,8 @@ func (c *Client) call(method string, args any, out any) error {
 
 // AddWithDir is Add with an explicit download directory, for tests and for a
 // future per-show folder layout.
-func (c *Client) AddWithDir(magnet, dir string) error {
-	return c.call("torrent-add", map[string]any{
+func (c *Client) AddWithDir(ctx context.Context, magnet, dir string) error {
+	return c.call(ctx, "torrent-add", map[string]any{
 		"filename":     magnet,
 		"download-dir": dir,
 	}, nil)

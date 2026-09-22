@@ -31,7 +31,7 @@ func TestSeasonCompleteIsNotDue(t *testing.T) {
 		_ = st.UpsertEpisode(sh.ID, i, episode.Watched, "", "")
 	}
 
-	l := New(st)
+	l := New(st, nil)
 	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
 		t.Error("completed season is still due; it would poll forever")
 	}
@@ -51,7 +51,7 @@ func TestSeasonInProgressIsDue(t *testing.T) {
 	// Trained: at least one group's offset is known.
 	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	if !dueIDs(t, l, 5*time.Minute)[sh.ID] {
 		t.Error("mid-season show with a due episode is not being polled")
 	}
@@ -68,7 +68,7 @@ func TestUntrainedShowIsNotDue(t *testing.T) {
 	_ = st.ProjectAirDates(sh.ID)
 	// No SetGroupOffset: the show has never been trained.
 
-	l := New(st)
+	l := New(st, nil)
 	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
 		t.Error("untrained show is being polled; it can never match a release")
 	}
@@ -83,7 +83,7 @@ func TestUntrainedShowIsDueOnceTrained(t *testing.T) {
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 	_ = st.ProjectAirDates(sh.ID)
 
-	l := New(st)
+	l := New(st, nil)
 	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
 		t.Fatal("untrained show should not be due")
 	}
@@ -105,7 +105,7 @@ func TestUnknownMaxStillPolls(t *testing.T) {
 	_ = st.ProjectAirDates(sh.ID)
 	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	if !dueIDs(t, l, 5*time.Minute)[sh.ID] {
 		t.Error("show with unknown max is not being polled")
 	}

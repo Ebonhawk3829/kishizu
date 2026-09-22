@@ -1,6 +1,7 @@
 package nyaa
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -149,7 +150,7 @@ func TestParseTimeHandlesNyaaVariants(t *testing.T) {
 // global feed would be useless — 75 items of everything is not 75 items of
 // one show.
 func TestFeedURLIsPerShow(t *testing.T) {
-	got := FeedURL("BLEACH Sennen Kessen")
+	got := NewDefault().FeedURL("BLEACH Sennen Kessen")
 	if !strings.HasPrefix(got, "https://nyaa.si/?page=rss") {
 		t.Errorf("url = %q, want the RSS endpoint", got)
 	}
@@ -165,7 +166,7 @@ func TestFeedURLIsPerShow(t *testing.T) {
 // that write the title differently, so the short aliases must be queried
 // first. This is what recovered 14 VARYG releases a full-name search missed.
 func TestFeedURLsForOrdersBroadestFirst(t *testing.T) {
-	got := FeedURLsFor("BLEACH: Thousand-Year Blood War - The Calamity",
+	got := NewDefault().FeedURLsFor("BLEACH: Thousand-Year Blood War - The Calamity",
 		[]string{"Bleach S17", "BLEACH Sennen Kessen Hen"})
 	if len(got) != 3 {
 		t.Fatalf("got %d urls, want 3", len(got))
@@ -182,7 +183,7 @@ func TestFeedURLsForOrdersBroadestFirst(t *testing.T) {
 // TestFeedURLsForDeduplicates: the same query twice is two identical HTTP
 // requests for the same 75 items.
 func TestFeedURLsForDeduplicates(t *testing.T) {
-	got := FeedURLsFor("Show", []string{"Show", " Show ", "Other"})
+	got := NewDefault().FeedURLsFor("Show", []string{"Show", " Show ", "Other"})
 	if len(got) != 2 {
 		t.Errorf("got %d urls, want 2 (Show and Other)", len(got))
 	}
@@ -197,9 +198,12 @@ func TestFetchAllDeduplicatesOnInfoHash(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	items, err := FetchAll(nil, []string{srv.URL, srv.URL})
+	items, failed, err := NewDefault().FetchAll(context.Background(), []string{srv.URL, srv.URL})
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
+	}
+	if failed != 0 {
+		t.Errorf("failed = %d, want 0", failed)
 	}
 	if len(items) != 2 {
 		t.Errorf("got %d items, want 2 (deduped across two identical feeds)", len(items))
@@ -218,12 +222,38 @@ func TestFetchAllSurvivesOneBadFeed(t *testing.T) {
 	}))
 	defer bad.Close()
 
-	items, err := FetchAll(nil, []string{bad.URL, good.URL})
+	items, failed, err := NewDefault().FetchAll(context.Background(), []string{bad.URL, good.URL})
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
 	if len(items) != 2 {
 		t.Errorf("got %d items, want 2 from the good feed", len(items))
+	}
+	// The failure is counted, not swallowed: a caller that only looked at
+	// the items could not tell this from a quiet week.
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1", failed)
+	}
+}
+
+// TestFetchAllReportsTotalOutage: when every feed fails, that is an error.
+// Returning items with no error made a total indexer outage indistinguishable
+// from "no releases this week" — the one case where the difference matters.
+func TestFetchAllReportsTotalOutage(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+
+	items, failed, err := NewDefault().FetchAll(context.Background(), []string{bad.URL, bad.URL})
+	if err == nil {
+		t.Error("expected an error when every feed failed")
+	}
+	if failed != 2 {
+		t.Errorf("failed = %d, want 2", failed)
+	}
+	if len(items) != 0 {
+		t.Errorf("got %d items, want 0", len(items))
 	}
 }
 
@@ -235,7 +265,7 @@ func TestFetchReportsNonOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := Fetch(nil, srv.URL); err == nil {
+	if _, err := NewDefault().Fetch(context.Background(), srv.URL); err == nil {
 		t.Error("expected an error for a non-200 response")
 	}
 }

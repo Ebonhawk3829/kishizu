@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Ebonhawk3829/kishizu/internal/adapt"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
@@ -30,7 +31,7 @@ func TestDedupesOnInfohash(t *testing.T) {
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH1", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL"))
 
@@ -68,7 +69,7 @@ func TestTerminalEpisodeIsNeverRegrabbed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH2", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL REPACK"))
 
@@ -89,7 +90,7 @@ func TestDownloadedEpisodeIsNotRegrabbed(t *testing.T) {
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "OLD", "old")
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("HASH2", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL REPACK"))
 	if d.Grab {
@@ -104,7 +105,7 @@ func TestResolutionFloor(t *testing.T) {
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	m := mustMatcher(t, st, sh)
 
 	low := l.evaluate(sh, m,
@@ -127,7 +128,7 @@ func TestUnreadableResolutionIsRejected(t *testing.T) {
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("H1", "[ToonsHub] Tomb Raider King S01E09 FHD WEB-DL"))
 	if d.Grab {
@@ -149,7 +150,7 @@ func TestVocabularyReadsUnusualResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("H1", "[ToonsHub] Tomb Raider King S01E09 FHD WEB-DL"))
 	if !d.Grab {
@@ -163,7 +164,7 @@ func TestBatchIsRejected(t *testing.T) {
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("H1", "[ToonsHub] Tomb Raider King (01-12) 1080p WEB-DL"))
 	if d.Grab {
@@ -183,7 +184,7 @@ func TestLowConfidenceIsNotGrabbed(t *testing.T) {
 	_ = st.SetGroupOffset(sh.ID, "A", 0, "training")
 	_ = st.SetGroupOffset(sh.ID, "B", 40, "training")
 
-	l := New(st)
+	l := New(st, nil)
 	d := l.evaluate(sh, mustMatcher(t, st, sh),
 		item("H1", "[BrandNewGroup] Tomb Raider King S01E09 1080p WEB-DL"))
 	if d.Grab {
@@ -206,7 +207,7 @@ func TestBestPicksPreferredGroup(t *testing.T) {
 		{Grab: true, ShowID: sh.ID, Episode: 9,
 			Item: item("H2", "[ToonsHub] Tomb Raider King S01E09 1080p HEVC")},
 	}
-	best := New(st).Best(decisions)
+	best := New(st, nil).Best(decisions)
 	if len(best) != 1 {
 		t.Fatalf("got %d best, want 1", len(best))
 	}
@@ -222,15 +223,15 @@ func TestBestBreaksTiesOnSeeders(t *testing.T) {
 	b := Decision{Grab: true, ShowID: 1, Episode: 5, Item: item("HB", "[ToonsHub] Show S01E05 1080p")}
 	b.Item.Seeders = 30
 
-	best := New(nil).Best([]Decision{a, b})
+	best := New(nil, nil).Best([]Decision{a, b})
 	if len(best) != 1 || best[0].Item.InfoHash != "HB" {
 		t.Errorf("best = %+v, want HB (more seeders)", best)
 	}
 }
 
-func mustMatcher(t *testing.T, st *store.Store, sh *store.Show) *store.Matcher {
+func mustMatcher(t *testing.T, st *store.Store, sh *store.Show) *adapt.Show {
 	t.Helper()
-	m, err := st.NewMatcher(sh)
+	m, err := adapt.NewVocab(st).Show(st, sh)
 	if err != nil {
 		t.Fatal(err)
 	}

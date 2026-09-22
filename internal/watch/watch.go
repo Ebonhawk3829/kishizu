@@ -146,25 +146,40 @@ func fileExists(path string) bool {
 
 // deleteFile removes one episode's file and marks the episode deleted.
 //
-// The path is checked against the library root before deleting: a corrupted
-// file_path must never cause a delete outside the library.
+// The path is opened through an os.Root confined to the library, so a
+// corrupted file_path cannot cause a delete outside it.
+//
+// The containment is os.Root rather than a string prefix check on the
+// absolute path. A prefix check does not resolve symlinks, so a link inside
+// the library pointing at a file outside it passed the check and the delete
+// went through — the exact failure the check existed to prevent. os.Root
+// resolves each path component against the root and refuses to follow a link
+// that escapes, which is the stdlib answer to this problem.
 func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 	path := ep.FilePath
 	if path == "" {
 		return nil
 	}
-	abs, err := filepath.Abs(path)
+	root, err := os.OpenRoot(h.Library)
 	if err != nil {
-		return err
+		return fmt.Errorf("open library root %q: %w", h.Library, err)
 	}
-	root, err := filepath.Abs(h.Library)
+	// A failed close on the way out has no recovery: the delete has already
+	// happened or already failed, and the original error is the one that
+	// matters.
+	defer func() { _ = root.Close() }()
+
+	// Relative to the root: an absolute path, or one that climbs out with
+	// "..", is refused by Remove rather than resolved.
+	rel, err := filepath.Rel(h.Library, path)
 	if err != nil {
-		return err
+		return fmt.Errorf("refusing to delete %q: not under library %q", path, h.Library)
 	}
-	if !strings.HasPrefix(abs, root+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to delete %q: outside library %q", abs, root)
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to delete %q: outside library %q", path, h.Library)
 	}
-	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+
+	if err := root.Remove(rel); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return h.st.UpsertEpisode(showID, ep.Number, episode.Deleted, "", "")

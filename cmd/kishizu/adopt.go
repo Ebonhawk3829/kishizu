@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ import (
 // -adopt-episodes overrides the classifier's proposal, which is how the
 // review step is exercised before the UI exists: a comma-separated list of
 // the numbers to adopt, in the same order as the listed files.
-func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, dl download.Downloader, confirm bool) error {
+func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, staging, library string, dl download.Downloader, confirm bool) error {
 	id := seadex.AniListIDFromURL(rawURL)
 	if id == 0 {
 		return fmt.Errorf("could not read a SeaDex entry id from %q", rawURL)
@@ -140,7 +141,7 @@ func adoptSeason(st *store.Store, rawURL, episodeList, staging, library string, 
 	if err := os.MkdirAll(stagingDir, 0o775); err != nil {
 		return fmt.Errorf("staging mkdir %s: %w", stagingDir, err)
 	}
-	if err := dl.Add(download.Magnet(plan.Torrent.InfoHash, title), stagingDir); err != nil {
+	if err := dl.Add(ctx, download.Magnet(plan.Torrent.InfoHash, title), stagingDir); err != nil {
 		return fmt.Errorf("%s add: %w", dl.Name(), err)
 	}
 

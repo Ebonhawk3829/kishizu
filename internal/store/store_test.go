@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
-	"github.com/Ebonhawk3829/kishizu/internal/match"
 )
 
 func testStore(t *testing.T) *Store {
@@ -296,39 +295,6 @@ func TestEpisodesByState(t *testing.T) {
 	}
 }
 
-// TestMatcherAdapter checks the store-backed Show satisfies the matcher and
-// resolves the BLEACH two-convention case through the database rather than
-// in-memory fixtures.
-func TestMatcherAdapter(t *testing.T) {
-	s := testStore(t)
-	sh, err := s.CreateShow("BLEACH: Thousand-Year Blood War - The Calamity", []string{
-		"Bleach: Sennen Kessen Hen - Kashin Tan",
-		"BLEACH Thousand Year Blood War",
-	}, 30)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = s.SetGroupOffset(sh.ID, "Erai-raws", 0, "seed")
-	_ = s.SetGroupOffset(sh.ID, "SubsPlease", 40, "seed")
-
-	m, err := s.NewMatcher(sh)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cases := []struct {
-		title string
-		want  int
-	}{
-		{"[Erai-raws] Bleach: Sennen Kessen Hen - Kashin Tan - 07 [1080p]", 7},
-		{"[SubsPlease] Bleach - Sennen Kessen Hen - 47 (1080p) [B657D64E].mkv", 7},
-		// ToonsHub is unseen; should generalise via the known offset set.
-		{"[ToonsHub] BLEACH Thousand-Year Blood War S01E47 1080p CR WEB-DL", 7},
-	}
-	for _, tc := range cases {
-		got := match.Match(m, tc.title)
-		if !got.Matched || got.Episode != tc.want {
-			t.Errorf("%s: matched=%v ep=%d want %d (%s)", tc.title, got.Matched, got.Episode, tc.want, got.Reason)
-		}
-	}
-}
+// The matcher adapter used to live in this package, which made the
+// persistence layer import the domain logic it was meant to be decoupled
+// from. It now lives in internal/adapt, along with these tests.

@@ -18,7 +18,7 @@ func TestAirDateGuardRejectsOldRelease(t *testing.T) {
 	_ = st.SetNextEpisode(sh.ID, 5, airing)
 	_ = st.ProjectAirDates(sh.ID)
 
-	l := New(st)
+	l := New(st, nil)
 	l.Now = func() time.Time { return airing }
 
 	// Published 10 weeks ago: long before episode 1's air date.
@@ -46,7 +46,7 @@ func TestAirDateGuardAllowsLateRepacks(t *testing.T) {
 	_ = st.SetNextEpisode(sh.ID, 5, airing)
 	_ = st.ProjectAirDates(sh.ID)
 
-	l := New(st)
+	l := New(st, nil)
 	late := item("H1", "[ToonsHub] Show S01E05 1080p WEB-DL REPACK")
 	late.PubDate = airing.AddDate(0, 0, 2) // two days after the air date
 	if !l.airDateOK(sh, late) {
@@ -60,7 +60,7 @@ func TestAirDateGuardSkipsWhenNoSchedulePoint(t *testing.T) {
 	st := testStore(t)
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 12) // no schedule point
 
-	l := New(st)
+	l := New(st, nil)
 	it := item("H1", "[ToonsHub] Show S01E09 1080p WEB-DL")
 	it.PubDate = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	if !l.airDateOK(sh, it) {
@@ -76,7 +76,7 @@ func TestAirDateGuardSkipsWhenPubDateMissing(t *testing.T) {
 	_ = st.SetNextEpisode(sh.ID, 5, time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC))
 	_ = st.ProjectAirDates(sh.ID)
 
-	l := New(st)
+	l := New(st, nil)
 	it := item("H1", "[ToonsHub] Show S01E05 1080p WEB-DL") // zero PubDate
 	if !l.airDateOK(sh, it) {
 		t.Error("guard blocked a release with no pubDate")
@@ -93,7 +93,7 @@ func TestEvaluateRejectsOldRelease(t *testing.T) {
 	_ = st.SetNextEpisode(sh.ID, 9, airing)
 	_ = st.ProjectAirDates(sh.ID)
 
-	l := New(st)
+	l := New(st, nil)
 	l.Now = func() time.Time { return airing }
 
 	it := item("H1", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL")
