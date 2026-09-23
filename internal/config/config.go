@@ -365,6 +365,19 @@ func mergeServer(dst, src *Server) {
 	}
 }
 
+// IsDryRun reports whether the server should decide without downloading.
+//
+// A helper rather than a direct nil check because DryRun is a *bool: nil means
+// "not configured", which falls back to the shipped default of true. A caller
+// that reads the pointer itself gets that backwards — a nil pointer is false,
+// so an unconfigured server looks like it downloads.
+func (s *Server) IsDryRun() bool {
+	if s.DryRun == nil {
+		return true
+	}
+	return *s.DryRun
+}
+
 // DeleteAfterDuration parses the delete_after setting. It accepts a number
 // followed by h (hours) or d (days) — "48h", "7d", "30d" — plus Go's own
 // suffixes (m for minutes, s for seconds) for anyone who wants them. Days

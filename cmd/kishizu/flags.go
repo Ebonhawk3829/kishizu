@@ -2,15 +2,20 @@ package main
 
 import (
 	"flag"
-	"time"
-
-	"github.com/Ebonhawk3829/kishizu/internal/download"
-	"github.com/Ebonhawk3829/kishizu/internal/notify"
 )
 
 // flags holds every command-line flag kishizu accepts, in one struct so the
-// definitions, the override application and the dispatch all read the same
-// names.
+// definitions and the dispatch read the same names.
+//
+// Only what the config file cannot hold lives here: where the database is,
+// where the config file is, which mode to run, and the arguments those modes
+// take. Every server setting — library, staging, keep, delete, interval,
+// dry-run, downloader, notifier — is configured in kishizu.yaml and editable
+// from the web UI.
+//
+// A settings flag would duplicate its default in two places, and the two
+// drift: a caller reading the flag gets a different answer than one reading
+// the config. Keep settings out of here.
 type flags struct {
 	dbPath       string
 	show         string
@@ -20,22 +25,6 @@ type flags struct {
 	trainName    string
 	ep           int
 	serve        string
-	rpc          string
-	downloader   string
-	qbitURL      string
-	qbitUser     string
-	qbitPass     string
-	library      string
-	staging      string
-	keep         int
-	delete       string
-	deleteAfter  time.Duration
-	interval     time.Duration
-	dryRun       bool
-	ntfyURL      string
-	notifier     string
-	gotifyURL    string
-	gotifyToken  string
 	debugOn      bool
 	infer        bool
 	backfill     bool
@@ -47,9 +36,10 @@ type flags struct {
 	reconcile    bool
 }
 
-// parseFlags defines and parses the command line. Defaults here are the
-// shipped defaults; a flag overrides the config file only when the user
-// actually typed it, which applyFlagOverrides enforces with flag.Visit.
+// parseFlags defines and parses the command line.
+//
+// There are no settings flags: every server setting comes from the config
+// file, which the web UI edits.
 func parseFlags() *flags {
 	f := &flags{}
 
@@ -61,24 +51,6 @@ func parseFlags() *flags {
 	flag.StringVar(&f.trainName, "train", "", "train a show (substring match on canonical name)")
 	flag.IntVar(&f.ep, "ep", 0, "episode number to train against (0 = next unwatched)")
 	flag.StringVar(&f.serve, "serve", "", "start the web UI on this address (e.g. 127.0.0.1:8098)")
-	// Empty by default: an empty value fails loudly at startup rather than
-	// surfacing as a failed grab later.
-	flag.StringVar(&f.rpc, "transmission", "", "Transmission RPC endpoint (required to download)")
-	flag.StringVar(&f.downloader, "downloader", string(download.KindTransmission), "torrent client: transmission or qbittorrent")
-	flag.StringVar(&f.qbitURL, "qbittorrent", "", "qBittorrent WebUI URL, e.g. http://localhost:8080")
-	flag.StringVar(&f.qbitUser, "qbittorrent-user", "", "qBittorrent WebUI username (optional)")
-	flag.StringVar(&f.qbitPass, "qbittorrent-pass", "", "qBittorrent WebUI password (optional)")
-	flag.StringVar(&f.library, "library", "/media/anime", "library root for finished episodes, as kishizu sees it")
-	flag.StringVar(&f.staging, "staging", "/downloads/anime", "staging root the downloader puts completed files in, as kishizu sees it")
-	flag.IntVar(&f.keep, "keep", 2, "recently watched episodes to keep on disk")
-	flag.StringVar(&f.delete, "delete", "", "watched-episode deletion: immediate, after, or off (empty = config file, default immediate)")
-	flag.DurationVar(&f.deleteAfter, "delete-after", 0, "with -delete after: how long a watched episode stays on disk, e.g. 48h or 7d")
-	flag.DurationVar(&f.interval, "interval", 5*time.Minute, "RSS poll interval")
-	flag.BoolVar(&f.dryRun, "dry-run", true, "poll and decide but do not hand off to the downloader")
-	flag.StringVar(&f.ntfyURL, "ntfy", "", "ntfy topic URL for notifications (empty disables)")
-	flag.StringVar(&f.notifier, "notifier", string(notify.KindNtfy), "notification backend: ntfy, gotify or none")
-	flag.StringVar(&f.gotifyURL, "gotify", "", "Gotify server URL, e.g. https://gotify.example.com")
-	flag.StringVar(&f.gotifyToken, "gotify-token", "", "Gotify app token")
 	flag.BoolVar(&f.debugOn, "debug", false, "verbose logging of every decision (toggleable at runtime via POST /api/debug)")
 	flag.BoolVar(&f.infer, "infer", false, "derive group offsets from air dates instead of training by hand")
 	flag.BoolVar(&f.backfill, "backfill-slugs", false, "attach animeschedule slugs from the mapping file and enrich from the schedule")
@@ -91,26 +63,4 @@ func parseFlags() *flags {
 
 	flag.Parse()
 	return f
-}
-
-// overrides projects the flags that can override the config file.
-func (f *flags) overrides() flagOverrides {
-	return flagOverrides{
-		library:     f.library,
-		staging:     f.staging,
-		keep:        f.keep,
-		delete:      f.delete,
-		deleteAfter: f.deleteAfter,
-		interval:    f.interval,
-		dryRun:      f.dryRun,
-		rpc:         f.rpc,
-		downloader:  f.downloader,
-		qbitURL:     f.qbitURL,
-		qbitUser:    f.qbitUser,
-		qbitPass:    f.qbitPass,
-		ntfyURL:     f.ntfyURL,
-		notifier:    f.notifier,
-		gotifyURL:   f.gotifyURL,
-		gotifyToken: f.gotifyToken,
-	}
 }

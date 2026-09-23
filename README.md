@@ -107,7 +107,7 @@ way (see the [flags](#flags) table).
 ```yaml
 services:
   kishizu:
-    image: ghcr.io/ebonhawk3829/kishizu:1.2.2   # or :latest
+    image: ghcr.io/ebonhawk3829/kishizu:1.3.0   # or :latest
     user: "1000:1000"             # your media user's uid:gid
     volumes:
       - ./config:/data            # database, config file, caches
@@ -122,15 +122,12 @@ services:
       - "/data/kishizu.yaml"
       - "-serve"
       - "0.0.0.0:8098"
-      - "-transmission"
-      - "http://transmission:9091/transmission/rpc"
-      - "-staging"
-      - "/media/downloads/anime"
-      - "-library"
-      - "/media/anime"
-      - "-dry-run=false"          # kishizu is dry-run by default; this line
-                                  # is what switches downloading on
 ```
+
+Then open **http://localhost:8098** and set the rest from the UI: the
+Transmission RPC endpoint, the library and staging roots, and `dry_run: false`
+to switch downloading on. Settings live in `/data/kishizu.yaml`, which the UI
+edits — there are no flags for them.
 
 Then open **http://localhost:8098**.
 
@@ -144,8 +141,8 @@ mounts for library and staging fail with `invalid cross-device link`.
 localhost by default, which Docker's port mapping cannot reach. The host side
 of the mapping (`127.0.0.1:8098:8098`) is what keeps it off your network.
 
-**Dry-run is the default.** With `-dry-run=false` in the command above, kishizu
-downloads for real. Drop that line to stay dry: it polls, matches and logs
+**Dry-run is the default.** Set `dry_run: false` in the config file (or the
+UI) to download for real. Leave it true and kishizu polls, matches and logs
 what it would download, and hands nothing to your torrent client.
 
 ### From source
@@ -390,27 +387,17 @@ the server's webhook at it and no plugin or script is needed. See
 
 ## Flags
 
+Flags cover only what the config file cannot hold: where the database is,
+where the config file is, which mode to run, and the arguments those modes
+take. Every server setting — library, staging, keep, delete, interval,
+dry-run, downloader, notifier — is configured in `kishizu.yaml` and editable
+from the web UI.
+
 | Flag | Default | Purpose |
 |---|---|---|
 | `-db` | `kishizu.db` | SQLite database path |
 | `-config` | `kishizu.yaml` | Configuration file |
 | `-serve` | — | Address for the web UI, e.g. `127.0.0.1:8098` |
-| `-library` | `/media/anime` | Library root, as kishizu sees it |
-| `-staging` | `/downloads/anime` | Staging root, as kishizu sees it |
-| `-keep` | `2` | Recently watched episodes to keep on disk |
-| `-delete` | — | Watched-episode deletion: `immediate`, `after`, or `off` |
-| `-delete-after` | — | With `-delete after`: how long a watched episode stays on disk, e.g. `48h`, `7d` |
-| `-interval` | `5m` | Poll interval |
-| `-dry-run` | `true` | Decide but do not download |
-| `-downloader` | `transmission` | Torrent client: `transmission` or `qbittorrent` |
-| `-transmission` | — | Transmission RPC endpoint |
-| `-qbittorrent` | — | qBittorrent WebUI URL |
-| `-qbittorrent-user` | — | qBittorrent WebUI username |
-| `-qbittorrent-pass` | — | qBittorrent WebUI password |
-| `-notifier` | `ntfy` | Notification backend: `ntfy`, `gotify` or `none` |
-| `-ntfy` | — | ntfy topic URL; empty disables |
-| `-gotify` | — | Gotify server URL |
-| `-gotify-token` | — | Gotify app token |
 | `-debug` | `false` | Verbose logging of every decision |
 | `-version` | — | Print the version and exit |
 | `-seed` | — | Insert the shows from the config file |
@@ -426,9 +413,7 @@ the server's webhook at it and no plugin or script is needed. See
 | `-slugs` | `slugs.yaml` | Name → slug mapping used by `-backfill-slugs` |
 | `-reconcile` | — | File completed downloads in staging once, then exit |
 
-A flag overrides the config file only when you actually pass it. Every flag has
-a default, so applying them unconditionally would let a default silently
-overwrite a configured value.
+To change a setting, change it in the UI or the config file.
 
 ## API
 

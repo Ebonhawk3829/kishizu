@@ -6,15 +6,16 @@
 --
 -- Signal rules:
 --   * An episode counts as watched when playback reaches within
---     MARK_WINDOW seconds of the end (the user skips the ED), OR playback
+--     mark_window seconds of the end (the user skips the ED), OR playback
 --     reaches the actual end.
---   * Nothing is posted while watching. Each file that reaches the mark
---     window is remembered and posted once, on exit, so a video abandoned
---     at 20% never sends anything and a playlist sends one signal per
---     episode, not just the last one.
+--   * The signal is posted the moment the mark window is entered, not at
+--     exit. Posting mid-playback means curl always runs to completion, so
+--     there is no teardown race and nothing pending when mpv quits. A video
+--     abandoned before the window never sends anything, and a playlist
+--     sends one signal per episode as each one reaches the window.
 --
--- Failure path: if the POST fails, the payload is appended to a spool file and
--- retried the next time mpv starts. A missed signal leaves a file on disk,
+-- Failure path: if the POST fails, the payload is appended to a spool file
+-- and retried on the next file load. A missed signal leaves a file on disk,
 -- which is the safe direction; a blocking one would ruin mpv. A notification
 -- is also sent to ntfy so the failure is visible rather than silent.
 
@@ -23,20 +24,18 @@ local utils = require 'mp.utils'
 local options = require 'mp.options'
 
 local o = {
-    -- kishizu's /api/watched endpoint. Replace HOST with wherever kishizu is
-    -- reachable from this machine: a hostname, a LAN address, or a VPN
-    -- address. Set this in mpv's script-opts rather than editing the file.
-    endpoint = 'http://HOST:8098/api/watched',
+    -- kishizu's /api/watched endpoint on the tailnet.
+    endpoint = 'http://100.64.0.1:8098/api/watched',
     -- Only files under this directory are reported. mpv is used for all media
     -- on this machine, so without the gate every film and TV episode would be
     -- posted to kishizu and come back as a 422. Subdirectories count.
     -- Empty disables the filter and reports everything.
-    root = '',
+    root = 'C:\\Anime',
     -- Seconds from the end within which playback counts as watched. The user
     -- skips the ED, so "reached the end" alone would miss most episodes.
     mark_window = 120,
     -- ntfy topic for failure alerts. Empty disables.
-    ntfy = '',
+    ntfy = 'http://100.64.0.1:8085/kishizu',
     -- Where failed posts are spooled for retry.
     spool = mp.command_native({'expand-path', '~~state/kishizu-spool.txt'}),
 }
@@ -69,10 +68,9 @@ local function under_root(p)
         and (path:sub(#root + 1, #root + 1) == '/' or #path == #root)
 end
 
--- pending holds one entry per file that reached the mark window, so a
--- playlist of episodes sends one signal per episode instead of only the
--- last one.
-local pending = {}
+-- marked holds one entry per file that has been posted, so the observer —
+-- which fires many times per second — sends exactly one signal per episode.
+local marked = {}
 
 local function spool(payload)
     local f = io.open(o.spool, 'a')
@@ -126,8 +124,16 @@ end
 local function flush_spool()
     local f = io.open(o.spool, 'r')
     if not f then return end
-    local lines = {}
-    for line in f:lines() do table.insert(lines, line) end
+    -- Dedupe before retrying: the spool appends on every failure, so the
+    -- same payload can accumulate across sessions and one entry would be
+    -- re-posted once per copy.
+    local seen, lines = {}, {}
+    for line in f:lines() do
+        if not seen[line] then
+            seen[line] = true
+            table.insert(lines, line)
+        end
+    end
     f:close()
     if #lines == 0 then return end
 
@@ -151,18 +157,41 @@ local function flush_spool()
     end
 end
 
-local function check_position(_, pos)
-    -- time-pos is unavailable before playback starts and at file transitions;
-    -- the observer still fires then, with nil.
+local function check_position()
+    -- Read time-pos fresh inside the callback instead of trusting the
+    -- observer's argument. During a playlist transition mpv can deliver a
+    -- stale time-pos from the previous file alongside the next file's path;
+    -- pairing those two once marked episodes that were never watched. Fresh
+    -- property reads are always self-consistent.
+    local pos = mp.get_property_number('time-pos')
     if not pos then return end
     local path = mp.get_property('path')
     if not path or not under_root(path) then return end
-    if pending[path] then return end
+    if marked[path] then return end
     local dur = mp.get_property_number('duration')
     if not dur or dur == 0 then return end
-    if dur - pos <= o.mark_window then
-        pending[path] = true
-        mp.msg.info('kishizu: near end, will mark watched on exit: ' .. path)
+    if dur - pos > o.mark_window then return end
+
+    -- The mark window IS the watch signal: post now, mid-playback, while
+    -- curl can run to completion. Nothing is deferred to exit, so quitting
+    -- can never kill a post in flight.
+    marked[path] = true
+    mp.msg.info('kishizu: mark window reached, posting: ' .. path)
+    local payload = utils.format_json({path = path})
+    local result = post(payload)
+    if result == 'ok' then
+        mp.osd_message('kishizu: marked watched')
+        mp.msg.info('kishizu: marked watched: ' .. path)
+    elseif result == 'rejected' then
+        -- The server is fine, it just does not track this show. Not an
+        -- error, and not worth a phone notification: mpv plays plenty of
+        -- things kishizu has never heard of.
+        mp.msg.verbose('kishizu: ignored untracked file: ' .. path)
+    else
+        spool(payload)
+        notify('kishizu: could not reach server; watch signal spooled for ' ..
+               mp.get_property('filename', path))
+        mp.msg.warn('kishizu: post failed, spooled: ' .. path)
     end
 end
 
@@ -178,28 +207,12 @@ local function on_file_load()
     flush_spool()
 end
 
-local function on_exit()
-    for path in pairs(pending) do
-        local payload = utils.format_json({path = path})
-        local result = post(payload)
-        if result == 'ok' then
-            mp.msg.info('kishizu: marked watched: ' .. path)
-        elseif result == 'rejected' then
-            -- The server is fine, it just does not track this show. Not an
-            -- error, and not worth a phone notification: mpv plays plenty of
-            -- things kishizu has never heard of.
-            mp.msg.verbose('kishizu: ignored untracked file: ' .. path)
-        else
-            spool(payload)
-            notify('kishizu: could not reach server; watch signal spooled for ' ..
-                   mp.get_property('filename', path))
-            mp.msg.warn('kishizu: post failed, spooled: ' .. path)
-        end
-    end
-    pending = {}
-end
+-- No shutdown handler: every signal is posted the moment its mark window is
+-- entered, so teardown has nothing to do. Posting during mpv's teardown was
+-- the old design's flaw — curl could be killed after the server received the
+-- request but before the status code came back, which spooled a signal the
+-- server had already accepted and raised a false "could not reach server"
+-- alert.
 
 mp.register_event('start-file', on_file_load)
 mp.observe_property('time-pos', 'number', check_position)
-mp.register_event('shutdown', on_exit)
-mp.register_event('quit', on_exit)

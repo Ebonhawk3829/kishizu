@@ -60,7 +60,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
-	applyFlagOverrides(cfg, f.overrides())
 
 	indexer, err := buildIndexer(cfg.Server.Indexer)
 	if err != nil {
@@ -69,10 +68,11 @@ func main() {
 	}
 
 	// An empty endpoint must fail at startup rather than surface as a failed
-	// grab later.
-	if !f.dryRun && cfg.Server.Downloader.TransmissionRPC == "" &&
+	// grab later. Read dry-run from the resolved config: a flag default of
+	// true would skip this guard for a config that set dry_run: false.
+	if !cfg.Server.IsDryRun() && cfg.Server.Downloader.TransmissionRPC == "" &&
 		cfg.Server.Downloader.Kind == string(download.KindTransmission) {
-		fmt.Fprintf(os.Stderr, "a Transmission RPC endpoint is required unless -dry-run is set\n")
+		fmt.Fprintf(os.Stderr, "a Transmission RPC endpoint is required unless dry_run is set\n")
 		os.Exit(1)
 	}
 
@@ -150,7 +150,11 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	}
 	srv.SetWatch(watch.New(st, cfg.Server.Library, keep, cfg.Server.Delete, after))
 
-	n, err := buildNotifier(f.notifier, f.ntfyURL, f.gotifyURL, f.gotifyToken)
+	// The notifier reads the resolved config, never a flag: buildNotifier
+	// treats an empty ntfy URL as "notifications disabled", so a source that
+	// can be empty by default silently turns every alert off.
+	n, err := buildNotifier(cfg.Server.Notifier.Kind, cfg.Server.Notifier.NtfyTopic,
+		cfg.Server.Notifier.GotifyURL, cfg.Server.Notifier.GotifyToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
