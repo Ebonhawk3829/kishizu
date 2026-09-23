@@ -143,7 +143,12 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	if cfg.Server.Keep != nil {
 		keep = *cfg.Server.Keep
 	}
-	srv.SetWatch(watch.New(st, cfg.Server.Library, keep))
+	after, err := cfg.Server.DeleteAfterDuration()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	srv.SetWatch(watch.New(st, cfg.Server.Library, keep, cfg.Server.Delete, after))
 
 	n, err := buildNotifier(f.notifier, f.ntfyURL, f.gotifyURL, f.gotifyToken)
 	if err != nil {

@@ -44,7 +44,7 @@ is the threshold, and a page that comes back clears the count.
 | **Grab** | Hands the best matching release to your torrent client, ranked by your group order |
 | **File** | Renames it into your library, ready for your player |
 | **Watch** | Anything that can POST JSON tells kishizu when you finish an episode |
-| **Clean** | Deletes watched episodes, keeping the last few |
+| **Clean** | Deletes watched episodes per the delete policy: immediately, after a delay, or never |
 
 ## Contents
 
@@ -168,6 +168,8 @@ server:
   library: /media/anime          # where finished episodes are filed
   staging: /downloads/anime      # where the client puts completed files
   keep: 2                        # recently watched episodes to leave on disk
+  delete: immediate              # immediate | after | off
+  # delete_after: 7d             # with delete: after — hours (48h) or days (7d)
   interval: 5m                   # how often to poll
   dry_run: true                  # decide but do not download
 
@@ -396,6 +398,8 @@ the server's webhook at it and no plugin or script is needed. See
 | `-library` | `/media/anime` | Library root, as kishizu sees it |
 | `-staging` | `/downloads/anime` | Staging root, as kishizu sees it |
 | `-keep` | `2` | Recently watched episodes to keep on disk |
+| `-delete` | — | Watched-episode deletion: `immediate`, `after`, or `off` |
+| `-delete-after` | — | With `-delete after`: how long a watched episode stays on disk, e.g. `48h`, `7d` |
 | `-interval` | `5m` | Poll interval |
 | `-dry-run` | `true` | Decide but do not download |
 | `-downloader` | `transmission` | Torrent client: `transmission` or `qbittorrent` |

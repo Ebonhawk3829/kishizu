@@ -28,6 +28,8 @@ type flags struct {
 	library      string
 	staging      string
 	keep         int
+	delete       string
+	deleteAfter  time.Duration
 	interval     time.Duration
 	dryRun       bool
 	ntfyURL      string
@@ -69,6 +71,8 @@ func parseFlags() *flags {
 	flag.StringVar(&f.library, "library", "/media/anime", "library root for finished episodes, as kishizu sees it")
 	flag.StringVar(&f.staging, "staging", "/downloads/anime", "staging root the downloader puts completed files in, as kishizu sees it")
 	flag.IntVar(&f.keep, "keep", 2, "recently watched episodes to keep on disk")
+	flag.StringVar(&f.delete, "delete", "", "watched-episode deletion: immediate, after, or off (empty = config file, default immediate)")
+	flag.DurationVar(&f.deleteAfter, "delete-after", 0, "with -delete after: how long a watched episode stays on disk, e.g. 48h or 7d")
 	flag.DurationVar(&f.interval, "interval", 5*time.Minute, "RSS poll interval")
 	flag.BoolVar(&f.dryRun, "dry-run", true, "poll and decide but do not hand off to the downloader")
 	flag.StringVar(&f.ntfyURL, "ntfy", "", "ntfy topic URL for notifications (empty disables)")
@@ -95,6 +99,8 @@ func (f *flags) overrides() flagOverrides {
 		library:     f.library,
 		staging:     f.staging,
 		keep:        f.keep,
+		delete:      f.delete,
+		deleteAfter: f.deleteAfter,
 		interval:    f.interval,
 		dryRun:      f.dryRun,
 		rpc:         f.rpc,

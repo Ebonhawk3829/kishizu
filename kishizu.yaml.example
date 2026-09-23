@@ -21,6 +21,16 @@ server:
   staging: /downloads/anime
   # Recently watched episodes to leave on disk. 0 keeps none.
   keep: 2
+  # When watched episodes are removed from disk:
+  #   immediate  delete as soon as a watch signal lands (default)
+  #   after      keep for delete_after, then remove on the next sweep
+  #   off        never delete; the library grows forever
+  delete: immediate
+  # How long a watched episode stays on disk when delete is "after".
+  # A number followed by h (hours) or d (days): "48h", "7d", "30d".
+  # Minutes and seconds also work ("90m") but are rarely useful.
+  # Required when delete is "after"; ignored otherwise.
+  # delete_after: 7d
   # How often to poll for releases.
   interval: 5m
   # Decide but do not download. Remove once you trust the matching.

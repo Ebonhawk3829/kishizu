@@ -317,7 +317,7 @@ func TestSweepDeletesAllWhenKeepZero(t *testing.T) {
 		paths = append(paths, p)
 	}
 
-	h := watch.New(st, library, 0)
+	h := watch.New(st, library, 0, watch.DeleteImmediate, 0)
 	deleted, kept, err := h.Sweep()
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)

@@ -12,6 +12,8 @@ type flagOverrides struct {
 	library     string
 	staging     string
 	keep        int
+	delete      string
+	deleteAfter time.Duration
 	interval    time.Duration
 	dryRun      bool
 	rpc         string
@@ -44,6 +46,12 @@ func applyFlagOverrides(cfg *config.File, o flagOverrides) {
 	}
 	if set["keep"] {
 		s.Keep = &o.keep
+	}
+	if set["delete"] {
+		s.Delete = o.delete
+	}
+	if set["delete-after"] {
+		s.DeleteAfter = o.deleteAfter.String()
 	}
 	if set["interval"] && o.interval > 0 {
 		s.Interval = o.interval.String()

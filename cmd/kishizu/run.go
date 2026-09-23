@@ -57,13 +57,17 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	if s.Keep != nil {
 		keep = *s.Keep
 	}
+	deleteAfter, err := s.DeleteAfterDuration()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 	dryRun := true
 	if s.DryRun != nil {
 		dryRun = *s.DryRun
 	}
 
 	l := listen.NewWithPolicy(st, indexer, buildQuality(s.Quality))
-	w := watch.New(st, s.Library, keep)
+	w := watch.New(st, s.Library, keep, s.Delete, deleteAfter)
 	rec := grab.NewWithScheme(st, s.Staging, s.Library, scheme)
 	rec.PruneUnselected = s.PruneUnselected
 	// A stalled download pings once, not on every poll.

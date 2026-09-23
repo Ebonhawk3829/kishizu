@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
@@ -31,15 +32,43 @@ type Handler struct {
 	Keep int
 	// Library is the root the files live under. Empty disables deletion.
 	Library string
+	// Delete is the deletion policy: "immediate" deletes watched episodes as
+	// soon as a signal lands, "after" waits for DeleteAfter, "off" never
+	// deletes. Validated at construction; an invalid value is a programming
+	// error, not a runtime condition.
+	Delete string
+	// DeleteAfter is the minimum age of a watch before "after" mode deletes.
+	// Zero for the other modes.
+	DeleteAfter time.Duration
 }
 
+// Delete modes accepted by New.
+const (
+	DeleteImmediate = "immediate"
+	DeleteAfterMode = "after"
+	DeleteOff       = "off"
+)
+
 // New builds a Handler. keep is the number of most-recent watched episodes to
-// retain; files older than that are deleted.
-func New(st *store.Store, library string, keep int) *Handler {
+// retain; files older than that are deleted. mode is one of "immediate",
+// "after" or "off"; after requires afterDelay > 0.
+func New(st *store.Store, library string, keep int, mode string, afterDelay time.Duration) *Handler {
 	if keep < 0 {
 		keep = 0
 	}
-	return &Handler{st: st, Library: library, Keep: keep}
+	switch mode {
+	case DeleteImmediate:
+		afterDelay = 0
+	case DeleteAfterMode:
+		if afterDelay <= 0 {
+			panic(fmt.Sprintf("watch: delete: after requires a positive delete_after, got %v", afterDelay))
+		}
+	case DeleteOff:
+		afterDelay = 0
+	default:
+		panic(fmt.Sprintf("watch: unknown delete mode %q", mode))
+	}
+	return &Handler{st: st, Library: library, Keep: keep, Delete: mode, DeleteAfter: afterDelay}
 }
 
 // Sweep deletes files for watched episodes beyond the Keep window.
@@ -48,9 +77,14 @@ func New(st *store.Store, library string, keep int) *Handler {
 // while the file is still open, or while the user changes their mind, should not
 // race the file out from under them. Sweep runs on its own schedule.
 //
+// The Delete policy gates what may be deleted at all: "off" deletes nothing,
+// "after" only episodes whose watch is older than DeleteAfter. Keep still
+// applies in every mode that deletes: it protects the most recent watches
+// regardless of age.
+//
 // Returns what it deleted and what it left, for logging.
 func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
-	if h.Library == "" {
+	if h.Library == "" || h.Delete == DeleteOff {
 		return nil, nil, nil
 	}
 	shows, err := h.st.ListShows()
@@ -95,6 +129,16 @@ func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
 		for i, ep := range watched {
 			if i < h.Keep {
 				debug.Log("keep %s (within the %d most recent)", ep.FilePath, h.Keep)
+				kept = append(kept, ep.FilePath)
+				continue
+			}
+			// "after" mode: a watch younger than the delay is protected
+			// regardless of position in the keep window. Episodes with no
+			// timestamp predate the column; they are old by definition.
+			if h.Delete == DeleteAfterMode && ep.WatchedAt != nil &&
+				time.Since(*ep.WatchedAt) < h.DeleteAfter {
+				debug.Log("keep %s (watched %v ago, within delete_after %v)",
+					ep.FilePath, time.Since(*ep.WatchedAt).Round(time.Minute), h.DeleteAfter)
 				kept = append(kept, ep.FilePath)
 				continue
 			}

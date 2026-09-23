@@ -26,7 +26,7 @@ func TestCheckMissingFlagsVanishedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := New(st, lib, 2)
+	h := New(st, lib, 2, DeleteImmediate, 0)
 	missing, err := h.CheckMissing()
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestCheckMissingIgnoresNoPath(t *testing.T) {
 	// Marked downloaded via the UI, no path — the file is on the user's PC.
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Downloaded, "", "")
 
-	h := New(st, lib, 2)
+	h := New(st, lib, 2, DeleteImmediate, 0)
 	missing, err := h.CheckMissing()
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestCheckMissingIgnoresPresentFile(t *testing.T) {
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Downloaded, "H", "rel")
 	_ = st.SetFilePath(sh.ID, 5, p)
 
-	h := New(st, lib, 2)
+	h := New(st, lib, 2, DeleteImmediate, 0)
 	missing, err := h.CheckMissing()
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestCheckMissingSkipsWatched(t *testing.T) {
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Watched, "H", "rel")
 	_ = st.SetFilePath(sh.ID, 5, p) // file already gone
 
-	h := New(st, lib, 2)
+	h := New(st, lib, 2, DeleteImmediate, 0)
 	missing, err := h.CheckMissing()
 	if err != nil {
 		t.Fatal(err)

@@ -270,6 +270,17 @@ func (s *Store) SetFilePath(showID int64, number int, path string) error {
 	return err
 }
 
+// BackdateWatched moves an episode's watched_at back by d. It exists for the
+// delete_after policy's tests, which need watches older than the delay
+// without sleeping, and for importing watch history recorded elsewhere.
+// Only meaningful on a watched episode; other states have no watched_at.
+func (s *Store) BackdateWatched(showID int64, number int, d time.Duration) error {
+	_, err := s.db.Exec(
+		`UPDATE episode SET watched_at = datetime(watched_at, ?) WHERE show_id = ? AND number = ?`,
+		fmt.Sprintf("-%d seconds", int(d.Seconds())), showID, number)
+	return err
+}
+
 // Unlatch resets an episode to wanted, so the user can deliberately
 // re-download something they already watched, deleted, or lost.
 //

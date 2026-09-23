@@ -108,8 +108,9 @@ The first matches the **base name** against tracked episodes, so the client's
 directory layout does not matter — only the filename. The second is explicit
 and takes precedence.
 
-Marking watched also sweeps: files for watched episodes beyond the keep window
-are deleted.
+Marking watched also sweeps: files for watched episodes are deleted per the
+delete policy (`immediate` by default; `after` respects the delay; `off`
+deletes nothing).
 
 ### `POST /api/watched-up-to`
 

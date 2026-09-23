@@ -18,6 +18,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -52,6 +53,17 @@ type Server struct {
 	Staging string `yaml:"staging"`
 	// Keep is how many recently watched episodes to leave on disk.
 	Keep *int `yaml:"keep"`
+	// Delete controls when watched episodes are removed from disk.
+	// "immediate" (the default) deletes as soon as a watch signal lands;
+	// "after" waits until the episode has been watched for DeleteAfter;
+	// "off" never deletes. Anything else fails at load.
+	Delete string `yaml:"delete"`
+	// DeleteAfter is how long a watched episode stays on disk before the
+	// "after" mode may remove it. Accepts a number followed by h for hours
+	// or d for days: "48h", "7d", "30d". Minutes and seconds are also
+	// valid ("90m", "7200s") but rarely useful. Required when delete is
+	// "after"; ignored otherwise.
+	DeleteAfter string `yaml:"delete_after"`
 	// PruneUnselected deletes staged files that were not selected for
 	// tracking, once a pack has finished. Off by default: it deletes data.
 	PruneUnselected *bool `yaml:"prune_unselected"`
@@ -258,6 +270,12 @@ func mergeServer(dst, src *Server) {
 	if src.Keep != nil {
 		dst.Keep = src.Keep
 	}
+	if src.Delete != "" {
+		dst.Delete = src.Delete
+	}
+	if src.DeleteAfter != "" {
+		dst.DeleteAfter = src.DeleteAfter
+	}
 	if src.PruneUnselected != nil {
 		dst.PruneUnselected = src.PruneUnselected
 	}
@@ -341,6 +359,42 @@ func mergeServer(dst, src *Server) {
 	}
 }
 
+// DeleteAfterDuration parses the delete_after setting. It accepts a number
+// followed by h (hours) or d (days) — "48h", "7d", "30d" — plus Go's own
+// suffixes (m for minutes, s for seconds) for anyone who wants them. Days
+// need their own suffix because time.ParseDuration has none: a month of
+// "720h" is unreadable.
+//
+// An empty setting is 0. A malformed value is an error, not a silent default:
+// a typo in a deletion delay is exactly the kind of thing that must fail
+// loudly at startup.
+func (s *Server) DeleteAfterDuration() (time.Duration, error) {
+	v := strings.TrimSpace(s.DeleteAfter)
+	if v == "" {
+		return 0, nil
+	}
+	// Days: convert to hours and let ParseDuration do the rest.
+	if d := strings.TrimSuffix(v, "d"); d != v && d != "" {
+		n, err := strconv.ParseFloat(d, 64)
+		if err != nil {
+			return 0, fmt.Errorf("delete_after: bad number of days %q", v)
+		}
+		dur := time.Duration(n) * 24 * time.Hour
+		if dur <= 0 {
+			return 0, fmt.Errorf("delete_after: must be positive, got %q", v)
+		}
+		return dur, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("delete_after: %q is not a duration like \"48h\" or \"7d\"", v)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("delete_after: must be positive, got %q", v)
+	}
+	return d, nil
+}
+
 // DefaultServer is the configuration kishizu runs with when nothing is set.
 func DefaultServer() *Server {
 	keep := 2
@@ -354,6 +408,7 @@ func DefaultServer() *Server {
 		Library:         "/media/anime",
 		Staging:         "/downloads/anime",
 		Keep:            &keep,
+		Delete:          "immediate",
 		Interval:        "5m",
 		DryRun:          &dryRun,
 		PruneUnselected: &prune,

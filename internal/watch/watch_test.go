@@ -66,7 +66,7 @@ func TestSweepDeletesBeyondKeep(t *testing.T) {
 		_ = st.UpsertEpisode(sh.ID, n, episode.Watched, "H", "rel")
 	}
 
-	h := New(st, lib, 2) // keep the 2 most recent
+	h := New(st, lib, 2, DeleteImmediate, 0) // keep the 2 most recent
 	deleted, kept, err := h.Sweep()
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestSweepRefusesOutsideLibrary(t *testing.T) {
 	_ = st.SetFilePath(sh.ID, 5, outside)
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Watched, "H", "rel")
 
-	h := New(st, t.TempDir(), 0) // keep 0, so it would delete if unguarded
+	h := New(st, t.TempDir(), 0, DeleteImmediate, 0) // keep 0, so it would delete if unguarded
 	deleted, _, err := h.Sweep()
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestSweepRefusesSymlinkEscape(t *testing.T) {
 	_ = st.SetFilePath(sh.ID, 1, link)
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Watched, "H", "rel")
 
-	h := New(st, lib, 0)
+	h := New(st, lib, 0, DeleteImmediate, 0)
 	if _, _, err := h.Sweep(); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestSweepRefusesParentTraversal(t *testing.T) {
 	_ = st.SetFilePath(sh.ID, 1, filepath.Join(lib, "..", "precious.mkv"))
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Watched, "H", "rel")
 
-	h := New(st, lib, 0)
+	h := New(st, lib, 0, DeleteImmediate, 0)
 	if _, _, err := h.Sweep(); err != nil {
 		t.Fatal(err)
 	}
