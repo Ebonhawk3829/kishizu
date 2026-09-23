@@ -200,6 +200,38 @@ func (s *Server) showByName(name string) (*store.Show, error) {
 	return nil, fmt.Errorf("no tracked show named %q", name)
 }
 
+// sweepAfter runs the missing-file check and the sweep in the background.
+// Every path that records a watch fires this: the user's intent when marking
+// something watched is that the file goes away now, not at the next tick.
+// It runs in the background rather than in the handler because it scans
+// every show's episodes and touches the filesystem; making the caller wait
+// delayed the response by however long the sweep took. The watch itself is
+// recorded before this fires, so a slow sweep cannot lose it.
+func (s *Server) sweepAfter() {
+	if s.watch == nil {
+		return
+	}
+	go func() {
+		if missing, err := s.watch.CheckMissing(); err != nil {
+			log.Printf("watch: check missing: %v", err)
+		} else if len(missing) > 0 {
+			log.Printf("watch: %d episode(s) missing from disk", len(missing))
+			if s.notifier != nil {
+				if err := s.notifier.Send("kishizu: file missing",
+					fmt.Sprintf("%d episode(s) vanished before the watch signal", len(missing)),
+					notify.PriorityHigh); err != nil {
+					log.Printf("notify: %v", err)
+				}
+			}
+		}
+		if deleted, kept, err := s.watch.Sweep(); err != nil {
+			log.Printf("watch sweep: %v", err)
+		} else if len(deleted) > 0 {
+			log.Printf("watch: %d deleted, %d kept", len(deleted), len(kept))
+		}
+	}()
+}
+
 // recordWatched latches an episode watched and runs everything a watch
 // implies. It is the shared core of /api/watched and /api/webhook: both
 // intakes must mean exactly the same thing, or a watch recorded by one path
@@ -220,32 +252,6 @@ func (s *Server) recordWatched(showID int64, epNum int, source string) error {
 	if err := s.st.ProjectAirDates(showID); err != nil {
 		log.Printf("%s: project air dates: %v", source, err)
 	}
-	// The missing-file check and the sweep run in the background rather than
-	// in this handler. They scan every show's episodes and touch the
-	// filesystem; making the caller wait on them delayed the response by
-	// however long the sweep took, for work the 15-minute tick would do
-	// anyway. The watch itself is recorded before this fires, so a slow
-	// sweep cannot lose it.
-	if s.watch != nil {
-		go func() {
-			if missing, err := s.watch.CheckMissing(); err != nil {
-				log.Printf("watch: check missing: %v", err)
-			} else if len(missing) > 0 {
-				log.Printf("watch: %d episode(s) missing from disk", len(missing))
-				if s.notifier != nil {
-					if err := s.notifier.Send("kishizu: file missing",
-						fmt.Sprintf("%d episode(s) vanished before the watch signal", len(missing)),
-						notify.PriorityHigh); err != nil {
-						log.Printf("notify: %v", err)
-					}
-				}
-			}
-			if deleted, kept, err := s.watch.Sweep(); err != nil {
-				log.Printf("watch sweep: %v", err)
-			} else if len(deleted) > 0 {
-				log.Printf("watch: %d deleted, %d kept", len(deleted), len(kept))
-			}
-		}()
-	}
+	s.sweepAfter()
 	return nil
 }

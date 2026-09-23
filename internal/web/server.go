@@ -464,6 +464,9 @@ func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.ProjectAirDates(sh.ID); err != nil {
 		log.Printf("watched-up-to: project air dates: %v", err)
 	}
+	// The bulk path deletes on the same contract as the single-episode one:
+	// a watch mark means the file goes away now, not at the next tick.
+	s.sweepAfter()
 	log.Printf("watched-up-to: %s episodes 1..%d (%d newly latched)", sh.CanonicalName, req.UpTo, marked)
 	writeJSON(w, map[string]any{
 		"show": sh.CanonicalName, "up_to": req.UpTo, "newly_marked": marked,
