@@ -46,107 +46,107 @@ type File struct {
 // they care about and nothing else.
 type Server struct {
 	// Library is where finished episodes are filed, as kishizu sees it.
-	Library string `yaml:"library"`
+	Library string `yaml:"library" json:"library"`
 	// Staging is where the downloader puts completed files, as kishizu sees
 	// it. Must be on the same filesystem as Library: the final move is a
 	// rename, and a rename across mount points fails.
-	Staging string `yaml:"staging"`
+	Staging string `yaml:"staging" json:"staging"`
 	// Keep is how many recently watched episodes to leave on disk.
-	Keep *int `yaml:"keep"`
+	Keep *int `yaml:"keep" json:"keep"`
 	// Delete controls when watched episodes are removed from disk.
 	// "immediate" (the default) deletes as soon as a watch signal lands;
 	// "after" waits until the episode has been watched for DeleteAfter;
 	// "off" never deletes. Anything else fails at load.
-	Delete string `yaml:"delete"`
+	Delete string `yaml:"delete" json:"delete"`
 	// DeleteAfter is how long a watched episode stays on disk before the
 	// "after" mode may remove it. Accepts a number followed by h for hours
 	// or d for days: "48h", "7d", "30d". Minutes and seconds are also
 	// valid ("90m", "7200s") but rarely useful. Required when delete is
 	// "after"; ignored otherwise.
-	DeleteAfter string `yaml:"delete_after"`
+	DeleteAfter string `yaml:"delete_after" json:"delete_after"`
 	// PruneUnselected deletes staged files that were not selected for
 	// tracking, once a pack has finished. Off by default: it deletes data.
-	PruneUnselected *bool `yaml:"prune_unselected"`
+	PruneUnselected *bool `yaml:"prune_unselected" json:"prune_unselected"`
 	// Interval is how often to poll for releases.
-	Interval string `yaml:"interval"`
+	Interval string `yaml:"interval" json:"interval"`
 	// DryRun decides but does not download.
-	DryRun *bool `yaml:"dry_run"`
+	DryRun *bool `yaml:"dry_run" json:"dry_run"`
 
 	// Downloader is which torrent client to use.
-	Downloader DownloaderConfig `yaml:"downloader"`
+	Downloader DownloaderConfig `yaml:"downloader" json:"downloader"`
 	// Notifier is which notification backend to use.
-	Notifier NotifierConfig `yaml:"notifier"`
+	Notifier NotifierConfig `yaml:"notifier" json:"notifier"`
 	// Indexer is where releases are searched for.
-	Indexer IndexerConfig `yaml:"indexer"`
+	Indexer IndexerConfig `yaml:"indexer" json:"indexer"`
 	// Quality is the release-quality policy.
-	Quality QualityConfig `yaml:"quality"`
+	Quality QualityConfig `yaml:"quality" json:"quality"`
 	// Naming is how files are named in the library.
-	Naming NamingConfig `yaml:"naming"`
+	Naming NamingConfig `yaml:"naming" json:"naming"`
 	// Browse is how the seasonal browse list is presented.
-	Browse BrowseConfig `yaml:"browse"`
+	Browse BrowseConfig `yaml:"browse" json:"browse"`
 }
 
 // DownloaderConfig selects and configures the torrent client.
 type DownloaderConfig struct {
 	// Kind is "transmission" or "qbittorrent".
-	Kind string `yaml:"kind"`
+	Kind string `yaml:"kind" json:"kind"`
 	// TransmissionRPC is the Transmission RPC endpoint.
-	TransmissionRPC string `yaml:"transmission_rpc"`
+	TransmissionRPC string `yaml:"transmission_rpc" json:"transmission_rpc"`
 	// QBittorrentURL is the qBittorrent WebUI root URL.
-	QBittorrentURL string `yaml:"qbittorrent_url"`
+	QBittorrentURL string `yaml:"qbittorrent_url" json:"qbittorrent_url"`
 	// QBittorrentUser and QBittorrentPass are the WebUI credentials.
 	// Optional when the WebUI bypasses auth for localhost.
-	QBittorrentUser string `yaml:"qbittorrent_user"`
-	QBittorrentPass string `yaml:"qbittorrent_pass"`
+	QBittorrentUser string `yaml:"qbittorrent_user" json:"qbittorrent_user"`
+	QBittorrentPass string `yaml:"qbittorrent_pass" json:"qbittorrent_pass"`
 }
 
 // NotifierConfig selects and configures the notification backend.
 type NotifierConfig struct {
 	// Kind is "ntfy", "gotify" or "none".
-	Kind string `yaml:"kind"`
+	Kind string `yaml:"kind" json:"kind"`
 	// NtfyTopic is the full ntfy topic URL.
-	NtfyTopic string `yaml:"ntfy_topic"`
+	NtfyTopic string `yaml:"ntfy_topic" json:"ntfy_topic"`
 	// GotifyURL is the Gotify server root.
-	GotifyURL string `yaml:"gotify_url"`
+	GotifyURL string `yaml:"gotify_url" json:"gotify_url"`
 	// GotifyToken is a Gotify app token. A secret: never written back to
 	// the file by the UI, and never logged.
-	GotifyToken string `yaml:"gotify_token"`
+	GotifyToken string `yaml:"gotify_token" json:"gotify_token"`
 }
 
 // IndexerConfig is where releases are searched for.
 type IndexerConfig struct {
 	// Base is the indexer root, e.g. https://nyaa.si
-	Base string `yaml:"base"`
+	Base string `yaml:"base" json:"base"`
 	// Category is the indexer's category filter, e.g. 1_2 for
 	// anime-english-translated on Nyaa.
-	Category string `yaml:"category"`
+	Category string `yaml:"category" json:"category"`
 	// UserAgent is sent on every request. Some indexers reject the default
 	// Go user agent outright, and a descriptive one lets an admin see who
 	// is polling them.
-	UserAgent string `yaml:"user_agent"`
+	UserAgent string `yaml:"user_agent" json:"user_agent"`
 	// MinInterval is the shortest time between requests to the indexer.
 	// Politeness: a public indexer should not be hammered, and a burst that
 	// looks like a scraper gets the caller blocked.
-	MinInterval string `yaml:"min_interval"`
+	MinInterval string `yaml:"min_interval" json:"min_interval"`
 }
 
 // QualityConfig is the release-quality policy.
 type QualityConfig struct {
 	// ResolutionFloor is the lowest acceptable resolution, e.g. 1080p.
-	ResolutionFloor string `yaml:"resolution_floor"`
+	ResolutionFloor string `yaml:"resolution_floor" json:"resolution_floor"`
 	// GroupOrder is the preferred release groups, best first.
-	GroupOrder []string `yaml:"group_order"`
+	GroupOrder []string `yaml:"group_order" json:"group_order"`
 	// CodecRank maps a codec to its rank. Lower is better.
-	CodecRank map[string]int `yaml:"codec_rank"`
+	CodecRank map[string]int `yaml:"codec_rank" json:"codec_rank"`
 	// ResolutionPenalty maps a resolution to a rank penalty. Lower is better.
-	ResolutionPenalty map[string]int `yaml:"resolution_penalty"`
+	ResolutionPenalty map[string]int `yaml:"resolution_penalty" json:"resolution_penalty"`
 	// PenaltyDub is added when a release is a dub-only encode.
-	PenaltyDub *int `yaml:"penalty_dub"`
+	PenaltyDub *int `yaml:"penalty_dub" json:"penalty_dub"`
 	// PenaltyUncensored is added when a release is uncensored. Negative to
 	// prefer it.
-	PenaltyUncensored *int `yaml:"penalty_uncensored"`
+	PenaltyUncensored *int `yaml:"penalty_uncensored" json:"penalty_uncensored"`
 	// RejectBatch excludes batches and season packs.
-	RejectBatch *bool `yaml:"reject_batch"`
+	RejectBatch *bool `yaml:"reject_batch" json:"reject_batch"`
 }
 
 // BrowseConfig is how the seasonal browse list is presented.
@@ -156,20 +156,20 @@ type BrowseConfig struct {
 	// Display only. The filter always matches both, so switching this never
 	// hides a show the user could have found — it changes which of the two
 	// names is on screen, not what is searchable.
-	Title string `yaml:"title"`
+	Title string `yaml:"title" json:"title"`
 }
 
 // NamingConfig is how files are named in the library.
 type NamingConfig struct {
 	// Preset is a named layout: "kishizu", "sonarr", "plex" or "custom".
-	Preset string `yaml:"preset"`
+	Preset string `yaml:"preset" json:"preset"`
 	// Pattern is a custom layout, used when Preset is "custom".
 	//
 	// Placeholders: {show} {season} {episode} {episode:2} {ext}
-	Pattern string `yaml:"pattern"`
+	Pattern string `yaml:"pattern" json:"pattern"`
 	// SeasonFolder, when true, files into <library>/<Show>/Season 01/.
 	// Implied by the sonarr and plex presets.
-	SeasonFolder *bool `yaml:"season_folder"`
+	SeasonFolder *bool `yaml:"season_folder" json:"season_folder"`
 }
 
 // Load reads and parses the configuration file, then applies any secret
@@ -236,7 +236,7 @@ func Parse(b []byte) (*File, error) {
 	// was ever written.
 	if block, ok := serverBlock(string(b)); ok {
 		var doc struct {
-			Server *Server `yaml:"server"`
+			Server *Server `yaml:"server" json:"server"`
 		}
 		if err := yaml.Unmarshal([]byte(block), &doc); err != nil {
 			return nil, fmt.Errorf("parse config: %w", err)

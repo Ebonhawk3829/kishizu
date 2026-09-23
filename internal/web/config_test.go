@@ -164,6 +164,127 @@ shows:
 	}
 }
 
+// TestSaveConfigPreservesYamlOnlySections: the UI edits a curated subset of
+// the config; indexer and quality fine-tuning are yaml-only by design. The
+// form no longer renders those fields, so a save that omits them must leave
+// the file's values alone — the first Save after a field leaves the form
+// would otherwise silently blank a hand-edited value.
+func TestSaveConfigPreservesYamlOnlySections(t *testing.T) {
+	srv, _, path := testServerWithConfig(t)
+	src := `server:
+  library: /media/anime
+  staging: /downloads/anime
+  indexer:
+    base: https://mirror.example
+    category: 9_9
+    user_agent: custom-agent
+    min_interval: 3s
+  quality:
+    resolution_floor: 720p
+    group_order:
+      - SubsPlease
+      - Erai-raws
+`
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The new UI's save body: no indexer key at all, quality carrying only
+	// what the form actually renders.
+	body := `{"library":"/media/anime","staging":"/downloads/anime","interval":"5m",
+"keep":0,"dry_run":false,
+  "downloader":{"kind":"transmission"},"notifier":{"kind":"none"},
+  "quality":{"resolution_floor":"1080p","group_order":["SubsPlease"]},
+  "naming":{"preset":"kishizu","season_folder":false}}`
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/config", strings.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	after, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	// Indexer was absent from the request: the file's values must survive.
+	if after.Server.Indexer.Base != "https://mirror.example" {
+		t.Errorf("indexer.base = %q, want the yaml value preserved", after.Server.Indexer.Base)
+	}
+	if after.Server.Indexer.Category != "9_9" {
+		t.Errorf("indexer.category = %q, want preserved", after.Server.Indexer.Category)
+	}
+	if after.Server.Indexer.UserAgent != "custom-agent" {
+		t.Errorf("indexer.user_agent = %q, want preserved", after.Server.Indexer.UserAgent)
+	}
+	if after.Server.Indexer.MinInterval != "3s" {
+		t.Errorf("indexer.min_interval = %q, want preserved", after.Server.Indexer.MinInterval)
+	}
+	// Quality WAS in the request: the request's values win.
+	if after.Server.Quality.ResolutionFloor != "1080p" {
+		t.Errorf("resolution_floor = %q, want the submitted 1080p", after.Server.Quality.ResolutionFloor)
+	}
+	if len(after.Server.Quality.GroupOrder) != 1 || after.Server.Quality.GroupOrder[0] != "SubsPlease" {
+		t.Errorf("group_order = %v, want the submitted list", after.Server.Quality.GroupOrder)
+	}
+}
+
+// TestSaveConfigAppliesUnderscoreFields: the UI speaks snake_case JSON, and
+// before the config structs carried json tags, Go's decoder silently dropped
+// every underscore-named key — dry_run, transmission_rpc, ntfy_topic,
+// resolution_floor and the rest decoded to zero and were written back as
+// defaults. A save looked successful while discarding half the user's edits.
+// This test is the regression guard: every field the form sends must land.
+func TestSaveConfigAppliesUnderscoreFields(t *testing.T) {
+	srv, _, path := testServerWithConfig(t)
+	src := `server:
+  library: /media/anime
+  staging: /downloads/anime
+  dry_run: false
+  downloader:
+    kind: transmission
+    transmission_rpc: http://old:9091/transmission/rpc
+  notifier:
+    kind: ntfy
+    ntfy_topic: http://old:8085/kishizu
+  quality:
+    resolution_floor: 720p
+    group_order:
+      - OldGroup
+`
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"library":"/media/anime","staging":"/downloads/anime","interval":"5m","keep":0,"dry_run":false,
+"downloader":{"kind":"transmission","transmission_rpc":"http://new:9091/transmission/rpc"},
+"notifier":{"kind":"ntfy","ntfy_topic":"http://new:8085/kishizu"},
+"quality":{"resolution_floor":"1080p","group_order":["SubsPlease"]},
+"naming":{"preset":"kishizu","pattern":"","season_folder":false}}`
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/config", strings.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.Server.Downloader.TransmissionRPC != "http://new:9091/transmission/rpc" {
+		t.Errorf("transmission_rpc = %q, want the submitted value", after.Server.Downloader.TransmissionRPC)
+	}
+	if after.Server.Notifier.NtfyTopic != "http://new:8085/kishizu" {
+		t.Errorf("ntfy_topic = %q, want the submitted value", after.Server.Notifier.NtfyTopic)
+	}
+	if after.Server.Quality.ResolutionFloor != "1080p" {
+		t.Errorf("resolution_floor = %q, want the submitted value", after.Server.Quality.ResolutionFloor)
+	}
+	if len(after.Server.Quality.GroupOrder) != 1 || after.Server.Quality.GroupOrder[0] != "SubsPlease" {
+		t.Errorf("group_order = %v, want the submitted value", after.Server.Quality.GroupOrder)
+	}
+	if after.Server.DryRun == nil || *after.Server.DryRun {
+		t.Errorf("dry_run = %v, want false from the request", after.Server.DryRun != nil && *after.Server.DryRun)
+	}
+}
+
 // TestSaveConfigRejectsInvalid: a config that cannot be loaded is worse than
 // one that was never edited — kishizu would refuse to start, and the user
 // would have to fix it by hand.

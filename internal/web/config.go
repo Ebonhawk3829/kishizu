@@ -11,8 +11,10 @@ import (
 
 	"github.com/Ebonhawk3829/kishizu/internal/config"
 	"github.com/Ebonhawk3829/kishizu/internal/download"
+	"github.com/Ebonhawk3829/kishizu/internal/groups"
 	"github.com/Ebonhawk3829/kishizu/internal/naming"
 	"github.com/Ebonhawk3829/kishizu/internal/notify"
+	"github.com/Ebonhawk3829/kishizu/internal/quality"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
 )
 
@@ -85,6 +87,26 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if gotifyFromEnv {
 		req.Notifier.GotifyToken = ""
+	}
+
+	// The UI edits a curated subset of the configuration; the rest is yaml-only
+	// by design (indexer internals, quality tuning). The form does not render
+	// those fields, so the browser sends them empty — and an empty value here
+	// means "not in this request", not "clear it". Restoring from the current
+	// file keeps a hand-edited yaml value alive across UI saves; without this,
+	// the first Save after the UI stopped rendering a field would silently
+	// blank it.
+	if req.Indexer == (config.IndexerConfig{}) {
+		req.Indexer = cur.Server.Indexer
+	}
+	// Quality contains slices, so it cannot be compared with ==. "Untouched"
+	// means every field at its zero value: the UI sends the whole object, but
+	// omits these keys entirely once they leave the form.
+	if req.Quality.ResolutionFloor == "" && len(req.Quality.GroupOrder) == 0 &&
+		len(req.Quality.CodecRank) == 0 && len(req.Quality.ResolutionPenalty) == 0 &&
+		req.Quality.PenaltyDub == nil && req.Quality.PenaltyUncensored == nil &&
+		req.Quality.RejectBatch == nil {
+		req.Quality = cur.Server.Quality
 	}
 
 	// Validate before writing: a config that cannot be loaded is worse than
@@ -240,11 +262,13 @@ func validateServer(s *config.Server) error {
 func (s *Server) configView(cfg *config.Server) map[string]any {
 	qbitFromEnv, gotifyFromEnv := secretFromEnv(cfg)
 	view := map[string]any{
-		"library":  cfg.Library,
-		"staging":  cfg.Staging,
-		"interval": cfg.Interval,
-		"dry_run":  boolVal(cfg.DryRun),
-		"keep":     intVal(cfg.Keep),
+		"library":      cfg.Library,
+		"staging":      cfg.Staging,
+		"interval":     cfg.Interval,
+		"dry_run":      boolVal(cfg.DryRun),
+		"keep":         intVal(cfg.Keep),
+		"delete":       cfg.Delete,
+		"delete_after": cfg.DeleteAfter,
 		"downloader": map[string]any{
 			"kind":             cfg.Downloader.Kind,
 			"transmission_rpc": cfg.Downloader.TransmissionRPC,
@@ -286,6 +310,10 @@ func (s *Server) configView(cfg *config.Server) map[string]any {
 			"notifiers":     notify.Kinds,
 			"presets":       naming.Presets,
 			"browse_titles": schedule.BrowseTitles,
+			"resolutions":   quality.Resolutions,
+			// The researched baseline for the group-order editor: the
+			// user's own list replaces it once they have one.
+			"group_baseline": groups.Baseline,
 		},
 	}
 	return view

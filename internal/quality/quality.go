@@ -119,6 +119,14 @@ func Default() *Policy {
 // to any listed group, but the group is still eligible.
 const RankUnlisted = 1000
 
+// Resolutions lists the resolution names the policy understands, best first.
+// The settings UI offers exactly these as the resolution floor: a free-text
+// floor invites a typo ("1080P") that silently never matches, since the
+// lookup is by exact lowercase name. "4k" is deliberately absent — the parser
+// emits it, but "2160p" is the same thing spelled the way the penalty table
+// prefers, and two spellings for one floor is a trap.
+var Resolutions = []string{"2160p", "1440p", "1080p", "720p", "480p"}
+
 // GroupRank returns where a release's group sits in the group order.
 // Unlisted groups sort last but are not excluded.
 func (p *Policy) GroupRank(group string) int {

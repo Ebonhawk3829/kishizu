@@ -194,8 +194,46 @@
      stay aligned across sections. */
   .settings .fields {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 10px; margin-bottom: 12px;
+    gap: 10px; margin-bottom: 12px; align-items: start;
   }
+  /* Section headers split the form into plain-language groups. Overrides the
+     page-level .sect (a flex rule with a trailing line): inside the settings
+     modal the header is a plain label over a full-width rule. */
+  .settings .sect {
+    display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--t2); margin: 18px 0 8px; padding-top: 12px;
+    border-top: 1px solid oklch(0.24 0.010 285);
+  }
+  .settings .sect::after { content: none; }
+  .settings .sect:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+  /* One-line explanations under cryptic fields. */
+  .settings .hint { font-size: 11.5px; color: var(--t3); margin-top: 3px; line-height: 1.35; }
+  /* Group order editor rows. */
+  .groups-list { display: flex; flex-direction: column; gap: 6px; }
+  .groups-list .g-row {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    background: oklch(0.19 0.010 285); border: 1px solid oklch(0.28 0.010 285);
+    border-radius: 7px; cursor: grab; font-size: 13.5px;
+  }
+  .groups-list .g-row.dragging { opacity: .45; cursor: grabbing; }
+  .groups-list .g-row .g-name { flex: 1; }
+  .groups-list .g-row .g-rank { color: var(--t3); font-size: 12px; min-width: 26px; }
+  .groups-list .g-row .g-x { color: var(--t3); cursor: pointer; padding: 0 4px; }
+  .groups-list .g-row .g-x:hover { color: var(--bad); }
+  .groups-list .g-row .badge {
+    font-size: 10.5px; padding: 1px 7px; border-radius: 9px;
+    background: oklch(0.30 0.05 150); color: oklch(0.85 0.10 150);
+  }
+  /* The acceptable line between preferred and merely-eligible. */
+  .groups-list .g-line {
+    display: flex; align-items: center; gap: 10px; color: var(--t3);
+    font-size: 11.5px; margin: 6px 0; user-select: none;
+  }
+  .groups-list .g-line::before, .groups-list .g-line::after {
+    content: ""; flex: 1; height: 1px; background: oklch(0.35 0.02 60);
+  }
+  .groups-list .g-line span { color: oklch(0.65 0.08 60); font-size: 11.5px; }
+  .groups-list .g-row.dragover { border-color: var(--accent); }
   .settings label { display: block; font-size: 12px; color: var(--t2); margin-bottom: 4px; }
   .settings input, .settings select {
     width: 100%; box-sizing: border-box; background: oklch(0.19 0.010 285);
@@ -589,6 +627,32 @@
   </div>
 </div>
 
+<!-- Group order editor. A drag-drop list beats a comma-separated text box:
+     the order IS the meaning, and order is what dragging expresses. The
+     acceptable line splits preferred groups from merely-eligible ones;
+     everything not in the list at all ranks as unlisted. -->
+<div class="modal-backdrop hidden" id="groups-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span>Preferred release groups</span>
+      <button class="btn ghost" id="btn-groups-close">Done</button>
+    </div>
+    <p class="hint">Drag to reorder — best first. Groups above the line are
+    preferred when choosing between releases; groups below it are still
+    grabbed, just never preferred. Groups not listed here rank as unlisted.
+    Add one with the box at the bottom.</p>
+    <div class="modal-scroll">
+      <div id="groups-list" class="groups-list"></div>
+      <div class="fields" style="margin-top:12px">
+        <div><label for="groups-add">Add a group</label>
+          <input id="groups-add" type="text" placeholder="exact release name, e.g. SubsPlease">
+        </div>
+        <div style="align-self:end"><button class="btn ghost" id="btn-groups-add">Add</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="shows"></div>
 
 </div>
@@ -899,48 +963,187 @@ function renderSettings() {
     `<option value="${escapeHtml(String(k))}"${String(k) === String(cur) ? ' selected' : ''}>${escapeHtml(String(k))}</option>`).join('');
 
   el('settings-form').innerHTML = `
+    <div class="sect">Library</div>
     <div class="fields">
-      <div><label for="set-library">Library</label><input id="set-library" type="text" value="${escapeHtml(v.library)}"></div>
-      <div><label for="set-staging">Staging</label><input id="set-staging" type="text" value="${escapeHtml(v.staging)}"></div>
-      <div><label for="set-interval">Poll interval</label><input id="set-interval" type="text" value="${escapeHtml(v.interval)}"></div>
-      <div><label for="set-keep">Keep watched</label><input id="set-keep" type="number" min="0" value="${v.keep}"></div>
+      <div><label for="set-library">Library</label><input id="set-library" type="text" value="${escapeHtml(v.library)}">
+        <div class="hint">Where finished episodes are filed.</div></div>
+      <div><label for="set-staging">Staging</label><input id="set-staging" type="text" value="${escapeHtml(v.staging)}">
+        <div class="hint">Where the torrent client drops completed files. Must be on the same filesystem as the library.</div></div>
+      <div><label for="set-interval">Poll interval</label><input id="set-interval" type="text" value="${escapeHtml(v.interval)}">
+        <div class="hint">How often to check for new releases, e.g. 5m.</div></div>
+      <div><label for="set-keep">Keep watched</label><input id="set-keep" type="number" min="0" value="${v.keep}">
+        <div class="hint">How many recently watched episodes to leave on disk. 0 deletes everything watched.</div></div>
+      <div><label for="set-delete">Delete watched</label><select id="set-delete">
+        <option value="immediate"${v.delete === 'immediate' ? ' selected' : ''}>immediately</option>
+        <option value="after"${v.delete === 'after' ? ' selected' : ''}>after a delay</option>
+        <option value="off"${v.delete === 'off' ? ' selected' : ''}>never</option>
+      </select>
+        <div class="hint">When watched episodes are removed from disk.</div></div>
+      <div class="del-after"><label for="set-delete-after">Delete after</label><input id="set-delete-after" type="text" value="${escapeHtml(v.delete_after || '')}" placeholder="7d">
+        <div class="hint">How long a watched episode stays: hours (48h) or days (7d).</div></div>
       <div><label for="set-dry">Dry run</label><select id="set-dry">
         <option value="true"${v.dry_run ? ' selected' : ''}>yes</option>
         <option value="false"${v.dry_run ? '' : ' selected'}>no</option>
-      </select></div>
+      </select>
+        <div class="hint">Yes: decide but never download. Turn off once you trust the matching.</div></div>
     </div>
+    <div class="sect">Downloader</div>
     <div class="fields">
-      <div><label for="set-dl">Downloader</label><select id="set-dl">${opts(c.downloaders, v.downloader.kind)}</select></div>
-      <div><label for="set-rpc">Transmission RPC</label><input id="set-rpc" type="text" value="${escapeHtml(v.downloader.transmission_rpc)}"></div>
-      <div><label for="set-qbit">qBittorrent URL</label><input id="set-qbit" type="text" value="${escapeHtml(v.downloader.qbittorrent_url)}"></div>
-      <div><label for="set-qbit-user">qBittorrent user</label><input id="set-qbit-user" type="text" value="${escapeHtml(v.downloader.qbittorrent_user)}"></div>
-      <div><label for="set-qbit-pass">qBittorrent password</label><input id="set-qbit-pass" type="password" value="${escapeHtml(v.downloader.qbittorrent_pass)}" placeholder="unchanged"></div>
+      <div><label for="set-dl">Client</label><select id="set-dl">${opts(c.downloaders, v.downloader.kind)}</select></div>
+      <div class="dl-transmission"><label for="set-rpc">Transmission RPC</label><input id="set-rpc" type="text" value="${escapeHtml(v.downloader.transmission_rpc)}">
+        <div class="hint">Transmission's RPC endpoint, e.g. http://100.64.0.1:9091/transmission/rpc</div></div>
+      <div class="dl-qbittorrent"><label for="set-qbit">qBittorrent URL</label><input id="set-qbit" type="text" value="${escapeHtml(v.downloader.qbittorrent_url)}">
+        <div class="hint">qBittorrent's WebUI address.</div></div>
+      <div class="dl-qbittorrent"><label for="set-qbit-user">qBittorrent user</label><input id="set-qbit-user" type="text" value="${escapeHtml(v.downloader.qbittorrent_user)}"></div>
+      <div class="dl-qbittorrent"><label for="set-qbit-pass">qBittorrent password</label><input id="set-qbit-pass" type="password" value="${escapeHtml(v.downloader.qbittorrent_pass)}" placeholder="unchanged"></div>
     </div>
+    <div class="sect">Notifications</div>
     <div class="fields">
-      <div><label for="set-nt">Notifier</label><select id="set-nt">${opts(c.notifiers, v.notifier.kind)}</select></div>
-      <div><label for="set-ntfy">ntfy topic</label><input id="set-ntfy" type="text" value="${escapeHtml(v.notifier.ntfy_topic)}"></div>
-      <div><label for="set-gotify">Gotify URL</label><input id="set-gotify" type="text" value="${escapeHtml(v.notifier.gotify_url)}"></div>
-      <div><label for="set-gotify-token">Gotify token</label><input id="set-gotify-token" type="password" value="${escapeHtml(v.notifier.gotify_token)}" placeholder="unchanged"></div>
+      <div><label for="set-nt">Service</label><select id="set-nt">${opts(c.notifiers, v.notifier.kind)}</select></div>
+      <div class="nt-ntfy"><label for="set-ntfy">ntfy topic</label><input id="set-ntfy" type="text" value="${escapeHtml(v.notifier.ntfy_topic)}">
+        <div class="hint">The topic URL kishizu posts stall and deletion alerts to.</div></div>
+      <div class="nt-gotify"><label for="set-gotify">Gotify URL</label><input id="set-gotify" type="text" value="${escapeHtml(v.notifier.gotify_url)}"></div>
+      <div class="nt-gotify"><label for="set-gotify-token">Gotify token</label><input id="set-gotify-token" type="password" value="${escapeHtml(v.notifier.gotify_token)}" placeholder="unchanged"></div>
     </div>
+    <div class="sect">Quality</div>
     <div class="fields">
-      <div><label for="set-ix-base">Indexer</label><input id="set-ix-base" type="text" value="${escapeHtml(v.indexer.base)}"></div>
-      <div><label for="set-ix-cat">Category</label><input id="set-ix-cat" type="text" value="${escapeHtml(v.indexer.category)}"></div>
-      <div><label for="set-ix-ua">User agent</label><input id="set-ix-ua" type="text" value="${escapeHtml(v.indexer.user_agent)}"></div>
-      <div><label for="set-ix-min">Min interval</label><input id="set-ix-min" type="text" value="${escapeHtml(v.indexer.min_interval)}"></div>
+      <div><label for="set-floor">Resolution floor</label><select id="set-floor">${opts(c.resolutions, v.quality.resolution_floor)}</select>
+        <div class="hint">Releases below this are rejected outright.</div></div>
+      <div><label>Preferred groups</label>
+        <button type="button" class="btn ghost" id="btn-groups-open">Edit order (${(v.quality.group_order || []).length})</button>
+        <div class="hint">Best first. Listed groups are preferred; unlisted ones are still eligible, just unprioritized.</div></div>
     </div>
+    <div class="sect">Naming</div>
     <div class="fields">
-      <div><label for="set-floor">Resolution floor</label><input id="set-floor" type="text" value="${escapeHtml(v.quality.resolution_floor)}"></div>
-      <div><label for="set-groups">Group order</label><input id="set-groups" type="text" value="${escapeHtml((v.quality.group_order || []).join(', '))}"></div>
-    </div>
-    <div class="fields">
-      <div><label for="set-preset">Naming</label><select id="set-preset">${opts(c.presets, v.naming.preset)}</select></div>
-      <div><label for="set-pattern">Pattern (custom only)</label><input id="set-pattern" type="text" value="${escapeHtml(v.naming.pattern)}"></div>
+      <div><label for="set-preset">Preset</label><select id="set-preset">${opts(c.presets, v.naming.preset)}</select></div>
+      <div class="naming-custom"><label for="set-pattern">Pattern</label><input id="set-pattern" type="text" value="${escapeHtml(v.naming.pattern)}">
+        <div class="hint">Only used when the preset is "custom".</div></div>
       <div><label for="set-season-folder">Season folder</label><select id="set-season-folder">
         <option value="true"${v.naming.season_folder ? ' selected' : ''}>yes</option>
         <option value="false"${v.naming.season_folder ? '' : ' selected'}>no</option>
-      </select></div>
-      <div><label for="set-browse-title">Browse titles</label><select id="set-browse-title">${opts(c.browse_titles, v.browse.title)}</select></div>
+      </select>
+        <div class="hint">File episodes into a "Season 1" subfolder.</div></div>
+      <div><label for="set-browse-title">Browse titles</label><select id="set-browse-title">${opts(c.browse_titles, v.browse.title)}</select>
+        <div class="hint">English or romanised titles in the seasonal browse list.</div></div>
+    </div>
+    <p class="hint" style="margin-top:14px">Indexer, naming pattern details and quality fine-tuning are configured in <b>kishizu.yaml</b> — see the README. Paths and the downloader need a restart; everything else takes effect on save.</p>`;
+  // The group-order button lives inside this innerHTML, so its bindings go
+  // here too — page-load binding would hit a null that does not exist yet.
+  el('btn-groups-open').onclick = openGroups;
+  el('btn-groups-close').onclick = closeGroups;
+  el('btn-groups-add').onclick = () => {
+    const name = el('groups-add').value.trim();
+    if (!name) return;
+    if (groupsWorking.some(g => g.name.toLowerCase() === name.toLowerCase())) {
+      el('groups-add').value = '';
+      return;
+    }
+    groupsWorking.push({name, recommended: false});
+    el('groups-add').value = '';
+    renderGroups();
+  };
+  el('groups-add').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); el('btn-groups-add').click(); }
+  });
+  syncSettingsVisibility();
+}
+
+// syncSettingsVisibility shows only the fields relevant to the current
+// choices: qBittorrent fields under qBittorrent, Gotify under Gotify, the
+// naming pattern under the custom preset. A form that renders every option
+// for every mode reads as a config dump; relevance is the point.
+function syncSettingsVisibility() {
+  if (!settingsView) return;
+  const toggle = (sel, on) => { document.querySelectorAll(sel).forEach(n => n.classList.toggle('hidden', !on)); };
+  const dl = el('set-dl').value;
+  toggle('.dl-transmission', dl === 'transmission');
+  toggle('.dl-qbittorrent', dl === 'qbittorrent');
+  const nt = el('set-nt').value;
+  toggle('.nt-ntfy', nt === 'ntfy');
+  toggle('.nt-gotify', nt === 'gotify');
+  toggle('.naming-custom', el('set-preset').value === 'custom');
+  toggle('.del-after', el('set-delete').value === 'after');
+}
+
+// ── group order editor ──────────────────────────────────────────────────────
+// The preference list is order-as-meaning, so the editor is drag-drop, not a
+// text box. groupsWorking is the editable copy; it is written back to the
+// settings body on save. The acceptable line is drawn after the last
+// recommended group of the baseline when the user has not positioned it —
+// a starting point, not a rule.
+
+let groupsWorking = [];
+
+function openGroups() {
+  if (!groupsWorking.length) {
+    // First open: seed from the user's current list if they have one, else
+    // the researched baseline. Seeding from the baseline alone would discard
+    // the user's existing order the first time they open the editor.
+    const current = settingsView?.quality?.group_order || [];
+    groupsWorking = current.length
+      ? current.map(name => ({name, recommended: false}))
+      : (settingsView?.choices?.group_baseline || []).map(g => ({name: g.name, recommended: g.recommended}));
+  }
+  el('groups-modal').classList.remove('hidden');
+  renderGroups();
+}
+
+function closeGroups() {
+  el('groups-modal').classList.add('hidden');
+}
+
+function renderGroups() {
+  const rec = new Map((settingsView?.choices?.group_baseline || []).map(g => [g.name, g.recommended]));
+  // The line sits after the last recommended group in the current order.
+  let lineAt = -1;
+  for (let i = groupsWorking.length - 1; i >= 0; i--) {
+    if (rec.get(groupsWorking[i].name)) { lineAt = i; break; }
+  }
+  const row = (g, i) => `
+    <div class="g-row" draggable="true" data-i="${i}">
+      <span class="g-rank">${i + 1}</span>
+      <span class="g-name">${escapeHtml(g.name)}</span>
+      ${rec.get(g.name) ? '<span class="badge">recommended</span>' : ''}
+      <span class="g-x" data-x="${i}" title="remove">✕</span>
     </div>`;
+  const before = groupsWorking.slice(0, lineAt + 1).map(row).join('');
+  const after = groupsWorking.slice(lineAt + 1).map((g, j) => row(g, lineAt + 1 + j)).join('');
+  el('groups-list').innerHTML = lineAt >= 0 && lineAt < groupsWorking.length - 1
+    ? before + `<div class="g-line"><span>acceptable line — groups below are still eligible, never preferred</span></div>` + after
+    : before + after;
+  wireGroupsDrag();
+}
+
+function wireGroupsDrag() {
+  let dragIdx = null;
+  el('groups-list').querySelectorAll('.g-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragIdx = parseInt(row.dataset.i, 10);
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      document.querySelectorAll('.g-row.dragover').forEach(n => n.classList.remove('dragover'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (parseInt(row.dataset.i, 10) !== dragIdx) row.classList.add('dragover');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('dragover'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      const to = parseInt(row.dataset.i, 10);
+      if (dragIdx === null || dragIdx === to) return;
+      const [moved] = groupsWorking.splice(dragIdx, 1);
+      groupsWorking.splice(to, 0, moved);
+      renderGroups();
+    });
+    row.querySelector('.g-x').addEventListener('click', () => {
+      groupsWorking.splice(parseInt(row.dataset.i, 10), 1);
+      renderGroups();
+    });
+  });
 }
 
 async function saveSettings() {
@@ -952,6 +1155,8 @@ async function saveSettings() {
     staging: el('set-staging').value.trim(),
     interval: el('set-interval').value.trim(),
     keep: parseInt(el('set-keep').value, 10) || 0,
+    delete: el('set-delete').value,
+    delete_after: el('set-delete-after').value.trim(),
     dry_run: el('set-dry').value === 'true',
     downloader: {
       kind: el('set-dl').value,
@@ -968,15 +1173,18 @@ async function saveSettings() {
       gotify_url: el('set-gotify').value.trim(),
       gotify_token: el('set-gotify-token').value,
     },
-    indexer: {
-      base: el('set-ix-base').value.trim(),
-      category: el('set-ix-cat').value.trim(),
-      user_agent: el('set-ix-ua').value.trim(),
-      min_interval: el('set-ix-min').value.trim(),
-    },
+    // Indexer is deliberately absent: it is yaml-only now, and the server
+    // preserves the file's values when the request omits them. The group
+    // order comes from the editor's working list, not a text box.
     quality: {
-      resolution_floor: el('set-floor').value.trim(),
-      group_order: el('set-groups').value.split(',').map(s => s.trim()).filter(Boolean),
+      resolution_floor: el('set-floor').value,
+      // The editor's working list — but if the editor was never opened this
+      // session, groupsWorking is empty and an empty list would wipe the
+      // user's order. Fall back to what the settings view loaded with.
+      // (groupsWorking holds {name} objects; the view holds plain strings.)
+      group_order: groupsWorking.length
+        ? groupsWorking.map(g => g.name)
+        : (settingsView?.quality?.group_order || []),
     },
     naming: {
       preset: el('set-preset').value,
@@ -1556,6 +1764,11 @@ function wireActions() {
   el('btn-settings-open').onclick = openSettings;
   el('btn-settings-close').onclick = closeSettings;
   el('btn-settings-save').onclick = saveSettings;
+  // The form shows only fields relevant to the current mode; these three
+  // selects are what relevance depends on.
+  el('settings-form').addEventListener('change', e => {
+    if (['set-dl', 'set-nt', 'set-preset', 'set-delete'].includes(e.target.id)) syncSettingsVisibility();
+  });
   el('btn-browse-open').onclick = openBrowse;
   el('btn-browse-close').onclick = closeBrowse;
   el('btn-browse-refresh').onclick = () => browse(true);
