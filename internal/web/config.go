@@ -103,6 +103,7 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	// means every field at its zero value: the UI sends the whole object, but
 	// omits these keys entirely once they leave the form.
 	if req.Quality.ResolutionFloor == "" && len(req.Quality.GroupOrder) == 0 &&
+		len(req.Quality.RejectGroups) == 0 &&
 		len(req.Quality.CodecRank) == 0 && len(req.Quality.ResolutionPenalty) == 0 &&
 		req.Quality.PenaltyDub == nil && req.Quality.PenaltyUncensored == nil &&
 		req.Quality.RejectBatch == nil {
@@ -296,6 +297,7 @@ func (s *Server) configView(cfg *config.Server) map[string]any {
 		"quality": map[string]any{
 			"resolution_floor": cfg.Quality.ResolutionFloor,
 			"group_order":      cfg.Quality.GroupOrder,
+			"reject_groups":    cfg.Quality.RejectGroups,
 		},
 		"naming": map[string]any{
 			"preset":        cfg.Naming.Preset,

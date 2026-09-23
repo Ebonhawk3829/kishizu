@@ -136,6 +136,9 @@ type QualityConfig struct {
 	ResolutionFloor string `yaml:"resolution_floor" json:"resolution_floor"`
 	// GroupOrder is the preferred release groups, best first.
 	GroupOrder []string `yaml:"group_order" json:"group_order"`
+	// RejectGroups is the hard-exclusion list: releases from these groups
+	// are never grabbed. Matched case- and punctuation-insensitively.
+	RejectGroups []string `yaml:"reject_groups" json:"reject_groups"`
 	// CodecRank maps a codec to its rank. Lower is better.
 	CodecRank map[string]int `yaml:"codec_rank" json:"codec_rank"`
 	// ResolutionPenalty maps a resolution to a rank penalty. Lower is better.
@@ -329,6 +332,9 @@ func mergeServer(dst, src *Server) {
 	}
 	if len(src.Quality.GroupOrder) > 0 {
 		dst.Quality.GroupOrder = src.Quality.GroupOrder
+	}
+	if len(src.Quality.RejectGroups) > 0 {
+		dst.Quality.RejectGroups = src.Quality.RejectGroups
 	}
 	if len(src.Quality.CodecRank) > 0 {
 		dst.Quality.CodecRank = src.Quality.CodecRank

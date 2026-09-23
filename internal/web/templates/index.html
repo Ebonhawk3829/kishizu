@@ -234,6 +234,18 @@
   }
   .groups-list .g-line span { color: oklch(0.65 0.08 60); font-size: 11.5px; }
   .groups-list .g-row.dragover { border-color: var(--accent); }
+  .groups-add-row { display: flex; gap: 10px; align-items: start; margin-top: 12px; }
+  .groups-add-row > div { flex: 1; }
+  /* The two zone lines are visually distinct: preferred is neutral, reject
+     is red-tinted so the hard-exclusion zone reads as such at a glance. */
+  .groups-list .g-line-pref span { color: var(--t2); }
+  .groups-list .g-line-rej { border: none; }
+  .groups-list .g-line-rej::before, .groups-list .g-line-rej::after {
+    content: ""; flex: 1; height: 1px; background: oklch(0.45 0.10 25);
+  }
+  .groups-list .g-line-rej span { color: oklch(0.70 0.12 25); }
+  .groups-list .g-line-rej { cursor: grab; }
+  .groups-list .g-line-pref { cursor: grab; }
   .settings label { display: block; font-size: 12px; color: var(--t2); margin-bottom: 4px; }
   .settings input, .settings select {
     width: 100%; box-sizing: border-box; background: oklch(0.19 0.010 285);
@@ -637,17 +649,21 @@
       <span>Preferred release groups</span>
       <button class="btn ghost" id="btn-groups-close">Done</button>
     </div>
-    <p class="hint">Drag to reorder — best first. Groups above the line are
-    preferred when choosing between releases; groups below it are still
-    grabbed, just never preferred. Groups not listed here rank as unlisted.
-    Add one with the box at the bottom.</p>
+    <p class="hint">Drag rows to reorder — best first. Drag the two lines to
+    set the zone boundaries: groups above the <b>preferred</b> line are ranked
+    when choosing between releases; groups between the lines are still
+    grabbed, just never preferred; groups below the <b>reject</b> line are
+    never grabbed, even if nothing else exists. Groups not listed here rank
+    as unlisted. ✕ removes a group from the list entirely (it becomes
+    unlisted, not rejected).</p>
     <div class="modal-scroll">
       <div id="groups-list" class="groups-list"></div>
-      <div class="fields" style="margin-top:12px">
+      <div class="groups-add-row">
         <div><label for="groups-add">Add a group</label>
-          <input id="groups-add" type="text" placeholder="exact release name, e.g. SubsPlease">
+          <input id="groups-add" type="text" placeholder="exact release name, e.g. Erai-raws">
+          <div class="hint">Copy the name exactly as it appears in the torrent title's [brackets] — capitalisation, hyphens and spaces. Matching ignores case and punctuation, but what you type here is what you'll see in the list.</div>
         </div>
-        <div style="align-self:end"><button class="btn ghost" id="btn-groups-add">Add</button></div>
+        <button class="btn ghost" id="btn-groups-add">Add</button>
       </div>
     </div>
   </div>
@@ -1066,23 +1082,45 @@ function syncSettingsVisibility() {
 }
 
 // ── group order editor ──────────────────────────────────────────────────────
-// The preference list is order-as-meaning, so the editor is drag-drop, not a
-// text box. groupsWorking is the editable copy; it is written back to the
-// settings body on save. The acceptable line is drawn after the last
-// recommended group of the baseline when the user has not positioned it —
-// a starting point, not a rule.
+// The list has three zones separated by two draggable lines: preferred
+// (ranked, best first), acceptable (eligible, unprioritized), and rejected
+// (never grabbed). The lines are real elements with their own positions —
+// derived state (e.g. "after the last recommended group") made the line
+// vanish whenever the order changed, so the positions are stored, not
+// computed. groupsWorking is the editable copy; on save it is split into
+// group_order (above the reject line) and reject_groups (below it).
 
-let groupsWorking = [];
+let groupsWorking = [];   // [{name, recommended}]
+let groupsPreferred = 0;  // preferred line sits AFTER this many entries
+let groupsReject = 0;     // reject line sits AFTER this many entries (from the end: 0 = at the very bottom)
 
 function openGroups() {
   if (!groupsWorking.length) {
-    // First open: seed from the user's current list if they have one, else
-    // the researched baseline. Seeding from the baseline alone would discard
-    // the user's existing order the first time they open the editor.
+    // First open: start from the user's current list, then append baseline
+    // groups they do not have — the baseline is a suggestion to merge, not a
+    // replacement for their order. Lines land at the baseline's suggested
+    // split when the user has no positions of their own yet.
     const current = settingsView?.quality?.group_order || [];
-    groupsWorking = current.length
-      ? current.map(name => ({name, recommended: false}))
-      : (settingsView?.choices?.group_baseline || []).map(g => ({name: g.name, recommended: g.recommended}));
+    const rejected = settingsView?.quality?.reject_groups || [];
+    const baseline = settingsView?.choices?.group_baseline || [];
+    const seen = new Set();
+    groupsWorking = [];
+    for (const name of current) {
+      if (!seen.has(name.toLowerCase())) { groupsWorking.push({name, recommended: false}); seen.add(name.toLowerCase()); }
+    }
+    for (const name of rejected) {
+      if (!seen.has(name.toLowerCase())) { groupsWorking.push({name, recommended: false}); seen.add(name.toLowerCase()); }
+    }
+    for (const g of baseline) {
+      if (!seen.has(g.name.toLowerCase())) { groupsWorking.push({name: g.name, recommended: g.recommended}); seen.add(g.name.toLowerCase()); }
+    }
+    // Default line positions: preferred after the last baseline-recommended
+    // group in the list; reject after everything (nothing rejected yet).
+    let lastRec = -1;
+    const rec = new Map(baseline.map(g => [g.name.toLowerCase(), g.recommended]));
+    groupsWorking.forEach((g, i) => { if (rec.get(g.name.toLowerCase())) lastRec = i; });
+    groupsPreferred = lastRec + 1;
+    groupsReject = groupsWorking.length;
   }
   el('groups-modal').classList.remove('hidden');
   renderGroups();
@@ -1093,30 +1131,33 @@ function closeGroups() {
 }
 
 function renderGroups() {
-  const rec = new Map((settingsView?.choices?.group_baseline || []).map(g => [g.name, g.recommended]));
-  // The line sits after the last recommended group in the current order.
-  let lineAt = -1;
-  for (let i = groupsWorking.length - 1; i >= 0; i--) {
-    if (rec.get(groupsWorking[i].name)) { lineAt = i; break; }
-  }
+  const rec = new Map((settingsView?.choices?.group_baseline || []).map(g => [g.name.toLowerCase(), g.recommended]));
   const row = (g, i) => `
     <div class="g-row" draggable="true" data-i="${i}">
       <span class="g-rank">${i + 1}</span>
       <span class="g-name">${escapeHtml(g.name)}</span>
-      ${rec.get(g.name) ? '<span class="badge">recommended</span>' : ''}
-      <span class="g-x" data-x="${i}" title="remove">✕</span>
+      ${rec.get(g.name.toLowerCase()) ? '<span class="badge">recommended</span>' : ''}
+      <span class="g-x" data-x="${i}" title="remove from list (becomes unlisted)">✕</span>
     </div>`;
-  const before = groupsWorking.slice(0, lineAt + 1).map(row).join('');
-  const after = groupsWorking.slice(lineAt + 1).map((g, j) => row(g, lineAt + 1 + j)).join('');
-  el('groups-list').innerHTML = lineAt >= 0 && lineAt < groupsWorking.length - 1
-    ? before + `<div class="g-line"><span>acceptable line — groups below are still eligible, never preferred</span></div>` + after
-    : before + after;
+  // Build with the lines interleaved at their stored positions. The reject
+  // line can sit at the very bottom (after every entry).
+  let html = '';
+  groupsWorking.forEach((g, i) => {
+    if (i === groupsPreferred) html += `<div class="g-line g-line-pref" draggable="true" data-line="pref"><span>preferred — ranked above all unlisted</span></div>`;
+    if (i === groupsReject) html += `<div class="g-line g-line-rej" draggable="true" data-line="rej"><span>reject — never grabbed</span></div>`;
+    html += row(g, i);
+  });
+  if (groupsReject >= groupsWorking.length) html += `<div class="g-line g-line-rej" draggable="true" data-line="rej"><span>reject — never grabbed</span></div>`;
+  el('groups-list').innerHTML = html;
   wireGroupsDrag();
 }
 
 function wireGroupsDrag() {
-  let dragIdx = null;
-  el('groups-list').querySelectorAll('.g-row').forEach(row => {
+  let dragIdx = null;      // index into groupsWorking when dragging a row
+  let dragLine = null;     // 'pref' | 'rej' when dragging a line
+  const list = el('groups-list');
+
+  list.querySelectorAll('.g-row').forEach(row => {
     row.addEventListener('dragstart', e => {
       dragIdx = parseInt(row.dataset.i, 10);
       row.classList.add('dragging');
@@ -1124,7 +1165,7 @@ function wireGroupsDrag() {
     });
     row.addEventListener('dragend', () => {
       row.classList.remove('dragging');
-      document.querySelectorAll('.g-row.dragover').forEach(n => n.classList.remove('dragover'));
+      list.querySelectorAll('.dragover').forEach(n => n.classList.remove('dragover'));
     });
     row.addEventListener('dragover', e => {
       e.preventDefault();
@@ -1137,10 +1178,50 @@ function wireGroupsDrag() {
       if (dragIdx === null || dragIdx === to) return;
       const [moved] = groupsWorking.splice(dragIdx, 1);
       groupsWorking.splice(to, 0, moved);
+      // Lines travel with their zones: shift positions when the move crosses
+      // them, so a drag never silently re-zones other groups.
+      if (dragIdx < groupsPreferred && to >= groupsPreferred) groupsPreferred--;
+      else if (dragIdx >= groupsPreferred && to < groupsPreferred) groupsPreferred++;
+      if (dragIdx < groupsReject && to >= groupsReject) groupsReject--;
+      else if (dragIdx >= groupsReject && to < groupsReject) groupsReject++;
       renderGroups();
     });
     row.querySelector('.g-x').addEventListener('click', () => {
-      groupsWorking.splice(parseInt(row.dataset.i, 10), 1);
+      const i = parseInt(row.dataset.i, 10);
+      groupsWorking.splice(i, 1);
+      if (groupsPreferred > i) groupsPreferred--;
+      if (groupsReject > i) groupsReject--;
+      renderGroups();
+    });
+  });
+
+  // The lines themselves are draggable: drop a line on a row to move the
+  // split to that row's position.
+  list.querySelectorAll('.g-line').forEach(lineEl => {
+    lineEl.addEventListener('dragstart', e => {
+      dragIdx = null;
+      dragLine = lineEl.dataset.line;
+      lineEl.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    lineEl.addEventListener('dragend', () => {
+      lineEl.classList.remove('dragging');
+      list.querySelectorAll('.dragover').forEach(n => n.classList.remove('dragover'));
+    });
+  });
+
+  list.querySelectorAll('.g-row').forEach(row => {
+    row.addEventListener('drop', e => {
+      if (!dragLine) return;
+      e.preventDefault();
+      const to = parseInt(row.dataset.i, 10);
+      if (dragLine === 'pref') {
+        // Line lands after the row it was dropped on.
+        groupsPreferred = to >= groupsReject ? groupsReject : to + 1;
+      } else {
+        groupsReject = to < groupsPreferred ? groupsPreferred : to + 1;
+      }
+      dragLine = null;
       renderGroups();
     });
   });
@@ -1178,13 +1259,16 @@ async function saveSettings() {
     // order comes from the editor's working list, not a text box.
     quality: {
       resolution_floor: el('set-floor').value,
-      // The editor's working list — but if the editor was never opened this
-      // session, groupsWorking is empty and an empty list would wipe the
-      // user's order. Fall back to what the settings view loaded with.
-      // (groupsWorking holds {name} objects; the view holds plain strings.)
+      // The editor's working list split at the reject line: above it is the
+      // preference order, below it is the hard-exclusion list. If the editor
+      // was never opened this session, fall back to what the view loaded
+      // with — an empty working list would otherwise wipe the user's setup.
       group_order: groupsWorking.length
-        ? groupsWorking.map(g => g.name)
+        ? groupsWorking.slice(0, Math.min(groupsPreferred, groupsWorking.length)).map(g => g.name)
         : (settingsView?.quality?.group_order || []),
+      reject_groups: groupsWorking.length
+        ? groupsWorking.slice(Math.min(groupsReject, groupsWorking.length)).map(g => g.name)
+        : (settingsView?.quality?.reject_groups || []),
     },
     naming: {
       preset: el('set-preset').value,

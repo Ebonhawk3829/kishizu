@@ -66,12 +66,14 @@ type Policy struct {
 	// allowlist.
 	GroupOrder []string
 
+	// RejectGroups is the hard-exclusion list: a release from one of these
+	// groups is never grabbed, even if it is the only candidate. Distinct
+	// from merely unlisted (ranked last but eligible). Matched through
+	// NormaliseGroup, so spelling and punctuation do not matter.
+	RejectGroups []string
+
 	// Penalties applied to a release's rank. Lower total wins.
-	//
-	// These are deliberately not hard rejects. A dub or an x265 release is
-	// still watchable, so it is demoted rather than excluded — it should lose
-	// to a better release, but still win if nothing better exists.
-	PenaltyDub        int // dub present: demote, never exclude
+	PenaltyDub        int // dub-only audio: penalise, subs are the point
 	PenaltyUncensored int // uncensored present: prefer, so negative
 
 	// RejectBatch excludes batches and season packs outright. They are out of
@@ -183,6 +185,9 @@ func (p *Policy) Reject(r *release.Release) (bool, string) {
 	if p.RejectBatch && r.IsBatch {
 		return true, "batch"
 	}
+	if p.GroupRejected(r.Group) {
+		return true, fmt.Sprintf("group %q is on the reject list", r.Group)
+	}
 	if p.ResolutionRejected(r.Resolution) {
 		if r.Resolution == "" {
 			return true, "no readable resolution"
@@ -192,11 +197,24 @@ func (p *Policy) Reject(r *release.Release) (bool, string) {
 	return false, ""
 }
 
-// Rank scores a release against the policy. Lower is better.
-//
-// This is the primary ordering input. Group preference is applied separately
-// and takes precedence, because which group posted a release says more about
-// its quality than any of these attributes do.
+// GroupRejected reports whether a release group is hard-excluded.
+func (p *Policy) GroupRejected(group string) bool {
+	want := release.NormaliseGroup(group)
+	if want == "" {
+		return false
+	}
+	for _, g := range p.RejectGroups {
+		if release.NormaliseGroup(g) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// Rank sums the release's attribute scores. This is the primary ordering
+// input. Group preference is applied separately and takes precedence, because
+// which group posted a release says more about its quality than any of these
+// attributes do.
 func (p *Policy) Rank(r *release.Release) int {
 	sum := 0
 

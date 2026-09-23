@@ -67,6 +67,9 @@ func buildQuality(q config.QualityConfig) *quality.Policy {
 	if len(q.GroupOrder) > 0 {
 		p.GroupOrder = q.GroupOrder
 	}
+	if len(q.RejectGroups) > 0 {
+		p.RejectGroups = q.RejectGroups
+	}
 	if len(q.CodecRank) > 0 {
 		p.CodecRank = q.CodecRank
 	}

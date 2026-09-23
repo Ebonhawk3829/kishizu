@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/release"
@@ -105,6 +106,49 @@ func TestFloorIsConfigurable(t *testing.T) {
 	// passes, including resolutions the penalty map demotes.
 	if p.ResolutionRejected("2160p") {
 		t.Error("2160p must pass a 720p floor; it is above it")
+	}
+}
+
+// TestGroupRejected: the reject list is a hard exclusion, distinct from
+// unlisted (ranked last but eligible). Matching is case- and
+// punctuation-insensitive, because release groups spell their own names
+// inconsistently and the user should not have to guess which spelling
+// the list needs.
+func TestGroupRejected(t *testing.T) {
+	p := Default()
+	p.RejectGroups = []string{"AnimeRG", "Crappy-Subs"}
+
+	if !p.GroupRejected("AnimeRG") {
+		t.Error("AnimeRG must be rejected")
+	}
+	// Normalisation: case, hyphens, underscores and dots are noise.
+	if !p.GroupRejected("crappy subs") {
+		t.Error("normalisation must apply to the reject list")
+	}
+	if !p.GroupRejected("CRAPPY_SUBS") {
+		t.Error("normalisation must apply to the release's group too")
+	}
+	if p.GroupRejected("SubsPlease") {
+		t.Error("an unlisted group must not be rejected")
+	}
+	if p.GroupRejected("") {
+		t.Error("an absent group must not match an empty entry")
+	}
+
+	// End to end: a release from a rejected group is refused at the gate,
+	// with a reason that names the group.
+	r := release.Parse("[AnimeRG] Show - 01 [1080p x264]")
+	rejected, why := p.Reject(&r)
+	if !rejected {
+		t.Error("a release from a rejected group must be rejected")
+	}
+	if !strings.Contains(why, "AnimeRG") {
+		t.Errorf("reject reason %q must name the group", why)
+	}
+	// The same release from an unlisted-but-not-rejected group passes.
+	r2 := release.Parse("[SomeOtherGroup] Show - 01 [1080p x264]")
+	if rejected, _ := p.Reject(&r2); rejected {
+		t.Error("an unlisted group must not be hard-rejected")
 	}
 }
 
