@@ -134,7 +134,16 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	// Training must query the same indexer the listener polls, or offsets
 	// would be learned from releases the pipeline never sees.
 	srv.SetIndexer(indexer)
-	srv.SetWatch(watch.New(st, f.library, f.keep))
+	// The watch handler must read the resolved config, not the raw flags:
+	// applyFlagOverrides has already merged the two, and a second handler
+	// built from flag defaults would sweep with a different keep window
+	// than the ticker's — the yaml value silently ignored on every
+	// watch-triggered sweep.
+	keep := 2
+	if cfg.Server.Keep != nil {
+		keep = *cfg.Server.Keep
+	}
+	srv.SetWatch(watch.New(st, cfg.Server.Library, keep))
 
 	n, err := buildNotifier(f.notifier, f.ntfyURL, f.gotifyURL, f.gotifyToken)
 	if err != nil {
