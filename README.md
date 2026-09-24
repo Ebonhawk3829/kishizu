@@ -107,7 +107,7 @@ way (see the [flags](#flags) table).
 ```yaml
 services:
   kishizu:
-    image: ghcr.io/ebonhawk3829/kishizu:1.3.0   # or :latest
+    image: ghcr.io/ebonhawk3829/kishizu:1.3.1   # or :latest
     user: "1000:1000"             # your media user's uid:gid
     volumes:
       - ./config:/data            # database, config file, caches
