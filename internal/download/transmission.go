@@ -21,8 +21,9 @@ func NewTransmission(rpcURL string) Downloader {
 
 func (t *transmissionDownloader) Name() string { return "Transmission" }
 
-// URL is the RPC endpoint, which is also the WebUI root: Transmission serves
-// its web client from the same address the RPC lives on.
+// URL is the WebUI address (the RPC endpoint with /rpc swapped for /web/),
+// where a user can look at a download directly. Browsing to the RPC endpoint
+// itself answers 409 — the CSRF handshake — so the link-out points here.
 func (t *transmissionDownloader) URL() string { return t.c.URL() }
 
 func (t *transmissionDownloader) Add(ctx context.Context, magnet, dir string) error {

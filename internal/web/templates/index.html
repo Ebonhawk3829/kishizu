@@ -123,9 +123,11 @@
     font-variant-numeric: tabular-nums;
   }
   .row .sub b { color: var(--t2); font-weight: 450; }
-  /* Link to the torrent client's own UI, shown on a downloading card. */
-  .row .sub .dl-link { color: var(--accent); text-decoration: none; }
-  .row .sub .dl-link:hover { text-decoration: underline; }
+  /* Link to the torrent client's own UI, shown beside the downloading
+     status. Slightly smaller than the status word so it reads as an
+     attachment to it, not a second status. */
+  .row .st .dl-link { color: var(--accent); text-decoration: none; font-size: 12.5px; margin-left: 6px; }
+  .row .st .dl-link:hover { text-decoration: underline; }
 
   /* ── status: dot + word, own column so they align down the page ─────── */
   .st { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; white-space: nowrap; }
@@ -1321,6 +1323,7 @@ function card(s) {
   // A downloading episode may need manual intervention — a dead swarm, a
   // stalled torrent, a file the client is stuck on. kishizu cannot fix those,
   // so the card links straight to the client's own UI where the user can.
+  // The link sits next to the status it belongs to, not the episode count.
   // Only shown when the client has an addressable web UI.
   const dlLink = (st === 'downloading' && downloaderURL)
     ? ` <a class="dl-link" href="${escapeHtml(downloaderURL)}" target="_blank" rel="noopener">client ↗</a>`
@@ -1365,9 +1368,9 @@ function card(s) {
     ${art}
     <div>
       <div class="name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</div>
-      <div class="sub">${air}${dlLink}${untrained}</div>
+      <div class="sub">${air}${untrained}</div>
     </div>
-    <span class="st ${cls}"><span class="dot"></span>${escapeHtml(st)}</span>
+    <span class="st ${cls}"><span class="dot"></span>${escapeHtml(st)}${dlLink}</span>
     <span class="acts">${acts}</span>
   </div>`;
 }

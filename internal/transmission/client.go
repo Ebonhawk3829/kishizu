@@ -31,10 +31,16 @@ func New(url string) *Client {
 	return &Client{url: url, hc: &http.Client{Timeout: 30 * time.Second}}
 }
 
-// URL is the RPC endpoint this client was built with. Transmission serves
-// its web UI from the same address, so this is also where a user goes to
-// look at a download directly.
-func (c *Client) URL() string { return c.url }
+// URL is the WebUI address, derived from the RPC endpoint: Transmission
+// serves its web client from the same host and port, with the /rpc suffix
+// swapped for /web/. Browsing to the RPC endpoint itself answers 409 — that
+// is the CSRF handshake, not a page — so the link-out must point here.
+func (c *Client) URL() string {
+	if i := strings.LastIndex(c.url, "/rpc"); i >= 0 {
+		return c.url[:i] + "/web/"
+	}
+	return c.url
+}
 
 // call performs one RPC request, handling the CSRF session token.
 //
