@@ -376,9 +376,9 @@ is irrelevant. You can also be explicit:
 
 An example mpv script is in [`scripts/mpv/`](scripts/mpv/). It only reports
 files under a configured root, so using mpv for other media will not spam the
-server. Failed posts are spooled and retried on the next start, and also raise
-a notification. A missed signal leaves a file on disk, which is the safe
-direction.
+server. A post whose outcome is unclear is settled by asking the server
+whether the episode is marked watched, so only a confirmed miss is spooled and
+reported. A missed signal leaves a file on disk, which is the safe direction.
 
 Media servers are supported directly: `POST /api/webhook` accepts watch
 events from Jellyfin, Plex and Emby in their native payload shapes — point
@@ -428,6 +428,7 @@ A few worth knowing:
 | `GET /healthz` | Liveness, for container healthchecks |
 | `GET /api/version` | Build version and Go toolchain |
 | `POST /api/watched` | Mark an episode watched |
+| `POST /api/watched/verify` | Report whether an episode is marked watched |
 | `GET /api/timetable` | Browse the season, with `?q=` to filter |
 
 ## Security

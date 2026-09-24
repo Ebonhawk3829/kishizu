@@ -180,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Watch signal from a player script, and manual marking from the UI.
 	mux.HandleFunc("POST /api/watched", s.handleWatched)
+	mux.HandleFunc("POST /api/watched/verify", s.handleWatchedVerify)
 	mux.HandleFunc("POST /api/watched-up-to", s.handleWatchedUpTo)
 	// Watch events from media servers: Jellyfin, Plex and Emby. Same core
 	// as /api/watched, translated from each server's payload shape.
@@ -748,6 +749,63 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{
 		"show_id": showID, "episode": epNum, "source": source,
+	})
+}
+
+// handleWatchedVerify reports whether an episode is marked watched, without
+// changing anything.
+//
+// A player script uses this to settle a watch signal whose outcome it could
+// not observe: the request may have reached the server even though the
+// response never came back. Reading the state answers definitively, so the
+// client can drop a signal that landed and retry only one that did not.
+//
+// Matching is the same as /api/watched, so a path that would be marked is
+// also a path that can be verified.
+func (s *Server) handleWatchedVerify(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		// Path is the full file path as the player saw it. Only the base name
+		// is used for matching, so the player's directory layout does not
+		// matter.
+		Path string `json:"path"`
+		// ShowID and Episode address an episode directly, for a caller that
+		// already knows which one it means.
+		ShowID  int64 `json:"show_id"`
+		Episode int   `json:"episode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var showID int64
+	var epNum int
+
+	if req.ShowID != 0 && req.Episode != 0 {
+		showID, epNum = req.ShowID, req.Episode
+	} else {
+		base := baseName(req.Path)
+		matched, ep, err := s.matchFile(base)
+		if err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, err)
+			return
+		}
+		showID, epNum = matched, ep
+	}
+
+	ep, err := s.st.GetEpisode(showID, epNum)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if ep == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d episode %d not found", showID, epNum))
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"show_id": showID, "episode": epNum, "state": string(ep.State),
+		"watched": ep.State == episode.Watched,
 	})
 }
 

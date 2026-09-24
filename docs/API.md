@@ -112,6 +112,30 @@ Marking watched also sweeps: files for watched episodes are deleted per the
 delete policy (`immediate` by default; `after` respects the delay; `off`
 deletes nothing).
 
+### `POST /api/watched/verify`
+
+Report whether an episode is marked watched, without changing anything.
+
+```json
+{"path":"/anywhere/Tomb Raider King - E09.mkv"}
+```
+
+```json
+{"show_id":1,"episode":9}
+```
+
+```json
+{"show_id":1,"episode":9,"state":"watched","watched":true}
+```
+
+A player uses this to settle a signal whose outcome it could not observe: the
+request may have reached the server even though the response never came back.
+Reading the state answers definitively, so a signal that landed can be dropped
+and only one that did not is retried.
+
+Matching is identical to `/api/watched`, so any path that can be marked can
+also be verified. An unmatched path returns 422.
+
 ### `POST /api/watched-up-to`
 
 Mark everything up to an episode watched.
