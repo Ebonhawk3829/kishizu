@@ -1989,7 +1989,12 @@ async function adoptConfirm() {
 })();
 
 wireActions();
-loadShows();
+// Summary before the first render: it carries downloader_url, which the
+// downloading cards need at paint time. Rendering shows first left every
+// card linkless — the summary arrived after the HTML was already written,
+// and nothing re-rendered. Later loadShows() calls are fine either way:
+// downloaderURL is already set by then.
+loadSummary().then(loadShows);
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
