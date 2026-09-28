@@ -212,7 +212,7 @@ func Match(s Show, title string) Result {
 
 	if off, ok := s.GroupOffset(group); ok {
 		ep := raw - off
-		if !plausible(ep, s) {
+		if !plausible(ep) {
 			return Result{Reason: fmt.Sprintf("episode %d out of range (group %q, offset %d)", ep, group, off)}
 		}
 		return Result{
@@ -229,7 +229,7 @@ func Match(s Show, title string) Result {
 	best := 0
 	for _, off := range s.KnownOffsets() {
 		ep := raw - off
-		if !plausible(ep, s) {
+		if !plausible(ep) {
 			continue
 		}
 		if best == 0 || ep < best {
@@ -256,7 +256,7 @@ func Match(s Show, title string) Result {
 // unannounced — so a bound taken from it would be absent when needed and
 // present only when unneeded. A wrong episode number is caught by the air-date
 // window instead: an episode that has not aired yet is not hunted at all.
-func plausible(ep int, s Show) bool {
+func plausible(ep int) bool {
 	return ep >= 1
 }
 

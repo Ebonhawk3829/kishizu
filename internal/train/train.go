@@ -373,12 +373,3 @@ func distinct(m map[string]int) []int {
 	sort.Ints(out)
 	return out
 }
-
-func containsFold(haystack []string, needle string) bool {
-	for _, h := range haystack {
-		if strings.EqualFold(h, needle) {
-			return true
-		}
-	}
-	return false
-}
