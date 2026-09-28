@@ -67,8 +67,6 @@ func (s *Show) Aliases() []string {
 	return []string{s.sh.CanonicalName}
 }
 
-func (s *Show) MaxEpisode() int { return s.sh.MaxEpisode }
-
 // GroupOffsets returns the offset for every known group. The matcher needs the
 // per-group map to weigh agreement: three groups concurring is stronger
 // evidence than one group on its own.

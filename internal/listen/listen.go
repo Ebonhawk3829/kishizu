@@ -126,14 +126,6 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			}
 			states = append(states, cycle.StateOf(ep, now))
 		}
-		// A show whose next episode is past its season length has finished.
-		// Without this it would poll weekly forever, hunting an episode that
-		// will never exist.
-		if sh.MaxEpisode > 0 && l.st.NextUnwatched(sh.ID) > sh.MaxEpisode {
-			debug.Log("%s: season complete (next > max %d), not due",
-				sh.CanonicalName, sh.MaxEpisode)
-			continue
-		}
 
 		if d, ok := cycle.PollInterval(states); ok {
 			// Only now does training matter: a dormant show costs nothing

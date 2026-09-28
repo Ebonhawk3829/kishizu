@@ -292,16 +292,3 @@ func TestCommitPersists(t *testing.T) {
 		t.Errorf("ToonsHub = %d, want 40", off["ToonsHub"])
 	}
 }
-
-func TestExtractAliases(t *testing.T) {
-	got := extractAliases("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL AAC2.0 H.264 (Dogul Wang, Multi-Subs)")
-	want := map[string]bool{"Tomb Raider King": true, "Dogul Wang": true}
-	for _, a := range got {
-		if !want[a] {
-			t.Errorf("unexpected alias %q", a)
-		}
-	}
-	if len(got) != 2 {
-		t.Errorf("aliases = %v, want %v", got, want)
-	}
-}

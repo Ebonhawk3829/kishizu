@@ -7,8 +7,8 @@ import "testing"
 func TestConfidenceRisesWithKnownGroup(t *testing.T) {
 	title := "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL"
 
-	unknown := &MemShow{Name: "Tomb Raider King", Max: 12, Offsets: map[string]int{}}
-	known := &MemShow{Name: "Tomb Raider King", Max: 12, Offsets: map[string]int{"ToonsHub": 0}}
+	unknown := &MemShow{Name: "Tomb Raider King", Offsets: map[string]int{}}
+	known := &MemShow{Name: "Tomb Raider King", Offsets: map[string]int{"ToonsHub": 0}}
 
 	a := Match(unknown, title)
 	b := Match(known, title)
@@ -32,11 +32,11 @@ func TestConfidenceRisesWithOffsetAgreement(t *testing.T) {
 	title := "[BrandNewGroup] Tomb Raider King S01E09 1080p WEB-DL"
 
 	// Three groups, all agreeing on offset 0.
-	agree := &MemShow{Name: "Tomb Raider King", Max: 12,
+	agree := &MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"ToonsHub": 0, "Erai-raws": 0, "SubsPlease": 0}}
 
 	// Three groups, all disagreeing.
-	disagree := &MemShow{Name: "Tomb Raider King", Max: 12,
+	disagree := &MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"ToonsHub": 0, "Erai-raws": 40, "SubsPlease": 7}}
 
 	a := Match(disagree, title)
@@ -53,9 +53,9 @@ func TestConfidenceRisesWithOffsetAgreement(t *testing.T) {
 func TestConfidenceFallsWhenOffsetsDisagree(t *testing.T) {
 	title := "[BrandNewGroup] Tomb Raider King S01E09 1080p WEB-DL"
 
-	agree := &MemShow{Name: "Tomb Raider King", Max: 12,
+	agree := &MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"A": 0, "B": 0, "C": 0}}
-	disagree := &MemShow{Name: "Tomb Raider King", Max: 12,
+	disagree := &MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"A": 0, "B": 40, "C": 7}}
 
 	a := Match(agree, title)
@@ -70,14 +70,14 @@ func TestConfidenceFallsWhenOffsetsDisagree(t *testing.T) {
 // TestConfidentThreshold: a known group with a strong alias match is confident
 // enough to act on; an unseen group with no agreement is not.
 func TestConfidentThreshold(t *testing.T) {
-	known := Match(&MemShow{Name: "Tomb Raider King", Max: 12,
+	known := Match(&MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"ToonsHub": 0}},
 		"[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL")
 	if !known.Confident() {
 		t.Errorf("known group should be confident, got %.2f", known.Confidence)
 	}
 
-	unseen := Match(&MemShow{Name: "Tomb Raider King", Max: 12,
+	unseen := Match(&MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"A": 0, "B": 40, "C": 7}},
 		"[BrandNewGroup] Tomb Raider King S01E09 1080p WEB-DL")
 	if unseen.Confident() {
@@ -112,7 +112,7 @@ func TestConfidenceIgnoresAliasQuality(t *testing.T) {
 	tight := "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL"
 	loose := "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL (Dogul Wang, Multi-Subs, Extra Words Here)"
 
-	sh := &MemShow{Name: "Tomb Raider King", Max: 12, Offsets: map[string]int{"ToonsHub": 0}}
+	sh := &MemShow{Name: "Tomb Raider King", Offsets: map[string]int{"ToonsHub": 0}}
 	a := Match(sh, tight)
 	b := Match(sh, loose)
 	if !a.Matched || !b.Matched {
@@ -152,7 +152,7 @@ func TestOffsetAgreement(t *testing.T) {
 		{"all disagree", map[string]int{"A": 0, "B": 40, "C": 7}, 1.0 / 3.0},
 	}
 	for _, c := range cases {
-		m := &MemShow{Name: "Show", Max: 12, Offsets: c.offsets}
+		m := &MemShow{Name: "Show", Offsets: c.offsets}
 		if got := offsetAgreement(m); got != c.want {
 			t.Errorf("%s: offsetAgreement = %.3f, want %.3f", c.name, got, c.want)
 		}
@@ -162,7 +162,7 @@ func TestOffsetAgreement(t *testing.T) {
 // TestUnreadableEpisodeIsNotConfident: a title with no episode number cannot be
 // confident, however well the alias matches.
 func TestUnreadableEpisodeIsNotConfident(t *testing.T) {
-	res := Match(&MemShow{Name: "Tomb Raider King", Max: 12,
+	res := Match(&MemShow{Name: "Tomb Raider King",
 		Offsets: map[string]int{"ToonsHub": 0}},
 		"[ToonsHub] Tomb Raider King 1080p WEB-DL")
 	if !res.Matched {

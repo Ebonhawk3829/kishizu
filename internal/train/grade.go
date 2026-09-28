@@ -191,7 +191,6 @@ func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep in
 		if correctedGroup != "" {
 			s.m.Offsets[correctedGroup] = g.RawEpisode - ep
 			s.m.Defaults = distinct(s.m.Offsets)
-			s.addAliases(g.Title)
 			s.Accepted++
 		} else if err := s.Teach(g.Title, ep); err != nil {
 			return notes, err

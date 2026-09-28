@@ -16,7 +16,6 @@ package train
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,14 +24,6 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
-)
-
-var (
-	regexpGroup   = regexp.MustCompile(`^\s*\[[^\]]+\]\s*`)
-	regexpParen   = regexp.MustCompile(`\(([^)]*)\)`)
-	regexpBracket = regexp.MustCompile(`\[[^\]]*\]`)
-	regexpSub     = regexp.MustCompile(`(?i)sub|dub|audio|multi|weekly`)
-	regexpQuality = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k|web-?dl|webrip|web|bd|blu-?ray|remux|avc|hevc|h\.?264|h\.?265|x264|x265|av1|aac|flac|opus|e-?ac-?3|ac3|ddp|10bit|hi10|dsnp|cr|amzn|nf|adn|iqiyi|dual|multi|subs?|dub|dubbed|raw|batch|complete|v2|v3|repack|proper|weekly)\b`)
 )
 
 // Candidate is a release the tool is asking about.
@@ -74,7 +65,7 @@ func NewSession(st *store.Store, sh *store.Show, targetEp int) (*Session, error)
 	return &Session{
 		st:           st,
 		show:         sh,
-		m:            &match.MemShow{Name: sh.CanonicalName, Alias: sh.Aliases, Max: sh.MaxEpisode, Offsets: offsets, Defaults: known},
+		m:            &match.MemShow{Name: sh.CanonicalName, Alias: sh.Aliases, Offsets: offsets, Defaults: known},
 		TargetEp:     targetEp,
 		Asked:        map[string]bool{},
 		gradedTokens: map[string]bool{},
@@ -96,9 +87,6 @@ func (s *Session) Seed(title string) error {
 
 	s.m.Offsets[group] = off
 	s.m.Defaults = distinct(s.m.Offsets)
-
-	// The seed also teaches us aliases.
-	s.m.Alias = append(s.m.Alias, extractAliases(title)...)
 	s.Accepted++
 	return nil
 }
@@ -125,7 +113,6 @@ func (s *Session) Teach(title string, ep int) error {
 	}
 	s.m.Offsets[group] = raw - ep
 	s.m.Defaults = distinct(s.m.Offsets)
-	s.addAliases(title)
 	s.Accepted++
 	return nil
 }
@@ -171,7 +158,7 @@ func (s *Session) novelty(title string) (float64, []string) {
 	if raw := r.RawEpisode(); raw > 0 {
 		novel := true
 		for _, off := range s.m.KnownOffsets() {
-			if ep := raw - off; ep >= 1 && (s.m.Max <= 0 || ep <= s.m.Max) {
+			if ep := raw - off; ep >= 1 {
 				novel = false
 				break
 			}
@@ -195,10 +182,14 @@ func (s *Session) novelty(title string) (float64, []string) {
 	}
 
 	// A title shape not matching anything already graded: different word order
-	// or punctuation usually means a different group's convention.
-	if len(s.m.Alias) > 0 && release.TitleScore(s.m.Aliases(), title) < match.Threshold {
-		score += wUnseenStructure
-		unseen = append(unseen, "unfamiliar title")
+	// or punctuation usually means a different group's convention. The same
+	// gate the matcher uses, so novelty and eligibility cannot disagree about
+	// what counts as a match.
+	if len(s.m.Alias) > 0 {
+		if ok, _ := match.AliasGate(s.m.Aliases(), title); !ok {
+			score += wUnseenStructure
+			unseen = append(unseen, "unfamiliar title")
+		}
 	}
 
 	if score > 1 {
@@ -295,8 +286,7 @@ func (s *Session) Accept(c Candidate) error {
 	r := release.Parse(c.Item.Title)
 	raw := r.RawEpisode()
 	if raw == 0 {
-		// Nothing numeric to learn, but the aliases still help.
-		s.addAliases(c.Item.Title)
+		// Nothing numeric to learn.
 		return nil
 	}
 	group := r.Group
@@ -305,7 +295,6 @@ func (s *Session) Accept(c Candidate) error {
 	}
 	s.m.Offsets[group] = raw - s.TargetEp
 	s.m.Defaults = distinct(s.m.Offsets)
-	s.addAliases(c.Item.Title)
 	return nil
 }
 
@@ -355,59 +344,18 @@ func (s *Session) Offsets() map[string]int {
 }
 
 // Commit persists what the session learned.
+//
+// Aliases are deliberately not written here. The animeschedule page is the
+// sole alias source: it publishes every name a show is known by, and names
+// scraped from release titles have already poisoned one show's alias set with
+// quality tokens ("1080p"), which made every release on the indexer eligible.
 func (s *Session) Commit() error {
 	for g, off := range s.m.Offsets {
 		if err := s.st.SetGroupOffset(s.show.ID, g, off, "training"); err != nil {
 			return err
 		}
 	}
-	for _, a := range s.m.Alias {
-		if err := s.st.AddAlias(s.show.ID, a); err != nil {
-			return err
-		}
-	}
 	return nil
-}
-
-func (s *Session) addAliases(title string) {
-	for _, a := range extractAliases(title) {
-		if !containsFold(s.m.Alias, a) {
-			s.m.Alias = append(s.m.Alias, a)
-		}
-	}
-}
-
-// extractAliases pulls plausible show titles out of a release name: the text
-// before the episode marker, plus any parenthesised romaji/official title.
-func extractAliases(title string) []string {
-	s := title
-	s = strings.TrimSpace(regexpGroup.ReplaceAllString(s, ""))
-
-	var paren []string
-	for _, pm := range regexpParen.FindAllStringSubmatch(s, -1) {
-		for _, part := range strings.Split(pm[1], ",") {
-			part = strings.TrimSpace(part)
-			if part != "" && !regexpSub.MatchString(part) {
-				paren = append(paren, part)
-			}
-		}
-	}
-	s = regexpParen.ReplaceAllString(s, " ")
-
-	if m := release.ReSxE.FindStringIndex(s); m != nil {
-		s = s[:m[0]]
-	} else if m := release.ReBare.FindStringIndex(s); m != nil {
-		s = s[:m[0]]
-	}
-	s = regexpBracket.ReplaceAllString(s, " ")
-	s = regexpQuality.ReplaceAllString(s, " ")
-	s = strings.TrimSpace(s)
-
-	var out []string
-	if len(s) > 2 {
-		out = append(out, s)
-	}
-	return append(out, paren...)
 }
 
 func distinct(m map[string]int) []int {

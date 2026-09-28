@@ -41,10 +41,10 @@ func InferOffsets(st *store.Store, sh *store.Show, items []nyaa.Item) (map[strin
 			}
 		}
 	}
-	max := sh.MaxEpisode
-	if max <= 0 {
-		max = lastSeen + 13 // unknown season length; allow a generous window
-	}
+	// No season-length bound: the length is unknown for exactly the shows that
+	// need inferring, so a bound taken from it would be absent when needed.
+	// The air-date window is what keeps wrong episodes out, not a max.
+	max := lastSeen + 13
 
 	// Each group's distinct raw numbers.
 	raws := map[string]map[int]bool{}

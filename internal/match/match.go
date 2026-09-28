@@ -16,9 +16,6 @@ type Show interface {
 	// Aliases are every other title the show is known by, including the
 	// schedule's romaji title and any alternate-language names.
 	Aliases() []string
-	// MaxEpisode bounds plausible episode numbers. 0 means unknown, in which
-	// case no upper bound is applied.
-	MaxEpisode() int
 	// GroupOffset returns the offset for a release group and whether one is known.
 	GroupOffset(group string) (int, bool)
 	// KnownOffsets returns every offset this show has exhibited, so an unseen
@@ -252,14 +249,15 @@ func Match(s Show, title string) Result {
 	}
 }
 
+// plausible bounds what counts as a readable episode number.
+//
+// There is deliberately no upper bound. The season length is unknown for
+// exactly the shows most at risk of mis-matching — mid-premiere, run length
+// unannounced — so a bound taken from it would be absent when needed and
+// present only when unneeded. A wrong episode number is caught by the air-date
+// window instead: an episode that has not aired yet is not hunted at all.
 func plausible(ep int, s Show) bool {
-	if ep < 1 {
-		return false
-	}
-	if m := s.MaxEpisode(); m > 0 && ep > m {
-		return false
-	}
-	return true
+	return ep >= 1
 }
 
 // MemShow is an in-memory Show, used for tests and for the first slice before
@@ -267,7 +265,6 @@ func plausible(ep int, s Show) bool {
 type MemShow struct {
 	Name     string
 	Alias    []string
-	Max      int
 	Offsets  map[string]int
 	Defaults []int
 }
@@ -278,8 +275,6 @@ func (m *MemShow) Aliases() []string {
 	all := append([]string{m.Name}, m.Alias...)
 	return all
 }
-
-func (m *MemShow) MaxEpisode() int { return m.Max }
 
 func (m *MemShow) GroupOffset(group string) (int, bool) {
 	return LookupOffset(group, m.Offsets)

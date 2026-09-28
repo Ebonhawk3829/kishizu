@@ -43,7 +43,7 @@ func refShows() map[string]*MemShow {
 				"Bleach Sennen Kessen Hen",
 				"BLEACH Thousand Year Blood War",
 			},
-			Max:      30,
+
 			Offsets:  map[string]int{"Erai-raws": 0, "SubsPlease": 40, "ToonsHub": 40, "(none)": 40},
 			Defaults: []int{0, 40},
 		},
@@ -54,14 +54,14 @@ func refShows() map[string]*MemShow {
 				"Re ZERO Starting Life in Another World",
 				"Re:Zero kara Hajimeru Isekai Seikatsu",
 			},
-			Max:      30,
+
 			Offsets:  map[string]int{"Erai-raws": 0, "(none)": 0},
 			Defaults: []int{0},
 		},
 		"trk": {
-			Name:     "Tomb Raider King",
-			Alias:    []string{"Dogul Wang"},
-			Max:      30,
+			Name:  "Tomb Raider King",
+			Alias: []string{"Dogul Wang"},
+
 			Offsets:  map[string]int{"ToonsHub": 0, "(none)": 0},
 			Defaults: []int{0},
 		},
@@ -90,9 +90,9 @@ func TestReferenceSet(t *testing.T) {
 // still resolves, because it is tried against the offsets the show has exhibited.
 func TestUnseenGroupGeneralises(t *testing.T) {
 	s := &MemShow{
-		Name:     "BLEACH: Thousand-Year Blood War - The Calamity",
-		Alias:    []string{"BLEACH Thousand Year Blood War", "Bleach Sennen Kessen Hen"},
-		Max:      30,
+		Name:  "BLEACH: Thousand-Year Blood War - The Calamity",
+		Alias: []string{"BLEACH Thousand Year Blood War", "Bleach Sennen Kessen Hen"},
+
 		Offsets:  map[string]int{"Erai-raws": 0, "SubsPlease": 40},
 		Defaults: []int{0, 40},
 	}
