@@ -155,6 +155,7 @@ func (s *Store) addColumns() error {
 		{"show", "schedule_fetched_at", "TEXT"},
 		{"show", "image_url", "TEXT"},
 		{"show", "slug", "TEXT"},
+		{"show", "airing_status", "TEXT"},
 		{"alias", "source", "TEXT NOT NULL DEFAULT 'manual'"},
 		{"episode", "airs_at", "TEXT"},
 	}
@@ -195,9 +196,14 @@ type Show struct {
 	ImageURL string
 	// Slug is the animeschedule.net slug, an exact identity for the show on
 	// the schedule. Empty when the show has no schedule page.
-	Slug      string
-	CreatedAt time.Time
-	Aliases   []string
+	Slug string
+	// AiringStatus is the schedule page's own Status field: Ongoing, Finished,
+	// Upcoming. Empty when never fetched. This is the season-complete signal:
+	// the page says so directly, which absence of a countdown cannot (a show
+	// on hiatus has no countdown either).
+	AiringStatus string
+	CreatedAt    time.Time
+	Aliases      []string
 }
 
 // CreateShow inserts a show with its aliases. The canonical name is always
@@ -239,16 +245,18 @@ func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
 	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, source,
-		cadence_weekday, cadence_source, cadence_fetched_at, image_url, slug, created_at FROM show WHERE id = ?`, id)
+		cadence_weekday, cadence_source, cadence_fetched_at, image_url, slug,
+		airing_status, created_at FROM show WHERE id = ?`, id)
 
 	var sh Show
 	var weekday sql.NullInt64
-	var src, source, fetched, created, image, slug sql.NullString
+	var src, source, fetched, created, image, slug, airing sql.NullString
 	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &source,
-		&weekday, &src, &fetched, &image, &slug, &created); err != nil {
+		&weekday, &src, &fetched, &image, &slug, &airing, &created); err != nil {
 		return nil, err
 	}
 	sh.Slug = slug.String
+	sh.AiringStatus = airing.String
 	if weekday.Valid {
 		w := int(weekday.Int64)
 		sh.CadenceWeekday = &w
@@ -442,6 +450,26 @@ func (s *Store) GetShowByName(name string) (*Show, error) {
 		return nil, err
 	}
 	return s.GetShow(id)
+}
+
+// SetAiringStatus records the schedule page's Status field verbatim.
+//
+// Stored verbatim rather than reduced to a boolean: the page distinguishes
+// Ongoing, Finished and Upcoming, and a future consumer may want any of them.
+// Finished() is the opinionated read.
+func (s *Store) SetAiringStatus(showID int64, status string) error {
+	_, err := s.db.Exec(`UPDATE show SET airing_status = ? WHERE id = ?`,
+		nullIfEmpty(strings.TrimSpace(status)), showID)
+	return err
+}
+
+// Finished reports whether the schedule says the season has ended.
+//
+// Only an explicit "Finished" counts. An absent countdown is not evidence —
+// a show on hiatus or awaiting a slot has no countdown either, which is the
+// same reading the timetable's DropFinished applies.
+func (sh *Show) Finished() bool {
+	return strings.EqualFold(strings.TrimSpace(sh.AiringStatus), "Finished")
 }
 
 // SetNextEpisode records the schedule's authoritative next-episode point:

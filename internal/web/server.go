@@ -1129,6 +1129,14 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 		}
 	}
 
+	// The page's Status is the season-complete signal, recorded verbatim so
+	// the listener can read it rather than inferring from a missing countdown.
+	if err := s.st.SetAiringStatus(sh.ID, info.Status); err != nil {
+		log.Printf("schedule: set status %s: %v", sh.Slug, err)
+	} else {
+		sh.AiringStatus = info.Status
+	}
+
 	// Alternative names, tagged with their provenance. Abbreviations are
 	// stored too but marked separately: too short to match on, still useful as
 	// a Nyaa feed query.
@@ -1209,6 +1217,10 @@ type showJSON struct {
 	// training or claim it is untrained — both would be noise about a
 	// question that does not apply.
 	Adopted bool `json:"adopted"`
+	// Finished is true when the schedule's Status field says the season has
+	// ended. The UI files such a show under Complete and the listener stops
+	// polling it.
+	Finished bool `json:"finished"`
 	// ImageURL is the season's cover art from the schedule, empty when unknown.
 	ImageURL string `json:"image_url"`
 	// Cadence is the air weekday, 0 = Sunday. Nil when unknown. Shown in the
@@ -1256,6 +1268,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Offsets:  offsets,
 			Trained:  len(offsets) > 0,
 			Adopted:  sh.Source == store.SourceSeaDex,
+			Finished: sh.Finished(),
 			Cadence:  sh.CadenceWeekday,
 			ImageURL: s.imageFor(sh),
 		}
@@ -1296,7 +1309,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			// through a season the next episode is always in the future, which
 			// made every airing show read as unaired.
 			aired := firstAirs != nil && !firstAirs.After(time.Now())
-			j.State, j.NeedsAttention = showState(states, j.Trained, aired, sh.Source == store.SourceSeaDex)
+			j.State, j.NeedsAttention = showState(states, j.Trained, aired, sh.Source == store.SourceSeaDex, sh.Finished())
 			if nextAirs != nil {
 				status := "upcoming"
 				if nextAirs.Before(time.Now()) {
@@ -1367,7 +1380,10 @@ const Complete = "complete"
 // rather than the airing schedule. Such a show has no air dates and is never
 // trained, so the usual "has it aired yet" and "is it trained" questions do
 // not apply: it is already on disk or on its way.
-func showState(states []cycle.State, trained, aired, adopted bool) (string, bool) {
+// finished reports that the schedule's Status field says the season has
+// ended. Such a show is never hunted again, so "up to date" would imply a
+// next episode is coming; it reads as complete instead.
+func showState(states []cycle.State, trained, aired, adopted, finished bool) (string, bool) {
 	attention := false
 	for _, s := range states {
 		if s == cycle.NoReleaseFound {
@@ -1405,6 +1421,28 @@ func showState(states []cycle.State, trained, aired, adopted bool) (string, bool
 
 	if !aired {
 		return Upcoming, false
+	}
+	// The schedule says the season has ended. Outstanding episodes still
+	// matter — a missing file needs a decision — but once nothing is in
+	// flight the season reads as complete rather than "up to date", which
+	// would imply a next episode is coming.
+	if finished {
+		for _, s := range states {
+			if s == cycle.Missing {
+				return string(cycle.Missing), true
+			}
+		}
+		for _, s := range states {
+			if s == cycle.Downloading {
+				return string(cycle.Downloading), false
+			}
+		}
+		for _, s := range states {
+			if s == cycle.ReadyToWatch {
+				return string(cycle.ReadyToWatch), false
+			}
+		}
+		return Complete, false
 	}
 	// An untrained show cannot match a release, so nothing else on the card
 	// means anything yet. Say so plainly instead of claiming it is up to date.

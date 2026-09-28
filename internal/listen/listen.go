@@ -117,6 +117,13 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			debug.Log("%s: adopted from SeaDex, not polled", sh.CanonicalName)
 			continue
 		}
+		// The schedule says the season has ended. This is the page's own
+		// Status, not an inference from a missing countdown — a show on
+		// hiatus has no countdown either, and must keep polling.
+		if sh.Finished() {
+			debug.Log("%s: schedule says finished, not polling", sh.CanonicalName)
+			continue
+		}
 
 		var states []cycle.State
 		hasAirDate := false

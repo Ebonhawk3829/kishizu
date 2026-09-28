@@ -221,6 +221,12 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			// The page is back, so whatever the earlier misses meant, it was
 			// not permanent.
 			delete(misses, sh.ID)
+			// The page's Status is the season-complete signal, recorded
+			// verbatim. The listener reads it instead of inferring "over"
+			// from a missing countdown, which a hiatus also produces.
+			if err := st.SetAiringStatus(sh.ID, info.Status); err != nil {
+				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+			}
 			if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
 					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
