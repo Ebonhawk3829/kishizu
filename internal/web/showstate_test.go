@@ -109,3 +109,39 @@ func TestAdoptedShowIsNotUpcomingOrNeedsTraining(t *testing.T) {
 		}
 	}
 }
+
+// TestFinishedShowReadsCompleteNotUpToDate: the schedule's Status says the
+// season has ended, so "up to date" would imply a next episode is coming.
+// Outstanding episodes still surface — a missing file needs a decision — but
+// once nothing is in flight the season reads as complete.
+func TestFinishedShowReadsCompleteNotUpToDate(t *testing.T) {
+	cases := []struct {
+		states []cycle.State
+		want   string
+	}{
+		{[]cycle.State{cycle.UpToDate}, Complete},
+		{[]cycle.State{cycle.ReadyToWatch}, string(cycle.ReadyToWatch)},
+		{[]cycle.State{cycle.Downloading}, string(cycle.Downloading)},
+		{[]cycle.State{cycle.Missing}, string(cycle.Missing)},
+	}
+	for _, c := range cases {
+		// trained=true, aired=true, adopted=false, finished=true
+		got, attention := showState(c.states, true, true, false, true)
+		if got != c.want {
+			t.Errorf("finished with %v = %q, want %q", c.states, got, c.want)
+		}
+		if c.want == string(cycle.Missing) && !attention {
+			t.Error("a missing episode in a finished season needs attention")
+		}
+	}
+}
+
+// TestFinishedShowStillTrainsAndHuntsUntilStatusSaysSo: finished is the
+// schedule's word, not an inference. A show whose page still says Ongoing
+// keeps its normal cycle even when its countdown is momentarily absent.
+func TestFinishedShowStillTrainsAndHuntsUntilStatusSaysSo(t *testing.T) {
+	got, _ := showState([]cycle.State{cycle.Hunting}, true, true, false, false)
+	if got != string(cycle.Hunting) {
+		t.Errorf("ongoing + hunting = %q, want %q", got, cycle.Hunting)
+	}
+}
