@@ -20,23 +20,6 @@ kishizu watches an indexer for the shows you have declared, works out which
 release is the episode you are waiting for, hands it to your torrent client,
 files it in your library, and deletes it once you have watched it.
 
-Air times come from animeschedule.net. If that site goes down, kishizu keeps
-working with the air times it already has.
-
-Two background jobs keep that current, each writing to its own store so the UI
-only ever reads: air times for your tracked shows, daily; the seasonal browse
-list, weekly.
-
-The weekly job is the only thing that talks to animeschedule about shows you
-are not tracking. It pulls the season, drops shows that have finished, and fills
-in each entry's English title, season length and art. Adding a show then copies
-from that cache rather than fetching the page, so it is instant and works when
-the site is down. A show not on the current season falls back to its own page.
-
-A page that 404s is not treated as finished on the strength of one sighting —
-pages vanish transiently during a site update. Three consecutive daily misses
-is the threshold, and a page that comes back clears the count.
-
 | Stage | What happens |
 |---|---|
 | **Declare** | Add shows by browsing the season, pasting an animeschedule.net URL, or listing them in the config file |
@@ -45,6 +28,11 @@ is the threshold, and a page that comes back clears the count.
 | **File** | Renames it into your library, ready for your player |
 | **Watch** | Anything that can POST JSON tells kishizu when you finish an episode |
 | **Clean** | Deletes watched episodes per the delete policy: immediately, after a delay, or never |
+
+Air times come from animeschedule.net and are cached locally, so kishizu keeps
+working when the site is down. Two background jobs keep things current: one
+refreshes air times for tracked shows daily, the other refreshes the seasonal
+browse list weekly.
 
 ## Contents
 
@@ -66,22 +54,15 @@ is the threshold, and a page that comes back clears the count.
 
 kishizu handles currently-airing seasons for one person.
 
-Releases follow semver. Patch releases are safe to take unread. Minor
-releases may add configuration keys, and existing ones keep working. A major
-release may change behaviour, and the release notes will say so.
+Releases follow semver. Patch releases are safe to take unread. Minor releases
+may add configuration keys; existing ones keep working. A major release may
+change behaviour, and the release notes will say so.
 
 What it does not do:
 
-- **Hunt a back catalogue.** It tracks shows week by week while they air. A
-  finished season can be [adopted](#adopting-a-finished-season) instead.
-- **Download batches or season packs** as part of the airing pipeline. One
-  episode at a time.
-- **Support multiple users.** No auth, no permissions model. See
-  [Security](#security).
-
-The core parts — release parsing, per-group episode offsets, the episode cycle
-— are not tied to any of that, and could be split out later. That is not
-planned.
+- **Hunt a back catalogue.** It tracks shows week by week while they air. A finished season can be [adopted](#adopting-a-finished-season) instead.
+- **Download batches or season packs** as part of the airing pipeline. One episode at a time.
+- **Support multiple users.** No auth, no permissions model. See [Security](#security).
 
 If you need something general-purpose today, use
 [autobrr](https://github.com/autobrr/autobrr) or
@@ -93,21 +74,21 @@ If you need something general-purpose today, use
 - Go 1.27+ if building from source. Docker needs nothing else.
 - Optionally, a notification service: **ntfy** or **Gotify**.
 
-Everything else is optional. kishizu runs dry by default, so you can point it
-at your library and watch what it decides before it downloads anything.
+kishizu runs dry by default, so you can point it at your library and see what
+it decides before it downloads anything.
 
 ## Installation
 
 ### Docker Compose
 
-An example deployment, using Transmission as the client. Adjust the image tag,
+An example deployment using Transmission as the client. Adjust the image tag,
 the client settings and the paths to your setup — qBittorrent works the same
 way (see the [flags](#flags) table).
 
 ```yaml
 services:
   kishizu:
-    image: ghcr.io/ebonhawk3829/kishizu:1.3.2   # or :latest
+    image: ghcr.io/ebonhawk3829/kishizu:latest
     user: "1000:1000"             # your media user's uid:gid
     volumes:
       - ./config:/data            # database, config file, caches
@@ -129,21 +110,18 @@ Transmission RPC endpoint, the library and staging roots, and `dry_run: false`
 to switch downloading on. Settings live in `/data/kishizu.yaml`, which the UI
 edits — there are no flags for them.
 
-Then open **http://localhost:8098**.
-
 Three things about that compose file:
 
 **Mount `./media:/media` as one mount, not two.** The final move from staging
-to library is a rename, and a rename cannot cross mount points. Separate
-mounts for library and staging fail with `invalid cross-device link`.
+to library is a rename, which cannot cross mount points. Separate mounts for
+library and staging fail with `invalid cross-device link`.
 
 **`-serve` must be `0.0.0.0:8098` inside the container.** kishizu binds to
 localhost by default, which Docker's port mapping cannot reach. The host side
-of the mapping (`127.0.0.1:8098:8098`) is what keeps it off your network.
+of the mapping (`127.0.0.1:8098:8098`) keeps it off your network.
 
 **Dry-run is the default.** Set `dry_run: false` in the config file (or the
-UI) to download for real. Leave it true and kishizu polls, matches and logs
-what it would download, and hands nothing to your torrent client.
+UI) to download for real.
 
 ### From source
 
@@ -201,29 +179,39 @@ shows:
 
 See [`kishizu.yaml.example`](kishizu.yaml.example) for the annotated version.
 
-**Configure this first if you are moving to kishizu mid-season** from another
-tool and want to pre-seed the database: run with `-seed` once the settings are
-right, so shows land with the paths and policy you intend.
+If you are moving to kishizu mid-season and want to pre-seed the database,
+configure this file first, then run with `-seed` so shows land with the paths
+and policy you intend.
 
 ### Settings in the UI
 
 **Settings** in the web UI edits this file. Paths and the downloader are
-captured at startup, so those need a restart; everything else takes effect on
-save.
+captured at startup and need a restart; everything else takes effect on save.
 
 ### Secrets
 
 The torrent client password and the notification token are stored in this file
-in plain text. To keep them out of it entirely, supply them by environment
-variable instead:
+in plain text. To keep them out, supply them by environment variable instead:
 
 | Variable | Replaces |
 |---|---|
 | `KISHIZU_QBITTORRENT_PASS` | `downloader.qbittorrent_pass` |
 | `KISHIZU_GOTIFY_TOKEN` | `notifier.gotify_token` |
 
-An environment variable wins when set and non-empty, and is never written back
-into the file. The UI masks secrets and never displays them.
+An environment variable takes precedence when set and non-empty, and is never
+written back into the file. The UI masks secrets and never displays them.
+
+### Notifications
+
+With a notifier configured, kishizu sends alerts for things that otherwise sit
+silently:
+
+| Alert | When |
+|---|---|
+| Downloading | An episode was handed to the torrent client. |
+| Download stalled | An episode has been downloading for over 48 hours with no file. Sent once per episode. |
+| Downloader unreachable | The torrent client did not respond. Sent once per outage, with a follow-up when it returns. |
+| Needs training | A show has started airing but has no known group offsets. Sent once per show. |
 
 ### Naming
 
@@ -235,30 +223,21 @@ into the file. The UI masks secrets and never displays them.
 | `custom` | your own pattern |
 
 A custom pattern uses `{show}`, `{season}`, `{season:2}`, `{episode}`,
-`{episode:2}`. It must contain `{show}` and an episode placeholder — without
-the episode, kishizu cannot read the number back out of a filename, and the
-watch signal would never match.
+`{episode:2}`, and must contain `{show}` and an episode placeholder.
 
 ## Adding shows
 
 Everything lives under **Add a show**.
 
-**Browse the season.** Open **Browse this season** for the cached timetable —
-every show on the current season, with the filter narrowing it. Pick one and
-the slug is an exact identity, so the season length, cover art and every
-alternative name are filled in for you. The list loads the first time you open
-the panel, not on page load.
+**Browse the season.** Open **Browse this season** for the cached timetable.
+Pick a show and the slug fills in the season length, cover art and alternative
+names automatically. The list shows romaji or English names (toggle in the
+panel or set `browse.title` in the config); the filter matches both either way.
 
-The list shows either the romaji or the English name: switch with the toggle in
-the panel, or set `browse.title` in the config file. The filter matches both
-either way, so switching never hides a show you could have found. Shows with no
-separate English name fall back to the romaji one.
-
-Browsing reads from a cache on disk and never touches the network, so the list
-is there even when animeschedule is down. A background job refreshes it weekly
-and fills in the English titles; a fresh container fetches once at startup, so
-the panel is never empty. **Refresh** in the panel forces it now.
-
+The browse list is cached on disk — it works even when animeschedule is down.
+A background job refreshes it weekly; a fresh container fetches once at
+startup so the panel is never empty. **Refresh** in the panel forces an
+immediate update.
 
 **Paste a URL.** An animeschedule.net URL (or a bare slug) does the same thing:
 
@@ -266,15 +245,13 @@ the panel is never empty. **Refresh** in the panel forces it now.
 https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 ```
 
-A plain show name is rejected: the slug is the identity that fills in the
-season length, cover art and air dates, and a name alone carries none of that.
-To add a show by name, list it in the config file and run `-seed` — that is
-also how you pre-seed a fresh database in one go. A show seeded without a slug
-gets its air dates once you attach one with `-backfill-slugs`.
+A plain show name is not accepted here — the slug is what carries the season
+length, cover art and air dates. To add a show by name, list it in the config
+file and run `-seed`. A show seeded without a slug gets its air dates once you
+attach one with `-backfill-slugs`.
 
-Japanese names and abbreviations are not imported. Release titles are
-romanised, so a Japanese name can never appear in one, and a short one can
-clear the alias threshold against an unrelated show on token overlap alone.
+Only romanised names are imported as aliases. Japanese names cannot appear in
+release titles, and short abbreviations risk false matches.
 
 ## How matching works
 
@@ -283,115 +260,104 @@ show, one group posts `E01` while another posts `E41`, and both are the same
 episode. kishizu stores an **offset per release group**, so `[VARYG] Show - 47`
 and `[Erai-raws] Show - 07` can both resolve to episode 7.
 
-Offsets are learned either by training (confirm the parse of a few releases, one
-per numbering convention) or by `-infer`, which derives them from the structure
-of each group's numbering. Both are reviewable and resettable per show in the UI.
+Offsets are learned either by training (confirm the parse of a few releases,
+one per numbering convention) or by `-infer`, which derives them from the
+structure of each group's numbering. Both are reviewable and resettable per
+show in the UI.
 
-Training calibrates the parser: a training run teaches the per-group episode
-offset and the vocabulary, meaning that a token in a title maps to a canonical
-value so every future release using that spelling is readable. Quality policy
-(resolution floor, codec ranking, batch rejection, dub demotion, group order)
-sits outside training entirely — it is global, set in advance in the config
-file, and applies to every show the same way.
+Training teaches the per-group episode offset and the title vocabulary — a
+mapping from tokens in a release title to canonical values, so every future
+release using that spelling is readable. Quality policy (resolution floor,
+group order, etc.) is configured globally and applies to every show the same
+way.
 
-A show starts hunting once it has been trained. Without at least one known group
-offset there is nothing to reason with, so polling would only burn requests.
-Untrained shows show as *needs training* in the UI.
+A show starts hunting once it has at least one known group offset. Untrained
+shows appear as *needs training* in the UI. A show whose first episode has not
+yet aired appears as *upcoming*.
 
-Training also needs a release to train on, so a show whose first episode is
-still in the future shows as *upcoming*. Some shows are announced without a
-scheduled slot; those stay *upcoming* until the site publishes a time.
+### Season end
+
+The schedule page's own status decides when a season is over. When it reports
+*Finished*, the show stops polling and moves to the **Complete** section of the
+UI. The daily refresh picks this up within a day. A show on hiatus keeps
+polling.
+
+The episode count is recorded for display where available ("Ep 4 of 12") but
+is not used to determine season end.
 
 ## Episode states
 
 | State | Meaning |
 |---|---|
-| *upcoming* | The season has not started. Nothing to do. |
+| *upcoming* | The season has not started. |
 | *hunting* | Aired, within 72 hours, no release grabbed yet. Polled every 3 minutes. |
-| *downloading* | Handed to the torrent client, not on disk yet. |
+| *downloading* | Handed to the torrent client, not on disk yet. Not polled. |
 | *ready to watch* | On disk, waiting for you. |
 | *missing* | Was on disk and is not now. Needs a decision: re-grab or mark watched. |
-| *no release found* | The 72 hour window closed with nothing grabbed. |
+| *no release found* | The 72-hour window closed with nothing grabbed. |
 | *up to date* | Watched or deleted. |
-
-An episode in *downloading* sits outside polling: it cannot be re-grabbed, so
-polling would evaluate releases nothing can act on. Quality is settled before
-the grab instead, by the global rules and the group order.
 
 ## Adopting a finished season
 
-The airing pipeline handles shows week by week. For a season that has already
-finished, kishizu can adopt a release from [releases.moe](https://releases.moe)
-(SeaDex), a community index of the highest-quality release for a given anime.
+For a season that has already finished, kishizu can adopt a release from
+[releases.moe](https://releases.moe) (SeaDex), a community index of the
+highest-quality release for a given anime.
 
-Open **Adopt a finished season** and paste the entry URL. kishizu reads the
-release, lists every file in it, and proposes which are episodes. Each file gets
-a checkbox and an episode dropdown, so you confirm or correct the proposals
-before anything downloads.
+Open **Adopt a finished season** and paste the entry URL. kishizu lists every
+file in the release and proposes which are episodes. Each file gets a checkbox
+and an episode dropdown for you to confirm or correct before anything
+downloads. Extras (NCOP, NCED, OVA, specials) are unchecked by default.
 
-The same thing is available from the command line:
+From the command line:
 
 ```sh
 ./kishizu -db kishizu.db -adopt "https://releases.moe/112124/"
 ```
 
-The URL's path is the AniList id, so no lookup is needed. The title and episode
-numbers are derived from the filenames, and extras (NCOP, NCED, OVA, specials)
-are left unchecked by default. `-adopt-episodes` overrides the proposal, one
-number per file, where `0` means download it but do not track it as an episode.
+`-adopt` is a dry run that prints the plan; add `-adopt-confirm` to perform it.
+`-adopt-episodes` overrides the proposed episode numbers, one per file, where
+`0` means download but do not track as an episode.
 
-**The whole release is downloaded.** A magnet link carries no file list, so the
-checkboxes decide which files become *episodes*; every file in the pack arrives
-regardless. Files you leave unchecked are removed once the torrent completes,
-if `prune_unselected` is enabled. If you tick the wrong boxes, the wrong files
-are kept — that is your call.
+The entire release is always downloaded — magnet links carry no file list, so
+the checkboxes control which files become tracked episodes, not which files
+arrive. Unchecked files are removed after the torrent completes if
+`prune_unselected` is enabled.
 
-Adopted seasons sit outside the airing pipeline: the release was chosen by
-hand, so there is nothing to hunt for and nothing to learn. They go straight to
-*downloading*, then *ready to watch*, and are deleted after watching like any
-other episode. They appear under **Complete** rather than Airing.
-
-Cover art comes from AniList: the entry URL carries the AniList id, and
-AniList serves the same poster the SeaDex page shows. If the lookup fails the
-adoption still succeeds, without a poster.
-
-From the command line, `-adopt` is a dry run that prints the plan and changes
-nothing; add `-adopt-confirm` to perform it.
+Adopted seasons appear under **Complete** and follow the same watch/delete
+cycle as airing episodes. Cover art is fetched from AniList using the id in
+the URL.
 
 ## Watch signal
 
-`POST /api/watched` marks an episode watched. It is not tied to any particular
-player — anything that can POST JSON can send it.
+`POST /api/watched` marks an episode watched. Anything that can POST JSON can
+send it.
 
 ```json
 {"path": "/anywhere/Show - E09.mkv"}
 ```
 
 Only the **base name** is used for matching, so the client's directory layout
-is irrelevant. You can also be explicit:
+does not matter. You can also be explicit:
 
 ```json
 {"show_id": 1, "episode": 9}
 ```
 
 An example mpv script is in [`scripts/mpv/`](scripts/mpv/). It only reports
-files under a configured root, so using mpv for other media will not spam the
-server. A post whose outcome is unclear is settled by asking the server
-whether the episode is marked watched, so only a confirmed miss is spooled and
-reported. A missed signal leaves a file on disk, which is the safe direction.
+files under a configured root, so using mpv for other media does not trigger
+false signals. A missed signal leaves a file on disk, which is the safe
+direction.
 
-Media servers are supported directly: `POST /api/webhook` accepts watch
-events from Jellyfin, Plex and Emby in their native payload shapes — point
-the server's webhook at it and no plugin or script is needed. See
+Media servers are supported directly: `POST /api/webhook` accepts watch events
+from Jellyfin, Plex and Emby in their native payload shapes — point the
+server's webhook at it and no plugin or script is needed. See
 [`API`](docs/API.md) for the payload formats.
 
 ## Flags
 
-Flags cover only what the config file cannot hold: where the database is,
-where the config file is, which mode to run, and the arguments those modes
-take. Every server setting — library, staging, keep, delete, interval,
-dry-run, downloader, notifier — is configured in `kishizu.yaml` and editable
-from the web UI.
+Flags cover where the database is, where the config file is, and which mode to
+run. Every server setting is configured in `kishizu.yaml` and editable from
+the web UI.
 
 | Flag | Default | Purpose |
 |---|---|---|
@@ -412,8 +378,6 @@ from the web UI.
 | `-backfill-slugs` | — | Attach animeschedule slugs from the mapping file |
 | `-slugs` | `slugs.yaml` | Name → slug mapping used by `-backfill-slugs` |
 | `-reconcile` | — | File completed downloads in staging once, then exit |
-
-To change a setting, change it in the UI or the config file.
 
 ## API
 
@@ -436,11 +400,9 @@ A few worth knowing:
 **There is no authentication.** Anyone who can reach the port has full control:
 they can add and remove shows, mark episodes watched, and trigger downloads.
 
-This is a deliberate trade-off for a single-user tool on a trusted network. It
-is why the default bind address is `127.0.0.1`. If you expose kishizu beyond
-localhost, put it behind something that authenticates — a reverse proxy with
-auth, or a private network such as a VPN or tailnet. Do not port-forward it to
-the internet.
+The default bind address is `127.0.0.1`. If you expose kishizu beyond
+localhost, put it behind a reverse proxy with auth, or a private network such
+as a VPN or tailnet. Do not port-forward it to the internet.
 
 See [`SECURITY`](docs/SECURITY.md) for how to report a vulnerability.
 
