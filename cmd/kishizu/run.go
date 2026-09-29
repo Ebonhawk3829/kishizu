@@ -83,6 +83,20 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			notify.PriorityHigh)
 	}
 
+	// A show that premiered but cannot hunt pings once, not on every tick:
+	// the condition persists until the user trains it, and at a 3-minute
+	// poll that would be ~480 pings a day for the same fact.
+	untrainedPinged := map[string]bool{}
+	l.OnUntrained = func(show string) {
+		if untrainedPinged[show] {
+			return
+		}
+		untrainedPinged[show] = true
+		alert(n, "kishizu: needs training",
+			fmt.Sprintf("%s has started airing but no release group's numbering is known yet, so nothing can be hunted. Open kishizu and train it.", show),
+			notify.PriorityHigh)
+	}
+
 	log.Printf("listener: polling every %s (dry-run=%v, downloader=%s)",
 		interval, dryRun, dl.Name())
 

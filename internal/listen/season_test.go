@@ -74,6 +74,66 @@ func TestUntrainedShowIsNotDue(t *testing.T) {
 	}
 }
 
+// TestOnUntrainedFiresForAiredShow: a show whose first episode has aired but
+// which has no group offsets is inert — never polled, never downloading,
+// never alerting through any other path. The OnUntrained callback is the one
+// signal it can produce, and it must fire.
+func TestOnUntrainedFiresForAiredShow(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
+	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
+	_ = st.ProjectAirDates(sh.ID)
+	// No SetGroupOffset: the show has never been trained.
+
+	var got []string
+	l := New(st, nil)
+	l.OnUntrained = func(show string) { got = append(got, show) }
+	_ = l.DueShows(5 * time.Minute)
+	if len(got) != 1 || got[0] != "Show" {
+		t.Errorf("OnUntrained = %v, want [Show]", got)
+	}
+}
+
+// TestOnUntrainedSilentForUnairedShow: an announced-but-unscheduled show has
+// nothing to train on yet — there are no releases for an episode that does
+// not exist. Asking for training then would be asking for the impossible, so
+// no signal.
+func TestOnUntrainedSilentForUnairedShow(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
+	// No air date at all: the show is waiting for a slot.
+	// No SetGroupOffset: never trained.
+
+	var got []string
+	l := New(st, nil)
+	l.OnUntrained = func(show string) { got = append(got, show) }
+	_ = l.DueShows(5 * time.Minute)
+	if len(got) != 0 {
+		t.Errorf("OnUntrained = %v, want none: an unaired show has nothing to train on", got)
+	}
+}
+
+// TestOnUntrainedSilentOnceTrained: the callback is about the gap, not the
+// show. Once an offset exists the show hunts normally and must not signal.
+func TestOnUntrainedSilentOnceTrained(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
+	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
+	_ = st.ProjectAirDates(sh.ID)
+	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
+
+	var got []string
+	l := New(st, nil)
+	l.OnUntrained = func(show string) { got = append(got, show) }
+	_ = l.DueShows(5 * time.Minute)
+	if len(got) != 0 {
+		t.Errorf("OnUntrained = %v, want none: a trained show hunts normally", got)
+	}
+}
+
 // TestUntrainedShowIsDueOnceTrained: the guard is about training, not about
 // the show. Learning one offset is enough to start polling.
 func TestUntrainedShowIsDueOnceTrained(t *testing.T) {

@@ -58,6 +58,16 @@ type Listener struct {
 	// the same rules hold for every show, so it is set once rather than per
 	// show.
 	Policy *quality.Policy
+	// OnUntrained, when set, is called for each show that has aired episode 1
+	// but cannot hunt because no group offset is known. The listener does not
+	// alert itself: notifying is the caller's concern, and the caller may want
+	// to batch or debounce. Nil means no signal.
+	//
+	// Without this a show that premiered while the user was away sits inert
+	// forever: it is never due (polling it would burn requests), so nothing
+	// is downloaded and nothing alerts. The UI shows "needs training", but
+	// the UI has to be looked at.
+	OnUntrained func(show string)
 	// Now is overridable in tests.
 	Now func() time.Time
 }
@@ -139,6 +149,13 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			// either way, so there is no point looking up its offsets.
 			if !l.isTrained(sh) {
 				debug.Log("%s: untrained, not polling", sh.CanonicalName)
+				// Episode 1 has aired (a state past up-to-date exists, or the
+				// first episode's air time has passed), so there is something
+				// to hunt — the show just cannot hunt yet. That is worth a
+				// signal; an unaired show is not.
+				if l.OnUntrained != nil && l.hasAired(eps, now) {
+					l.OnUntrained(sh.CanonicalName)
+				}
 				continue
 			}
 			out[sh] = d
@@ -166,6 +183,28 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 		return false
 	}
 	return len(offsets) > 0
+}
+
+// hasAired reports whether episode 1 of this show has aired, from the
+// episode rows: any state past "wanted" means a release was seen, and a
+// first-episode air time in the past means the season has started even if
+// nothing was grabbed. An announced-but-unscheduled show has neither, and
+// there is nothing to train on yet — asking for training then would be
+// asking for something that cannot be done.
+func (l *Listener) hasAired(eps []*store.Episode, now time.Time) bool {
+	for _, ep := range eps {
+		if ep.Number != 1 {
+			continue
+		}
+		switch episode.ParseState(string(ep.State)) {
+		case episode.Downloading, episode.Downloaded, episode.Watched, episode.Deleted, episode.Missing:
+			return true
+		}
+		if ep.AirsAt != nil && ep.AirsAt.Before(now) {
+			return true
+		}
+	}
+	return false
 }
 
 // PollShow fetches one show's feed and evaluates each item.
