@@ -433,7 +433,10 @@ func (s *Store) SetSource(showID int64, source string) error {
 	return err
 }
 
-// SetMaxEpisode updates the plausibility bound used by the matcher.
+// SetMaxEpisode records the season's episode count for display ("Ep 4 of
+// 12"). It does not bound matching or decide when a season has ended: the
+// schedule's status is the season-end signal, and a count is often
+// unannounced until late in a run.
 func (s *Store) SetMaxEpisode(showID int64, max int) error {
 	_, err := s.db.Exec(`UPDATE show SET max_episode = ? WHERE id = ?`, max, showID)
 	return err
@@ -478,9 +481,8 @@ func (sh *Show) Finished() bool {
 //
 // n is clamped to at least 1. The page renders "Ep 0" for a show that has
 // been announced but has not premiered, and storing that verbatim breaks
-// everything downstream: episode numbers are 1-based, plausible() rejects
-// anything below 1, and the season-complete check (next > max) can never fire
-// for a next of 0. Treating it as episode 1 is the honest reading — the next
+// everything downstream: episode numbers are 1-based and plausible() rejects
+// anything below 1. Treating it as episode 1 is the honest reading — the next
 // episode is the first one — and the daily refresh corrects the time once the
 // show actually appears on the timetable.
 func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {

@@ -88,11 +88,8 @@ func (s *Show) Aliases() []string {
 // the page does not give one.
 //
 // A Movie reports "Episodes: 1", and that is the correct answer, not a special
-// case: a film IS one download. The season-complete check is `next > max`, so
-// max=1 still allows episode 1 to be hunted and stops cleanly once it is
-// watched. Suppressing it would be worse than using it — with max=0 the
-// plausibility bound is lost, and a mis-numbered release could be accepted as
-// episode 5 of a film.
+// case: a film IS one download, and "Ep 1 of 1" reads correctly on it.
+// Suppressing it would lose the display count for films entirely.
 func (s *Show) SeasonLength() int {
 	if s.Episodes <= 0 {
 		return 0

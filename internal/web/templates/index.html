@@ -1312,10 +1312,11 @@ function card(s) {
 
   // Air line: the next episode the user actually owes, with its air time when
   // the projection knows it. Tense matters — "airs" for a future point,
-  // "aired" for one already past. Past the season length, say so.
+  // "aired" for one already past. A finished season has no next episode, so
+  // the count stands alone.
   let air;
-  if (s.max && s.next > s.max) {
-    air = `Season complete — ${s.max} episodes`;
+  if (s.finished) {
+    air = `Season complete${s.max ? ' — ' + s.max + ' episodes' : ''}`;
   } else if (s.next_schedule) {
     const sc = s.next_schedule;
     const past = new Date(sc.airs_at) < Date.now();

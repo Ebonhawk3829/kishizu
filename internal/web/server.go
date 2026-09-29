@@ -1115,12 +1115,14 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 		return
 	}
 
-	// The season length is the plausibility bound the matcher uses and the
-	// signal that a season has finished. The site knows it; the user usually
-	// does not, so most shows sat at 0 (unknown) before this.
+	// The season length is recorded for display ("Ep 4 of 12"). The site
+	// knows it; the user usually does not, so most shows sat at 0 (unknown)
+	// before this.
 	//
-	// SeasonLength, not Episodes: a film reports "1", and capping a season at
-	// one episode would mark it complete after a single download.
+	// SeasonLength, not Episodes: a film reports "1", and storing that as a
+	// season length would read "Ep 1 of 1" on a film that is correctly one
+	// download. Season end comes from the page's status, not from this
+	// number.
 	if n := info.SeasonLength(); n > 0 && n != sh.MaxEpisode {
 		if err := s.st.SetMaxEpisode(sh.ID, n); err != nil {
 			log.Printf("schedule: set max %s: %v", sh.Slug, err)
