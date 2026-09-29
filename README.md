@@ -100,15 +100,14 @@ at your library and watch what it decides before it downloads anything.
 
 ### Docker Compose
 
-An example deployment, using Transmission as the client. Adjust the client
-settings and the paths to your setup — qBittorrent works the same way (see the
-[flags](#flags) table). The example tracks `:latest`; pin a version tag
-(e.g. `:1.3.5`) if you would rather update on purpose.
+An example deployment, using Transmission as the client. Adjust the image tag,
+the client settings and the paths to your setup — qBittorrent works the same
+way (see the [flags](#flags) table).
 
 ```yaml
 services:
   kishizu:
-    image: ghcr.io/ebonhawk3829/kishizu:latest
+    image: ghcr.io/ebonhawk3829/kishizu:1.3.2   # or :latest
     user: "1000:1000"             # your media user's uid:gid
     volumes:
       - ./config:/data            # database, config file, caches
@@ -129,6 +128,8 @@ Then open **http://localhost:8098** and set the rest from the UI: the
 Transmission RPC endpoint, the library and staging roots, and `dry_run: false`
 to switch downloading on. Settings live in `/data/kishizu.yaml`, which the UI
 edits — there are no flags for them.
+
+Then open **http://localhost:8098**.
 
 Three things about that compose file:
 
@@ -195,7 +196,7 @@ shows:
     aliases:
       - Example Show Romaji Title
     watched: 0
-    max: 12                        # display only; the schedule decides when a season ends
+    max: 12
 ```
 
 See [`kishizu.yaml.example`](kishizu.yaml.example) for the annotated version.
@@ -223,22 +224,6 @@ variable instead:
 
 An environment variable wins when set and non-empty, and is never written back
 into the file. The UI masks secrets and never displays them.
-
-### Notifications
-
-With a notifier configured, kishizu sends:
-
-| Alert | When |
-|---|---|
-| Downloading | An episode was handed to the torrent client. |
-| Download stalled | An episode has been downloading for over 48 hours with no file — the swarm may be dead. Sent once per episode. |
-| Downloader unreachable | The torrent client did not respond. Sent once per outage, with a follow-up when it is reachable again. |
-| Needs training | A show has started airing but no release group's numbering is known, so nothing can be hunted. Sent once per show. |
-
-All of these are things that otherwise sit silently: a stalled download is
-invisible (the episode is not hunting, so it is never re-grabbed), and an
-untrained show is never polled at all. Notifications are the only signal for
-both.
 
 ### Naming
 
@@ -316,23 +301,6 @@ Untrained shows show as *needs training* in the UI.
 Training also needs a release to train on, so a show whose first episode is
 still in the future shows as *upcoming*. Some shows are announced without a
 scheduled slot; those stay *upcoming* until the site publishes a time.
-
-### Season end
-
-The schedule page's own status decides when a season is over. When it says
-*Finished*, the show stops polling and moves to the **Complete** section of
-the UI; the daily refresh picks the change up within a day of the site
-updating. Only an explicit *Finished* counts — a show on hiatus has no
-countdown either, and keeps polling.
-
-Episode counts are not used for this. A season's length is often unannounced
-until late in its run, so a count taken from it would be missing exactly when
-it is needed; the schedule's status is a direct statement instead. The count
-is still recorded where the site publishes one, for display ("Ep 4 of 12").
-
-A show that starts airing before it has been trained cannot hunt, and polls
-would only burn requests — so kishizu sends a notification instead, once, to
-say it needs training.
 
 ## Episode states
 
