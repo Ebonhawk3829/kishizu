@@ -756,7 +756,7 @@ async function loadShows() {
   // listener has stopped polling it, so it belongs with the other seasons
   // that are no longer being watched week by week.
   const complete = shows.filter(s => s.adopted || s.finished).sort(byName);
-  const airing = shows.filter(s => !s.adopted && s.state !== 'upcoming').sort(byAir);
+  const airing = shows.filter(s => !s.adopted && !s.finished && s.state !== 'upcoming').sort(byAir);
   // Soonest first, so the next thing to decide is at the top. Shows with no
   // announced slot sort last: there is nothing to act on for those, and
   // putting them first would bury the ones that need a decision.
