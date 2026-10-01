@@ -220,6 +220,11 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 		if it.InfoHash != "" && s.Asked[it.InfoHash] {
 			continue
 		}
+		// Releases this show has already acted on — grabbed by the listener,
+		// or confirmed in an earlier training session — carry nothing new.
+		if seen, err := s.st.HasSeen(it.InfoHash); err == nil && seen {
+			continue
+		}
 		if ok, _ := match.AliasGate(s.m.Aliases(), it.Title); !ok {
 			continue
 		}
@@ -349,10 +354,25 @@ func (s *Session) Offsets() map[string]int {
 // sole alias source: it publishes every name a show is known by, and names
 // scraped from release titles have already poisoned one show's alias set with
 // quality tokens ("1080p"), which made every release on the indexer eligible.
+//
+// Confirmed infohashes are recorded as seen, so a fresh session does not
+// re-offer what the user already worked through. Without this, re-opening
+// training showed the same candidates again — double handling for no new
+// information.
 func (s *Session) Commit() error {
 	for g, off := range s.m.Offsets {
 		if err := s.st.SetGroupOffset(s.show.ID, g, off, "training"); err != nil {
 			return err
+		}
+	}
+	for hash := range s.Asked {
+		// Asked holds both infohashes (40 hex chars) and titles; only
+		// infohashes are meaningful across sessions. Anything else is a
+		// title, which the seen table does not key on.
+		if len(hash) == 40 && isHex(hash) {
+			if err := s.st.MarkSeen(hash, s.show.ID, 0); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -372,4 +392,19 @@ func distinct(m map[string]int) []int {
 	}
 	sort.Ints(out)
 	return out
+}
+
+// isHex reports whether a string is 40 hex characters — the shape of a
+// torrent infohash. Asked holds titles too, and the seen table keys on
+// infohash alone.
+func isHex(s string) bool {
+	for _, r := range s {
+		isDigit := r >= '0' && r <= '9'
+		isLower := r >= 'a' && r <= 'f'
+		isUpper := r >= 'A' && r <= 'F'
+		if !isDigit && !isLower && !isUpper {
+			return false
+		}
+	}
+	return true
 }

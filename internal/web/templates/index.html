@@ -1459,7 +1459,8 @@ function renderTrain() {
     return;
   }
 
-  el('candidates').innerHTML = state.candidates.map(c => `
+  const cands = state.candidates || [];
+  el('candidates').innerHTML = cands.map(c => `
     <div class="cand">
       <div class="t">
         <span class="ep ${c.episode ? '' : 'unknown'}">${c.episode ? 'ep' + c.episode : 'ep?'}</span>
@@ -1660,7 +1661,11 @@ async function submitCorrections() {
 async function commit() {
   try {
     const r = await api('/api/train/commit', {});
-    toast(`Saved. ${r.accepted} accepted, ${r.rejected} rejected.`);
+    // Verified is what would now be grabbed for the target episode — the
+    // proof training worked. That is the number worth reporting, not a
+    // "rejected" count from a flow that no longer grades.
+    const n = (r.verified || []).length;
+    toast(`Saved. ${r.accepted} confirmed, ${n} release${n === 1 ? '' : 's'} now resolving to ep ${state.episode}.`);
     state = { active: false };
     // Training is done: the session is committed and inactive, so close the
     // modal rather than leaving an empty panel to dismiss separately.

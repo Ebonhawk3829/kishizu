@@ -199,6 +199,11 @@ func (s *Server) trainStateLocked() trainStateJSON {
 		Accepted: s.session.sess.Accepted,
 		Rejected: s.session.sess.Rejected,
 		Offsets:  s.session.sess.Offsets(),
+		// Initialised so the JSON is [] and never null: a nil slice marshals
+		// as null, and the UI maps over both fields. The session list going
+		// quiet (everything graded or asked) is a normal state, not an error.
+		Candidates: []candidateJSON{},
+		Resolved:   []candidateJSON{},
 	}
 	if s.session.show != nil {
 		st.Show = s.session.show.CanonicalName
@@ -264,9 +269,12 @@ func (s *Server) handleTrainCommit(w http.ResponseWriter, r *http.Request) {
 	s.session.active = false
 	writeJSON(w, map[string]any{
 		"committed": true,
-		"accepted":  s.session.sess.Accepted,
-		"rejected":  s.session.sess.Rejected,
-		"verified":  verified,
+		// Accepted is how many releases the user confirmed. Rejected is always
+		// zero in the current flow — training confirms parses, it does not
+		// grade — so it is kept for the API contract but not surfaced.
+		"accepted": s.session.sess.Accepted,
+		"rejected": s.session.sess.Rejected,
+		"verified": verified,
 	})
 }
 
