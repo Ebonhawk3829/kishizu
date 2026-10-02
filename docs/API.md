@@ -20,13 +20,13 @@ Liveness. Deliberately shallow — it does not touch the database or the network
 so a slow upstream cannot mark a correctly-running container unhealthy.
 
 ```json
-{"status":"ok","version":"v1.0.0"}
+{"status":"ok","version":"v1.3.6"}
 ```
 
 ### `GET /api/version`
 
 ```json
-{"version":"v1.0.0","go":"go1.27.1"}
+{"version":"v1.3.6","go":"go1.27.1"}
 ```
 
 ---
@@ -65,6 +65,12 @@ Every tracked show.
 
 `adopted` is true for a season taken from releases.moe. Such a show is never
 trained and never polled, so the UI suppresses training for it.
+
+`cadence` is the show's air weekday — `0` = Sunday through `6` = Saturday —
+taken from the animeschedule.net page. It is `null` when the show has no
+schedule page or the page does not say. kishizu uses it to project air dates a
+week at a time from the schedule's next-episode point, and the listener uses
+that projection to reject releases published before this week's air date.
 
 ### `POST /api/shows`
 
@@ -299,7 +305,7 @@ Shaped for a dashboard widget.
 ```json
 {"status":"3 to watch","ready":3,"downloading":1,"hunting":2,"missing":0,
  "upToDate":false,"next":{"show":"...","episode":18,"airs_at":"..."},
- "version":"v1.0.0","downloader_url":"http://transmission:9091/transmission/rpc"}
+ "version":"v1.3.6","downloader_url":"http://transmission:9091/transmission/rpc"}
 ```
 
 `downloader_url` is the torrent client's web address, for linking a user to
