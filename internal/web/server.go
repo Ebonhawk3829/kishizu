@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -200,6 +201,10 @@ func (s *Server) Handler() http.Handler {
 	// Dashboard summary: status plus the next air time. Smaller than /stats
 	// and shaped for a widget.
 	mux.HandleFunc("GET /api/summary", s.handleSummary)
+	// Week schedule: every episode with a known air time in a window,
+	// shaped for a dashboard grid. /api/summary only exposes the single
+	// soonest episode, which cannot answer "what airs this week".
+	mux.HandleFunc("GET /api/schedule", s.handleSchedule)
 	mux.HandleFunc("GET /api/debug", s.handleDebug)
 	// Runtime debug toggle, so verbose logging can be switched on during a
 	// live run without a restart.
@@ -561,6 +566,86 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
+}
+
+// handleSchedule serves every episode with a known air time inside a
+// window, across all tracked shows, sorted by air time.
+//
+// The window comes from ?from= and ?to= as RFC3339 timestamps, defaulting
+// to now → now+7d. A default window rather than a required parameter keeps
+// the endpoint honest from a bare curl: a schedule with no arguments should
+// mean "the coming week", not an error or an unbounded dump.
+//
+// Air times are projected weekly by the store (ProjectAirDates), so this
+// reads the database and nothing else — no schedule fetch, no network I/O.
+// A dashboard widget must render even when animeschedule is unreachable.
+//
+// The state is the same cycle.StateOf the summary uses, so a widget colors
+// "ready to watch" and "hunting" identically to the rest of the UI.
+func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+
+	from := now
+	if v := r.URL.Query().Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("from: %w", err))
+			return
+		}
+		from = t
+	}
+	to := from.Add(7 * 24 * time.Hour)
+	if v := r.URL.Query().Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("to: %w", err))
+			return
+		}
+		to = t
+	}
+	if to.Before(from) {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("to precedes from"))
+		return
+	}
+
+	shows, err := s.st.ListShows()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	type entry struct {
+		Show    string      `json:"show"`
+		Episode int         `json:"episode"`
+		AirsAt  string      `json:"airs_at"`
+		State   cycle.State `json:"state"`
+	}
+	eps := []entry{}
+	for _, sh := range shows {
+		showEps, err := s.st.EpisodesForShow(sh.ID)
+		if err != nil {
+			continue
+		}
+		for _, ep := range showEps {
+			if ep.AirsAt == nil || ep.AirsAt.Before(from) || ep.AirsAt.After(to) {
+				continue
+			}
+			eps = append(eps, entry{
+				Show:    sh.CanonicalName,
+				Episode: ep.Number,
+				AirsAt:  ep.AirsAt.Format(time.RFC3339),
+				State:   cycle.StateOf(ep, now),
+			})
+		}
+	}
+	sort.Slice(eps, func(i, j int) bool { return eps[i].AirsAt < eps[j].AirsAt })
+
+	writeJSON(w, map[string]any{
+		"from":     from.Format(time.RFC3339),
+		"to":       to.Format(time.RFC3339),
+		"count":    len(eps),
+		"episodes": eps,
+	})
 }
 
 // handleStats summarises episode state for a homepage widget.
