@@ -290,8 +290,6 @@ var (
 	reTileTitle = regexp.MustCompile(`<h2 class="anime-tile-title"[^>]*>([^<]+)</h2>`)
 	reTileImg   = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 	reTileTime  = regexp.MustCompile(`<time[^>]+datetime="([^"]+)"`)
-	// The page inlines its CSS, which repeats the tile class names.
-	reStyleBlock = regexp.MustCompile(`(?s)<style.*?</style>`)
 )
 
 // FetchTimetable retrieves the seasonal timetable.
@@ -341,7 +339,7 @@ func ParseTimetable(r interface{ Read([]byte) (int, error) }) (*Timetable, error
 
 func parseTimetableString(page string) (*Timetable, error) {
 	// Strip style blocks first: the page inlines its CSS, which contains the
-        // same class names as the markup.
+	// same class names as the markup.
 	type tile struct {
 		slug string
 		pos  int

@@ -142,7 +142,6 @@ func TestUntrainedShowIsDueOnceTrained(t *testing.T) {
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 
-
 	l := New(st, nil)
 	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
 		t.Fatal("untrained show should not be due")

@@ -242,10 +242,10 @@ func (s *Store) addColumns() error {
 
 // Show is a tracked show with everything the matcher needs.
 type Show struct {
-	ID             int64
-	CanonicalName  string
-	MaxEpisode     int
-	Source         string
+	ID            int64
+	CanonicalName string
+	MaxEpisode    int
+	Source        string
 	// ImageURL is the season's cover art from the schedule, for the UI.
 	ImageURL string
 	// Slug is the animeschedule.net slug, an exact identity for the show on

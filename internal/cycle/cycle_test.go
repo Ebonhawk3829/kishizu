@@ -36,8 +36,8 @@ func TestStateCycle(t *testing.T) {
 		{"downloaded is ready to watch", ep(episode.Downloaded), at(-time.Hour), ReadyToWatch},
 		{"wanted before anchor is up to date", ep(episode.Wanted), at(time.Hour), UpToDate},
 		{"wanted just after anchor is hunting", ep(episode.Wanted), at(-time.Hour), Hunting},
-		{"wanted near window edge is hunting", ep(episode.Wanted), at(-Window+time.Minute), Hunting},
-		{"wanted past window is no release found", ep(episode.Wanted), at(-Window-time.Minute), NoReleaseFound},
+		{"wanted near window edge is hunting", ep(episode.Wanted), at(-Window + time.Minute), Hunting},
+		{"wanted past window is no release found", ep(episode.Wanted), at(-Window - time.Minute), NoReleaseFound},
 		{"wanted with no anchor is hunting", ep(episode.Wanted), nil, Hunting},
 		// Downloading is its own state, not a form of hunting: the episode
 		// is in flight and cannot be re-grabbed, so claiming the listener
