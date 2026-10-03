@@ -241,3 +241,31 @@ func TestVersionSuffixStillReadsEpisode(t *testing.T) {
 		t.Errorf("Why = %q, should mention the version", classes[0].Why)
 	}
 }
+
+// TestSceneStylePackClassifies: Western remux groups name files in scene
+// style — dots for spaces, SxxEyy episode tags, no " - " separator. A pack
+// like that used to classify as zero episodes and no title, leaving the
+// review screen with all-unchecked rows and "(no title)". The fixture is the
+// real CRUCiBLE entry for Trapped in a Dating Sim (AniList 142074).
+func TestSceneStylePackClassifies(t *testing.T) {
+	e := loadFixture(t, "entry_142074.json")
+	p, err := PlanEntry(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Title != "Trapped in a Dating Sim" {
+		t.Errorf("DeriveTitle() = %q, want %q", p.Title, "Trapped in a Dating Sim")
+	}
+	if p.MaxEpisode != 12 {
+		t.Errorf("MaxEpisode = %d, want 12", p.MaxEpisode)
+	}
+	for _, c := range p.Files {
+		if !c.Include {
+			t.Errorf("%q not included: %s", c.Name, c.Why)
+			continue
+		}
+		if c.Episode < 1 || c.Episode > 12 {
+			t.Errorf("%q episode = %d, want 1..12", c.Name, c.Episode)
+		}
+	}
+}

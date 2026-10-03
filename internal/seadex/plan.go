@@ -29,6 +29,14 @@ var reExtra = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(` +
 // last " - " separator, with an optional version suffix (01v2).
 var reEpisode = regexp.MustCompile(`^(.*?)\s+-\s+(\d{1,3})(v\d+)?\b`)
 
+// reSeasonEpisode reads the episode number from scene-style filenames, where
+// dots replace spaces and the episode is tagged SxxEyy: "Title.S01E01.Ep.Name.
+// 1080p.BluRay.mkv". SeaDex entries carry both naming conventions — fanout
+// groups keep the " - " separator, Western remux groups (CRUCiBLE and friends)
+// use the scene style — and a pack in the second style read as zero episodes
+// and no title before this pattern existed.
+var reSeasonEpisode = regexp.MustCompile(`(?i)S\d{1,2}E(\d{1,3})(v\d+)?\b`)
+
 // FileClass is what the classifier thinks one file is.
 type FileClass struct {
 	// Name is the original filename, unmodified.
@@ -83,6 +91,18 @@ func ClassifyFiles(files []File) []FileClass {
 				continue
 			}
 		}
+		if m := reSeasonEpisode.FindStringSubmatch(body); m != nil {
+			n, err := strconv.Atoi(m[1])
+			if err == nil {
+				out = append(out, FileClass{
+					Name:    f.Name,
+					Episode: n,
+					Include: true,
+					Why:     "episode " + m[1] + m[2],
+				})
+				continue
+			}
+		}
 		out = append(out, FileClass{
 			Name:    f.Name,
 			Include: false,
@@ -120,6 +140,11 @@ func stripDecorations(name string) string {
 // DeriveTitle recovers the show title from the classified files: the text
 // before the episode separator, which every file in a pack shares.
 //
+// Scene-style names ("Title.S01E01.Ep.Name...") have no separator, so the
+// title is the text before the SxxEyy tag with dots read as spaces. Both
+// styles must agree per file before its title counts, or a mixed pack would
+// vote a fragment in.
+//
 // Returns "" when no file yielded a title, in which case the caller should
 // ask the user rather than invent one.
 func DeriveTitle(classes []FileClass) string {
@@ -132,6 +157,15 @@ func DeriveTitle(classes []FileClass) string {
 		body := reMedia.ReplaceAllString(s, "")
 		if m := reEpisode.FindStringSubmatch(body); m != nil {
 			t := strings.TrimSpace(m[1])
+			if t != "" {
+				counts[t]++
+			}
+			continue
+		}
+		if loc := reSeasonEpisode.FindStringIndex(body); loc != nil {
+			t := strings.TrimSpace(body[:loc[0]])
+			t = strings.ReplaceAll(t, ".", " ")
+			t = strings.Join(strings.Fields(t), " ")
 			if t != "" {
 				counts[t]++
 			}
