@@ -1,0 +1,438 @@
+{
+"page": 1,
+"perPage": 1,
+"totalItems": 1,
+"totalPages": 1,
+"items": [
+{
+"alID": 142074,
+"collectionId": "3l2x9nxip35gqb5",
+"collectionName": "entries",
+"comparison": "https://slow.pics/c/eVhfND3a,https://slow.pics/c/zZeI0Y6n",
+"created": "2025-03-19 14:37:00.212Z",
+"expand": {
+"trs": [
+{
+"collectionId": "oiwizhmushn5qqh",
+"collectionName": "torrents",
+"created": "2025-04-12 15:28:51.114Z",
+"dualAudio": true,
+"files": [
+{
+"length": 5624149544,
+"name": "Trapped.in.a.Dating.Sim.S01E01.I.Hate.This.World.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5690884229,
+"name": "Trapped.in.a.Dating.Sim.S01E02.Hey.Girl.Wanna.Get.Some.Tea.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5692705605,
+"name": "Trapped.in.a.Dating.Sim.S01E03.Let's.Duel.Prince.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5720181338,
+"name": "Trapped.in.a.Dating.Sim.S01E04.Mind.If.I.Go.Easy.on.You.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5682793578,
+"name": "Trapped.in.a.Dating.Sim.S01E05.It's.Awesome.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5692692953,
+"name": "Trapped.in.a.Dating.Sim.S01E06.My.First.School.Festival.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5686250021,
+"name": "Trapped.in.a.Dating.Sim.S01E07.We.Both.Hate.Hot.Guys.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7010579584,
+"name": "Trapped.in.a.Dating.Sim.S01E08.This.Isn't.a.Game.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7024172780,
+"name": "Trapped.in.a.Dating.Sim.S01E09.She's.a.Doormat.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7009407118,
+"name": "Trapped.in.a.Dating.Sim.S01E10.Unlike.You.Wannabe.Nobles.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7049034007,
+"name": "Trapped.in.a.Dating.Sim.S01E11.What.I.Can.Do.Now.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7075124052,
+"name": "Trapped.in.a.Dating.Sim.S01E12.No.Matter.How.Tough.The.World.of.Otome.Games.Is.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+}
+],
+"groupedUrl": "",
+"id": "qqcn5hk9fijmt5q",
+"infoHash": "e211e5d1e227cb4a1a45907378723bd35cbc30ce",
+"isBest": true,
+"releaseGroup": "CRUCiBLE",
+"tags": [],
+"tracker": "Nyaa",
+"updated": "2025-07-25 13:59:51.306Z",
+"url": "https://nyaa.si/view/1958847"
+},
+{
+"collectionId": "oiwizhmushn5qqh",
+"collectionName": "torrents",
+"created": "2025-04-12 15:28:51.247Z",
+"dualAudio": true,
+"files": [
+{
+"length": 5624149544,
+"name": "Trapped.in.a.Dating.Sim.S01E01.I.Hate.This.World.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5690884229,
+"name": "Trapped.in.a.Dating.Sim.S01E02.Hey.Girl.Wanna.Get.Some.Tea.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5692705605,
+"name": "Trapped.in.a.Dating.Sim.S01E03.Let's.Duel.Prince.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5720181338,
+"name": "Trapped.in.a.Dating.Sim.S01E04.Mind.If.I.Go.Easy.on.You.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5682793578,
+"name": "Trapped.in.a.Dating.Sim.S01E05.It's.Awesome.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5692692953,
+"name": "Trapped.in.a.Dating.Sim.S01E06.My.First.School.Festival.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 5686250021,
+"name": "Trapped.in.a.Dating.Sim.S01E07.We.Both.Hate.Hot.Guys.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7010579584,
+"name": "Trapped.in.a.Dating.Sim.S01E08.This.Isn't.a.Game.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7024172780,
+"name": "Trapped.in.a.Dating.Sim.S01E09.She's.a.Doormat.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7009407118,
+"name": "Trapped.in.a.Dating.Sim.S01E10.Unlike.You.Wannabe.Nobles.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7049034007,
+"name": "Trapped.in.a.Dating.Sim.S01E11.What.I.Can.Do.Now.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+},
+{
+"length": 7075124052,
+"name": "Trapped.in.a.Dating.Sim.S01E12.No.Matter.How.Tough.The.World.of.Otome.Games.Is.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"
+}
+],
+"groupedUrl": "",
+"id": "eq5zmz9ejm3pm60",
+"infoHash": "<redacted>",
+"isBest": true,
+"releaseGroup": "CRUCiBLE",
+"tags": [],
+"tracker": "AB",
+"updated": "2025-07-25 13:59:51.371Z",
+"url": "/torrents.php?id=75860&torrentid=1166203"
+},
+{
+"collectionId": "oiwizhmushn5qqh",
+"collectionName": "torrents",
+"created": "2025-07-07 19:12:03.949Z",
+"dualAudio": true,
+"files": [
+{
+"length": 1032416153,
+"name": "Trapped.in.a.Dating.Sim.S01E01.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 783786143,
+"name": "Trapped.in.a.Dating.Sim.S01E02.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 720863754,
+"name": "Trapped.in.a.Dating.Sim.S01E03.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 884762392,
+"name": "Trapped.in.a.Dating.Sim.S01E04.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 853383461,
+"name": "Trapped.in.a.Dating.Sim.S01E05.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 776797787,
+"name": "Trapped.in.a.Dating.Sim.S01E06.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 925091751,
+"name": "Trapped.in.a.Dating.Sim.S01E07.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 733595116,
+"name": "Trapped.in.a.Dating.Sim.S01E08.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 777251935,
+"name": "Trapped.in.a.Dating.Sim.S01E09.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 827315114,
+"name": "Trapped.in.a.Dating.Sim.S01E10.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 1069780982,
+"name": "Trapped.in.a.Dating.Sim.S01E11.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 913205322,
+"name": "Trapped.in.a.Dating.Sim.S01E12.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+}
+],
+"groupedUrl": "",
+"id": "gv5cnu2weuweens",
+"infoHash": "<redacted>",
+"isBest": false,
+"releaseGroup": "Headpatter",
+"tags": [],
+"tracker": "AB",
+"updated": "2025-07-25 13:59:51.477Z",
+"url": "/torrents.php?id=75860&torrentid=1178712"
+},
+{
+"collectionId": "oiwizhmushn5qqh",
+"collectionName": "torrents",
+"created": "2025-03-19 14:36:59.965Z",
+"dualAudio": false,
+"files": [
+{
+"length": 1226858464,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 11 [Blu-ray 1080p Hi10P FLAC][54F9729B].mkv"
+},
+{
+"length": 1198179910,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 01 [Blu-ray 1080p Hi10P FLAC][425B9B0B].mkv"
+},
+{
+"length": 1068669314,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 12 [Blu-ray 1080p Hi10P FLAC][B207AC74].mkv"
+},
+{
+"length": 1060684401,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 07 [Blu-ray 1080p Hi10P FLAC][AA50B57D].mkv"
+},
+{
+"length": 1032336085,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 04 [Blu-ray 1080p Hi10P FLAC][79CD04C9].mkv"
+},
+{
+"length": 985273150,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 05 [Blu-ray 1080p Hi10P FLAC][A5366BD4].mkv"
+},
+{
+"length": 966053452,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 10 [Blu-ray 1080p Hi10P FLAC][5C93DD99].mkv"
+},
+{
+"length": 921636459,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 02 [Blu-ray 1080p Hi10P FLAC][2242C6A4].mkv"
+},
+{
+"length": 915906319,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 09 [Blu-ray 1080p Hi10P FLAC][105901D1].mkv"
+},
+{
+"length": 911880948,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 06 [Blu-ray 1080p Hi10P FLAC][1086DE39].mkv"
+},
+{
+"length": 865060614,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 08 [Blu-ray 1080p Hi10P FLAC][1F03B45F].mkv"
+},
+{
+"length": 856342443,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 03 [Blu-ray 1080p Hi10P FLAC][851562A2].mkv"
+},
+{
+"length": 106511869,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu OP [Blu-ray 1080p Hi10P FLAC][7D373547].mkv"
+},
+{
+"length": 58193679,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu ED [Blu-ray 1080p Hi10P FLAC][9A4653AB].mkv"
+}
+],
+"groupedUrl": "",
+"id": "3soqgj7js5wge7s",
+"infoHash": "4c2bf2137ea62d5f3f63421095d5f3152e83e0a5",
+"isBest": false,
+"releaseGroup": "Chihiro",
+"tags": [],
+"tracker": "Nyaa",
+"updated": "2025-07-25 13:59:51.542Z",
+"url": "https://nyaa.si/view/1619916"
+},
+{
+"collectionId": "oiwizhmushn5qqh",
+"collectionName": "torrents",
+"created": "2025-03-19 14:37:00.099Z",
+"dualAudio": false,
+"files": [
+{
+"length": 1226858464,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 11 [Blu-ray 1080p Hi10P FLAC][54F9729B].mkv"
+},
+{
+"length": 1198179910,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 01 [Blu-ray 1080p Hi10P FLAC][425B9B0B].mkv"
+},
+{
+"length": 1068669314,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 12 [Blu-ray 1080p Hi10P FLAC][B207AC74].mkv"
+},
+{
+"length": 1060684401,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 07 [Blu-ray 1080p Hi10P FLAC][AA50B57D].mkv"
+},
+{
+"length": 1032336085,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 04 [Blu-ray 1080p Hi10P FLAC][79CD04C9].mkv"
+},
+{
+"length": 985273150,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 05 [Blu-ray 1080p Hi10P FLAC][A5366BD4].mkv"
+},
+{
+"length": 966053452,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 10 [Blu-ray 1080p Hi10P FLAC][5C93DD99].mkv"
+},
+{
+"length": 921636459,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 02 [Blu-ray 1080p Hi10P FLAC][2242C6A4].mkv"
+},
+{
+"length": 915906319,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 09 [Blu-ray 1080p Hi10P FLAC][105901D1].mkv"
+},
+{
+"length": 911880948,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 06 [Blu-ray 1080p Hi10P FLAC][1086DE39].mkv"
+},
+{
+"length": 865060614,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 08 [Blu-ray 1080p Hi10P FLAC][1F03B45F].mkv"
+},
+{
+"length": 856342443,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu 03 [Blu-ray 1080p Hi10P FLAC][851562A2].mkv"
+},
+{
+"length": 106511869,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu OP [Blu-ray 1080p Hi10P FLAC][7D373547].mkv"
+},
+{
+"length": 58193679,
+"name": "[Chihiro] Otome Game Sekai wa Mob ni Kibishii Sekai desu ED [Blu-ray 1080p Hi10P FLAC][9A4653AB].mkv"
+}
+],
+"groupedUrl": "",
+"id": "hzky67c4qq6d4bv",
+"infoHash": "<redacted>",
+"isBest": false,
+"releaseGroup": "Chihiro",
+"tags": [],
+"tracker": "AB",
+"updated": "2025-07-25 13:59:51.603Z",
+"url": "/torrents.php?id=75860&torrentid=1018926"
+},
+{
+"collectionId": "oiwizhmushn5qqh",
+"collectionName": "torrents",
+"created": "2025-07-25 13:59:51.721Z",
+"dualAudio": true,
+"files": [
+{
+"length": 1032416153,
+"name": "Trapped.in.a.Dating.Sim.S01E01.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 783786143,
+"name": "Trapped.in.a.Dating.Sim.S01E02.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 720863754,
+"name": "Trapped.in.a.Dating.Sim.S01E03.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 884762392,
+"name": "Trapped.in.a.Dating.Sim.S01E04.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 853383461,
+"name": "Trapped.in.a.Dating.Sim.S01E05.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 776797787,
+"name": "Trapped.in.a.Dating.Sim.S01E06.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 925091751,
+"name": "Trapped.in.a.Dating.Sim.S01E07.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 733595116,
+"name": "Trapped.in.a.Dating.Sim.S01E08.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 777251935,
+"name": "Trapped.in.a.Dating.Sim.S01E09.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 827315114,
+"name": "Trapped.in.a.Dating.Sim.S01E10.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 1069780982,
+"name": "Trapped.in.a.Dating.Sim.S01E11.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+},
+{
+"length": 913205322,
+"name": "Trapped.in.a.Dating.Sim.S01E12.1080p.Bluray.Dual-Audio.Opus.2.0.10Bit.x264-Headpatter.mkv"
+}
+],
+"groupedUrl": "",
+"id": "lm4lpdqkfr01o3u",
+"infoHash": "b8a9e854b7582df130a0c2d5175aca67eaee87e6",
+"isBest": false,
+"releaseGroup": "Headpatter",
+"tags": [],
+"tracker": "Nyaa",
+"updated": "2025-07-25 13:59:51.721Z",
+"url": "https://nyaa.si/view/1997722"
+}
+]
+},
+"id": "5bitcess3mhpk4b",
+"incomplete": false,
+"notes": "CRUCiBLE is USA BD Remux+Chihiro, PGS and CR\nChihiro is blurmaxxed JPN BD Encode, video sucks but there's no other releases using their BD subs\nHeadpatter is Chihiro with dub, PGS, and CR\nThe JPN BD has very strong lowpassing for some scenes, USA is perfectly fine despite being from CR",
+"theoreticalBest": "",
+"trs": [
+"qqcn5hk9fijmt5q",
+"eq5zmz9ejm3pm60",
+"gv5cnu2weuweens",
+"3soqgj7js5wge7s",
+"hzky67c4qq6d4bv",
+"lm4lpdqkfr01o3u"
+],
+"updated": "2025-07-25 13:59:51.801Z"
+}
+]
+}
