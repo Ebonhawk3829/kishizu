@@ -569,6 +569,21 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 	return err
 }
 
+// ClearNextEpisode removes the stored anchor entirely.
+//
+// A page with no countdown and no episode number is not "keep whatever we
+// had" — it is the site saying it has no air information. Leaving a stale
+// anchor in place freezes it: the refresh only writes when the page publishes
+// a countdown, so a bogus row (an "Ep 0" premiere countdown captured mid-site-
+// update) would otherwise never be corrected and the UI would go on reporting
+// a premiere that the site itself no longer mentions. NULL is the honest
+// value: the show reads as unscheduled until the page publishes a real one.
+func (s *Store) ClearNextEpisode(showID int64) error {
+	_, err := s.db.Exec(`UPDATE show SET next_ep = NULL, next_airs_at = NULL,
+		schedule_fetched_at = datetime('now') WHERE id = ?`, showID)
+	return err
+}
+
 // nullIfEmpty maps an empty string to SQL NULL, so "unknown" stays
 // distinguishable from "known to be empty".
 func nullIfEmpty(s string) any {

@@ -248,11 +248,37 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 				}
 				updated++
 			} else {
-				// No countdown on the page: the season has finished. This is
-				// the page saying so directly, rather than absence from a
-				// weekly timetable — which is also true of breaks, premieres
-				// and hiatuses, and stripping art for those would be wrong.
+				// No countdown on the page. Two cases share this branch and
+				// they need opposite handling of a stored anchor:
+				//
+				// A finished season has no countdown because nothing is next —
+				// the page's Status says so directly, and the anchor is left
+				// alone: it still records the last episode's slot, and stripping
+				// art or history for a finished season would be wrong.
+				//
+				// An upcoming or hiatused show also has no countdown, but here
+				// a stored anchor is a liability: the refresh only writes when
+				// the page publishes one, so a stale row (an "Ep 0" premiere
+				// countdown captured mid-site-update) would be frozen forever
+				// while the site itself no longer mentions it. The page's own
+				// Status distinguishes the cases — only a non-finished show
+				// gets its anchor cleared, because only there is the anchor
+				// claiming something the page no longer says.
 				finished++
+				// The anchor check goes through NextEpisode rather than the
+				// Show struct: ListShows does not load the anchor columns,
+				// and widening GetShow for one caller would cost a query on
+				// every show load.
+				if !sh.Finished() {
+					if n, _, err := st.NextEpisode(sh.ID); err == nil && n > 0 {
+						if err := st.ClearNextEpisode(sh.ID); err != nil {
+							log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+						} else {
+							log.Printf("schedule refresh: %s: cleared stale anchor (page has no countdown)",
+								sh.CanonicalName)
+						}
+					}
+				}
 			}
 			if info.ImageURL != "" && info.ImageURL != sh.ImageURL {
 				_ = st.SetImageURL(sh.ID, info.ImageURL)

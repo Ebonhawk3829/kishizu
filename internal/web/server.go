@@ -1387,11 +1387,19 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			// Episode 1 specifically — not the next unwatched one. Mid-way
 			// through a season the next episode is always in the future, which
 			// made every airing show read as unaired.
-			aired := (anchorEp <= 1 && anchorAt != nil && !anchorAt.After(time.Now())) ||
+			//
+			// anchorEp >= 1, not <= 1: the anchor is 1-based, so a stored 0 is
+			// corruption (a pre-clamp "Ep 0" premiere countdown), not an early
+			// episode. Treating 0 as aired would flag a show whose premiere
+			// the site no longer even lists as needing training.
+			aired := (anchorEp == 1 && anchorAt != nil && !anchorAt.After(time.Now())) ||
 				j.Downloaded > 0 || j.Watched > 0 || j.Deleted > 0
 			j.State, j.NeedsAttention = showState(states, j.Trained, aired, sh.Source == store.SourceSeaDex, sh.Finished())
 		}
-		if anchorAt != nil {
+		// A 0 anchor is corruption, not a schedule (see the aired calculation
+		// above): serving it would render an "Ep 0" line for a premiere the
+		// site does not list. Nothing is the honest value.
+		if anchorAt != nil && anchorEp >= 1 {
 			status := "upcoming"
 			if anchorAt.Before(time.Now()) {
 				status = "aired"
