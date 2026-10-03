@@ -26,7 +26,10 @@ import (
 const URL = "https://releases.moe"
 
 // API is the PocketBase REST root.
-const API = URL + "/api/collections"
+//
+// A variable rather than a constant so tests can point it at a stub, the
+// same way anilist.Endpoint is.
+var API = URL + "/api/collections"
 
 // Entry is one SeaDex record: a finished show and the torrents judged best
 // for it.

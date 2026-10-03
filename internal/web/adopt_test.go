@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Ebonhawk3829/kishizu/internal/anilist"
 	"github.com/Ebonhawk3829/kishizu/internal/download"
+	"github.com/Ebonhawk3829/kishizu/internal/seadex"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -136,5 +138,74 @@ func TestAdoptDisabledWithoutConfig(t *testing.T) {
 	})
 	if rec.Code != http.StatusNotImplemented {
 		t.Errorf("status = %d, want 501: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAdoptPreviewPrefersAniListTitle: the entry page displays the title
+// right next to the torrent list, so the preview should carry that name —
+// authoritative — rather than one parsed out of the release's filenames,
+// which follow a group's naming scheme rather than any contract. The
+// filename-derived title is only the fallback for when AniList cannot be
+// reached.
+func TestAdoptPreviewPrefersAniListTitle(t *testing.T) {
+	srv, _ := testServerWithAdopt(t)
+
+	// Stub SeaDex with a scene-style pack whose filenames would derive a
+	// different title than AniList's.
+	seadexSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"items": [{
+				"alID": 142074,
+				"incomplete": false,
+				"theoreticalBest": "",
+				"notes": "",
+				"expand": {"trs": [{
+					"infoHash": "e211e5d1e227cb4a1a45907378723bd35cbc30ce",
+					"url": "https://nyaa.si/view/1958847",
+					"tracker": "Nyaa",
+					"releaseGroup": "CRUCiBLE",
+					"isBest": true,
+					"dualAudio": true,
+					"tags": [],
+					"files": [
+						{"name": "Trapped.in.a.Dating.Sim.S01E01.I.Hate.This.World.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"},
+						{"name": "Trapped.in.a.Dating.Sim.S01E02.Hey.Girl.Wanna.Get.Some.Tea.1080p.BluRay.Remux.Dual-Audio.FLAC2.0.H.264-CRUCiBLE.mkv"}
+					]
+				}]}
+			}]
+		}`))
+	}))
+	defer seadexSrv.Close()
+
+	anilistSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":{"Media":{"id":142074,"title":{"english":"Trapped in a Dating Sim: The World of Otome Games Is Tough for Mobs"}}}}`))
+	}))
+	defer anilistSrv.Close()
+
+	oldAPI, oldEndpoint := seadex.API, anilist.Endpoint
+	seadex.API = seadexSrv.URL + "/api/collections"
+	anilist.Endpoint = anilistSrv.URL
+	defer func() { seadex.API, anilist.Endpoint = oldAPI, oldEndpoint }()
+
+	rec := postJSON(t, srv, "/api/adopt/preview", map[string]string{"url": "https://releases.moe/142074/"})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Title string `json:"title"`
+		Files []struct {
+			Episode int  `json:"episode"`
+			Include bool `json:"include"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	want := "Trapped in a Dating Sim: The World of Otome Games Is Tough for Mobs"
+	if out.Title != want {
+		t.Errorf("title = %q, want the AniList title %q", out.Title, want)
+	}
+	if len(out.Files) != 2 || !out.Files[0].Include || out.Files[0].Episode != 1 {
+		t.Errorf("files = %+v, want two pre-assigned episodes", out.Files)
 	}
 }

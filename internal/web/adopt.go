@@ -82,8 +82,22 @@ func (s *Server) handleAdoptPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The title comes from AniList, not from the filenames. The entry page
+	// displays it right next to the torrent list, so it is the name the user
+	// is looking at when they paste the link, and it is authoritative in a
+	// way filename parsing can never be — a remux group's naming scheme is
+	// nobody's contract. The filename-derived title stays as the fallback
+	// for when AniList is unreachable or has no English title: a guessable
+	// name beats an empty field on the review screen.
+	title := plan.Title
+	if m, err := anilist.New().FetchMedia(id); err != nil {
+		log.Printf("adopt: anilist title lookup: %v", err)
+	} else if m != nil && m.Title != "" {
+		title = m.Title
+	}
+
 	out := adoptPreview{
-		Title:           plan.Title,
+		Title:           title,
 		Release:         plan.Torrent.ReleaseGroup,
 		Tracker:         plan.Torrent.Tracker,
 		InfoHash:        plan.Torrent.InfoHash,

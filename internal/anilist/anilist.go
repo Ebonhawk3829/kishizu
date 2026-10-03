@@ -30,6 +30,8 @@ var Endpoint = "https://graphql.anilist.co"
 type Media struct {
 	// ID is the AniList media id, which is also a SeaDex entry's URL path.
 	ID int
+	// Title is the English title. Empty when AniList has none.
+	Title string
 	// CoverURL is the large cover image. Empty when AniList has none.
 	CoverURL string
 }
@@ -55,6 +57,7 @@ func (c *Client) FetchMedia(id int) (*Media, error) {
 	query := `query ($id: Int) {
 		Media(id: $id, type: ANIME) {
 			id
+			title { english }
 			coverImage { large }
 		}
 	}`
@@ -81,7 +84,10 @@ func (c *Client) FetchMedia(id int) (*Media, error) {
 type mediaResponse struct {
 	Data struct {
 		Media *struct {
-			ID         int `json:"id"`
+			ID    int `json:"id"`
+			Title struct {
+				English string `json:"english"`
+			} `json:"title"`
 			CoverImage struct {
 				Large string `json:"large"`
 			} `json:"coverImage"`
@@ -102,5 +108,5 @@ func ParseMedia(r io.Reader) (*Media, error) {
 	if m == nil {
 		return nil, nil
 	}
-	return &Media{ID: m.ID, CoverURL: m.CoverImage.Large}, nil
+	return &Media{ID: m.ID, Title: m.Title.English, CoverURL: m.CoverImage.Large}, nil
 }
