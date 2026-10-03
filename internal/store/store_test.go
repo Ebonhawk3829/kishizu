@@ -279,22 +279,6 @@ func TestUnlatchOnInFlightIsNoOp(t *testing.T) {
 	}
 }
 
-func TestEpisodesByState(t *testing.T) {
-	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
-	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloaded, "h1", "t1")
-	_ = s.UpsertEpisode(sh.ID, 2, episode.Downloaded, "h2", "t2")
-	_ = s.UpsertEpisode(sh.ID, 3, episode.Watched, "h3", "t3")
-
-	got, err := s.EpisodesByState(episode.Downloaded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Errorf("got %d downloaded, want 2", len(got))
-	}
-}
-
 // The matcher adapter lives in internal/adapt, along with these tests: the
 // persistence layer must not import the domain logic it is meant to be
 // decoupled from.

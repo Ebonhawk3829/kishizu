@@ -42,7 +42,7 @@ func TestAdoptedEpisodeStatesRender(t *testing.T) {
 		if err != nil || ep == nil {
 			t.Fatalf("episode for state %s: %v", s, err)
 		}
-		if got := cycle.StateOf(ep, time.Now()); got != want {
+		if got := cycle.StateOf(ep, nil, time.Now()); got != want {
 			t.Errorf("state %s with no air date renders as %q, want %q", s, got, want)
 		}
 	}

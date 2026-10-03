@@ -370,7 +370,7 @@ func TestTimetableMarksTracked(t *testing.T) {
 	}
 	// Seed the cache directly: the point of this test is the marking, not
 	// the fetching.
-	if err := c.Seed(&schedule.Timetable{
+	if err := c.SeedForTest(&schedule.Timetable{
 		Fetched: time.Now(),
 		Entries: []schedule.Entry{
 			{Slug: "tracked-show", Title: "Tracked Show"},
@@ -435,7 +435,7 @@ func TestTimetableReturnsTheWholeList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Seed(&schedule.Timetable{
+	if err := c.SeedForTest(&schedule.Timetable{
 		Fetched: time.Now(),
 		Entries: []schedule.Entry{
 			{Slug: "a", Title: "Alpha"},
@@ -479,7 +479,7 @@ func TestTimetableFilterNarrows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Seed(&schedule.Timetable{
+	if err := c.SeedForTest(&schedule.Timetable{
 		Fetched: time.Now(),
 		Entries: []schedule.Entry{
 			{Slug: "a", Title: "Alpha"},

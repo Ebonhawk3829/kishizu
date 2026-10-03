@@ -201,7 +201,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	refreshSchedule := func() {
 		shows, err := st.ListShows()
 		if err != nil {
-			// The refresh is what moves air dates when a show is delayed; a
+			// The refresh is what moves the anchor when a show is delayed; a
 			// silent no-op here means every hunt window drifts on stale
 			// timing with no signal. Logged even though the caller retries
 			// tomorrow, because a systemic failure should be visible.
@@ -243,10 +243,6 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			}
 			if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
-					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
-					continue
-				}
-				if err := st.ProjectAirDates(sh.ID); err != nil {
 					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 					continue
 				}

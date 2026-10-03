@@ -1,7 +1,8 @@
 // Package release parses Nyaa release titles into structured fields.
 //
-// The logic is deliberately dumb: regex extraction plus integer arithmetic. All
-// the intelligence lives in the alias list and the per-group offsets, not here.
+// The logic is intentionally simple: regex extraction plus integer
+// arithmetic. All the intelligence lives in the alias list and the per-group
+// offsets, not here.
 package release
 
 import (
@@ -51,11 +52,10 @@ var (
 	// it the whole release reads as having no episode at all — it can never
 	// be grabbed, and the reason in the log is "episode unreadable".
 	//
-	// This is a pattern rather than a vocabulary entry deliberately. The
-	// vocabulary maps one token to one value, and 第N话 is a different token
-	// for every episode: teaching 第3话 teaches episode 3 and nothing else.
-	// A pattern generalises across every episode, which is what a numbering
-	// convention needs.
+	// A pattern, not a vocabulary entry: the vocabulary maps one token to one
+	// value, and 第N话 is a different token for every episode — teaching
+	// 第3话 teaches episode 3 and nothing else. A pattern generalises across
+	// every episode, which is what a numbering convention needs.
 	reChineseEpisode = regexp.MustCompile(`第\s*(\d{1,4})\s*话`)
 	reSeasonWord     = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)\s+season\b|\bseason\s+(\d{1,2})\b`)
 	reResolution     = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k)\b`)

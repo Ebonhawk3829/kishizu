@@ -48,13 +48,3 @@ var Baseline = []Group{
 	{Name: "Chihiro"},
 	{Name: "AnimeRG"},
 }
-
-// Recommended reports whether a group carries the recommended flag.
-func Recommended(name string) bool {
-	for _, g := range Baseline {
-		if g.Name == name {
-			return g.Recommended
-		}
-	}
-	return false
-}

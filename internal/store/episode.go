@@ -30,10 +30,6 @@ type Episode struct {
 	InfoHash     string
 	ReleaseTitle string
 	FilePath     string
-	// AirsAt is when this episode is expected to air, projected from the
-	// schedule. Nil when unknown. Distinguishes "hasn't aired yet" from
-	// "should have aired but untouched".
-	AirsAt       *time.Time
 	DownloadedAt *time.Time
 	WatchedAt    *time.Time
 }
@@ -42,13 +38,13 @@ type Episode struct {
 // which is the normal case for an episode we have never seen.
 func (s *Store) GetEpisode(showID int64, number int) (*Episode, error) {
 	row := s.db.QueryRow(`SELECT show_id, number, state, infohash, release_title,
-		file_path, airs_at, downloaded_at, watched_at FROM episode WHERE show_id = ? AND number = ?`,
+		file_path, downloaded_at, watched_at FROM episode WHERE show_id = ? AND number = ?`,
 		showID, number)
 
 	var e Episode
 	var state, hash, title, path sql.NullString
-	var airs, dl, watched sql.NullString
-	err := row.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched)
+	var dl, watched sql.NullString
+	err := row.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &dl, &watched)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -59,7 +55,6 @@ func (s *Store) GetEpisode(showID int64, number int) (*Episode, error) {
 	e.InfoHash = hash.String
 	e.ReleaseTitle = title.String
 	e.FilePath = path.String
-	e.AirsAt = parseTime(airs)
 	e.DownloadedAt = parseTime(dl)
 	e.WatchedAt = parseTime(watched)
 	return &e, nil
@@ -115,8 +110,8 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 	case episode.Watched:
 		q += `, watched_at = datetime('now')`
 	case episode.Deleted:
-		// Clear the path: the file is gone, and a stale path would make the
-		// UI show something that no longer exists.
+		// Clear the path: the file is gone, and the UI must not show a file
+		// that no longer exists.
 		q += `, file_path = NULL`
 	}
 	if infohash != "" {
@@ -137,12 +132,12 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 // MarkWatchedUpTo latches episodes 1..n as watched.
 //
 // For a first run of a newly added show: the user has already seen earlier
-// episodes, and without this the listener would grab everything from episode
-// 1. Watched is terminal, so those episodes are never grabbed.
+// episodes, and marking them keeps the listener from grabbing them again.
+// Watched is terminal, so those episodes are never grabbed.
 //
 // By default it skips episodes that are downloading: re-latching something
-// genuinely in flight would be surprising. But a download can get stuck —
-// no seeders, or a torrent that never completes — and then the user cannot
+// genuinely in flight is surprising. But a download can get stuck — no
+// seeders, or a torrent that never completes — and then the user cannot
 // record that they watched the episode some other way. force overrides the
 // in-flight guard for exactly that case. Terminal states are never
 // overridden, with or without force.
@@ -150,10 +145,9 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int, force bool) (int, error) {
 	if n < 1 {
 		return 0, nil
 	}
-	// Latch by STATE, not by row existence. Air-date projection creates a
-	// "wanted" row for every episode up to the schedule point, so nearly every
-	// episode already has a row — skipping those would make this a no-op for
-	// exactly the common case.
+	// Latch by STATE, not by row existence. A row in "wanted" is not progress:
+	// only episodes that are downloading or further along are already handled,
+	// and re-latching those is what this must skip.
 	rows, err := s.db.Query(
 		`SELECT number, state FROM episode WHERE show_id = ? AND number <= ?`, showID, n)
 	if err != nil {
@@ -270,17 +264,6 @@ func (s *Store) SetFilePath(showID int64, number int, path string) error {
 	return err
 }
 
-// BackdateWatched moves an episode's watched_at back by d. It exists for the
-// delete_after policy's tests, which need watches older than the delay
-// without sleeping, and for importing watch history recorded elsewhere.
-// Only meaningful on a watched episode; other states have no watched_at.
-func (s *Store) BackdateWatched(showID int64, number int, d time.Duration) error {
-	_, err := s.db.Exec(
-		`UPDATE episode SET watched_at = datetime(watched_at, ?) WHERE show_id = ? AND number = ?`,
-		fmt.Sprintf("-%d seconds", int(d.Seconds())), showID, number)
-	return err
-}
-
 // Unlatch resets an episode to wanted, so the user can deliberately
 // re-download something they already watched, deleted, or lost.
 //
@@ -314,10 +297,9 @@ func (s *Store) Unlatch(showID int64, number int) error {
 }
 
 // NextUnwatched returns the episode after the highest one the user has
-// consumed. Deliberately max-based rather than sequential: the listener has
-// always done it this way, and a gap in watched history is almost always a
-// failed watch signal rather than genuinely out-of-order viewing — hunting
-// the gap would grab an episode the user has already seen.
+// consumed. Max-based, not sequential: a gap in watched history is almost
+// always a failed watch signal, not genuinely out-of-order viewing, and
+// hunting the gap grabs an episode the user has already seen.
 func (s *Store) NextUnwatched(showID int64) int {
 	eps, err := s.EpisodesForShow(showID)
 	if err != nil {
@@ -335,7 +317,7 @@ func (s *Store) NextUnwatched(showID int64) int {
 // EpisodesForShow returns every episode row for a show, ordered by number.
 func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 	rows, err := s.db.Query(`SELECT show_id, number, state, infohash, release_title,
-		file_path, airs_at, downloaded_at, watched_at FROM episode WHERE show_id = ? ORDER BY number`, showID)
+		file_path, downloaded_at, watched_at FROM episode WHERE show_id = ? ORDER BY number`, showID)
 	if err != nil {
 		return nil, err
 	}
@@ -345,15 +327,14 @@ func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 	for rows.Next() {
 		var e Episode
 		var state, hash, title, path sql.NullString
-		var airs, dl, watched sql.NullString
-		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched); err != nil {
+		var dl, watched sql.NullString
+		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &dl, &watched); err != nil {
 			return nil, err
 		}
 		e.State = episode.ParseState(state.String)
 		e.InfoHash = hash.String
 		e.ReleaseTitle = title.String
 		e.FilePath = path.String
-		e.AirsAt = parseTime(airs)
 		e.DownloadedAt = parseTime(dl)
 		e.WatchedAt = parseTime(watched)
 		out = append(out, &e)
@@ -364,11 +345,10 @@ func (s *Store) EpisodesForShow(showID int64) ([]*Episode, error) {
 // FindByFileName resolves a filename to the episode that owns it, by exact
 // match on the base name of the stored path.
 //
-// This is the watch signal's primary path, and it is deliberately exact.
-// kishizu named the file itself when the download completed, so the name is
-// known — there is nothing to infer. Fuzzy matching here would be guessing
-// at a question already answered, and a wrong guess deletes a file the user
-// may still want.
+// This is the watch signal's primary path, and it is exact: kishizu named
+// the file itself when the download completed, so the name is known — there
+// is nothing to infer, and a wrong guess deletes a file the user may still
+// want.
 //
 // Comparison is on base name only, because the path the player sees on the
 // user's machine differs from the path the server stored: the file may have
@@ -378,7 +358,7 @@ func (s *Store) FindByFileName(name string) (*Episode, error) {
 		return nil, nil
 	}
 	rows, err := s.db.Query(`SELECT show_id, number, state, infohash, release_title,
-		file_path, airs_at, downloaded_at, watched_at FROM episode
+		file_path, downloaded_at, watched_at FROM episode
 		WHERE file_path IS NOT NULL AND file_path != ''`)
 	if err != nil {
 		return nil, err
@@ -388,8 +368,8 @@ func (s *Store) FindByFileName(name string) (*Episode, error) {
 	for rows.Next() {
 		var e Episode
 		var state, hash, title, path sql.NullString
-		var airs, dl, watched sql.NullString
-		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched); err != nil {
+		var dl, watched sql.NullString
+		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &dl, &watched); err != nil {
 			return nil, err
 		}
 		if baseName(path.String) != name {
@@ -399,40 +379,9 @@ func (s *Store) FindByFileName(name string) (*Episode, error) {
 		e.InfoHash = hash.String
 		e.ReleaseTitle = title.String
 		e.FilePath = path.String
-		e.AirsAt = parseTime(airs)
 		e.DownloadedAt = parseTime(dl)
 		e.WatchedAt = parseTime(watched)
 		return &e, nil
 	}
 	return nil, rows.Err()
-}
-
-// EpisodesByState returns every episode in a given state across all shows.
-func (s *Store) EpisodesByState(st episode.State) ([]*Episode, error) {
-	rows, err := s.db.Query(`SELECT show_id, number, state, infohash, release_title,
-		file_path, airs_at, downloaded_at, watched_at FROM episode WHERE state = ? ORDER BY show_id, number`,
-		string(st))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []*Episode
-	for rows.Next() {
-		var e Episode
-		var state, hash, title, path sql.NullString
-		var airs, dl, watched sql.NullString
-		if err := rows.Scan(&e.ShowID, &e.Number, &state, &hash, &title, &path, &airs, &dl, &watched); err != nil {
-			return nil, err
-		}
-		e.State = episode.ParseState(state.String)
-		e.InfoHash = hash.String
-		e.ReleaseTitle = title.String
-		e.FilePath = path.String
-		e.AirsAt = parseTime(airs)
-		e.DownloadedAt = parseTime(dl)
-		e.WatchedAt = parseTime(watched)
-		out = append(out, &e)
-	}
-	return out, rows.Err()
 }

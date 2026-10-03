@@ -35,7 +35,7 @@ func seededServer(t *testing.T) (*Server, *store.Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Seed(&schedule.Timetable{
+	if err := c.SeedForTest(&schedule.Timetable{
 		Fetched: time.Now(),
 		Entries: []schedule.Entry{
 			{Slug: "a-show", Title: "A Romaji", EnglishTitle: "A English"},

@@ -9,12 +9,12 @@ import (
 // Vocabulary maps the words release groups actually use onto the canonical
 // values kishizu reasons about.
 //
-// The parser is deliberately dumb — regex extraction over a fixed word list.
-// That is the right call, because the alternative is widening regexes forever
-// to chase every spelling every group invents. But it means a release written
-// in an unexpected vocabulary reads as *nothing*: no codec, no resolution, no
-// source. Such a release cannot be ranked or filtered, so it silently loses to
-// a worse release that happened to use a recognised spelling.
+// The parser is intentionally simple — regex extraction over a fixed word
+// list, because the alternative is widening regexes forever to chase every
+// spelling every group invents. The cost is that a release written in an
+// unexpected vocabulary reads as *nothing*: no codec, no resolution, no
+// source. Such a release cannot be ranked or filtered, so it silently loses
+// to a worse release that happened to use a recognised spelling.
 //
 // Training closes that gap. When the user corrects a parse they supply both
 // halves — the canonical value and the token in the title that meant it — and

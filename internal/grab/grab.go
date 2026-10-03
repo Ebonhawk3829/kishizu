@@ -67,18 +67,13 @@ type Reconciler struct {
 	OnStall func(show, title string, ep int)
 }
 
-// New builds a Reconciler.
+// NewWithScheme builds a Reconciler that files episodes using a specific
+// naming scheme. A nil scheme means kishizu's own layout.
 //
 // staging and library are both required: staging is scanned for completed
 // files, library is where they are moved to. No downloader client is
 // needed — the done-script removes torrents on completion, so the staging
 // directory is the durable record, not the torrent list.
-func New(st *store.Store, staging, library string) *Reconciler {
-	return NewWithScheme(st, staging, library, nil)
-}
-
-// NewWithScheme builds a Reconciler that files episodes using a specific
-// naming scheme. A nil scheme means kishizu's own layout.
 func NewWithScheme(st *store.Store, staging, library string, s *naming.Scheme) *Reconciler {
 	if s == nil {
 		s, _ = naming.Resolve(naming.PresetKishizu, "", nil)
@@ -198,14 +193,10 @@ func (r *Reconciler) Reconcile() error {
 // (NCOP, NCED, OVAs) sit in staging forever, holding disk for files nobody
 // asked for.
 //
-// It only runs when the pack is COMPLETE. Deleting while episodes are still
-// in flight would race the download: a file that has not finished writing
-// yet resolves to nothing, and pruning it would destroy an episode the user
-// is waiting for.
-//
-// The user's selection is the authority. If they ticked the wrong boxes, the
-// wrong files are kept — that is their call, and guessing on their behalf
-// would be worse.
+// It only runs when the pack is COMPLETE: pruning while episodes are still
+// in flight races the download, and a file that has not finished writing yet
+// resolves to nothing. The user's selection is the authority — if they
+// ticked the wrong boxes, the wrong files are kept, and that is their call.
 func (r *Reconciler) pruneUnselected(sh *store.Show, dir string, unresolved []string, inFlight map[int]*store.Episode) {
 	if len(unresolved) == 0 || r.PruneUnselected == nil || !*r.PruneUnselected {
 		return
@@ -280,12 +271,11 @@ func pruneEmptyDirs(root string) {
 // reportStalled flags episodes that have been "downloading" for longer than
 // the stall window with no file in staging to show for it.
 //
-// The state is deliberately left alone. Rewinding a downloading episode to
-// wanted would re-grab it, and the first grab may still be seeding or
-// slow rather than dead — the user decides, via unlatch, whether to retry.
-// What was missing was the signal, not the state change: nothing anywhere
-// looked at how long an episode had been in flight, so a dead swarm sat
-// silently in "downloading" forever.
+// The state is left alone: the first grab may still be seeding or slow
+// rather than dead, and the user decides via unlatch whether to retry. What
+// this adds is the signal — nothing else looks at how long an episode has
+// been in flight, so a dead swarm would otherwise sit silently in
+// "downloading" forever.
 //
 // The grab time is downloaded_at, which UpsertEpisode stamps when the magnet
 // is handed off. An episode with no timestamp (adopted seasons write none)
@@ -390,9 +380,7 @@ func lookupOffset(group string, offsets map[string]int) (int, bool) {
 //
 // Recursive because a torrent is not always a flat list of files: a season
 // pack arrives as one directory named after the release, with the episodes
-// inside it. Reading only the top level found nothing for such a torrent, so
-// a completed download sat in staging forever and its episode stayed
-// "downloading".
+// inside it. Only the top level would miss those entirely.
 //
 // Depth is not bounded, but the reconciler only ever acts on a file that
 // resolves to an episode already in flight, so extra files are left alone
@@ -421,13 +409,12 @@ func mediaFiles(dir string) ([]string, error) {
 // episode downloaded.
 //
 // The target comes from the naming scheme, not from a format string baked in
-// here, so a configured layout is honoured everywhere rather than only on the
-// write path. The extension comes from the source file.
+// here, so a configured layout is honoured everywhere. The extension comes
+// from the source file.
 //
 // The two database writes are a transaction, so the episode can never be
-// marked downloaded without its path (or vice versa) — a half-finalised
-// episode would be invisible to both the reconciler and the missing-file
-// check forever.
+// marked downloaded without its path (or vice versa): a half-finalised
+// episode is invisible to both the reconciler and the missing-file check.
 func (r *Reconciler) finalise(sh *store.Show, ep *store.Episode, src string) error {
 	ext := strings.ToLower(filepath.Ext(src))
 	if ext == "" {
@@ -500,6 +487,3 @@ func isMedia(name string) bool {
 	}
 	return false
 }
-
-// longest, since batch extras are usually small. Real sizes would need the
-// "files" length field from Transmission; the name ordering is sufficient to

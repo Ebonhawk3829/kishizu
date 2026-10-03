@@ -180,8 +180,8 @@ type NamingConfig struct {
 //
 // A missing file is not an error: it yields defaults, so kishizu starts with
 // no configuration at all. A file that exists but cannot be parsed IS an
-// error — silently ignoring a broken config would run with settings the user
-// never asked for.
+// error: running with settings the user never asked for is worse than not
+// starting.
 func Load(path string) (*File, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -235,8 +235,7 @@ func Parse(b []byte) (*File, error) {
 	// file. The show list breaks YAML: a show name may contain a colon
 	// ("BLEACH: Thousand-Year Blood War"), which YAML reads as a key/value
 	// separator. The hand-written parser tolerates that, the library does
-	// not — so parsing the whole file would reject every kishizu.yaml that
-	// was ever written.
+	// not.
 	if block, ok := serverBlock(string(b)); ok {
 		var doc struct {
 			Server *Server `yaml:"server" json:"server"`
@@ -261,8 +260,8 @@ func Parse(b []byte) (*File, error) {
 // mergeServer overwrites only the fields that were explicitly set.
 //
 // Pointers distinguish "set to false" from "not mentioned", which is why the
-// optional booleans and ints are pointers. Without that, a file that omitted
-// dry_run would turn dry-run off.
+// optional booleans and ints are pointers: a file that omits dry_run must
+// keep the default (true), not read as false.
 func mergeServer(dst, src *Server) {
 	if src.Library != "" {
 		dst.Library = src.Library
@@ -367,10 +366,10 @@ func mergeServer(dst, src *Server) {
 
 // IsDryRun reports whether the server should decide without downloading.
 //
-// A helper rather than a direct nil check because DryRun is a *bool: nil means
-// "not configured", which falls back to the shipped default of true. A caller
-// that reads the pointer itself gets that backwards — a nil pointer is false,
-// so an unconfigured server looks like it downloads.
+// DryRun is a *bool: nil means "not configured", which falls back to the
+// shipped default of true. A caller reading the pointer directly gets that
+// backwards — a nil pointer reads as false, so an unconfigured server looks
+// like it downloads.
 func (s *Server) IsDryRun() bool {
 	if s.DryRun == nil {
 		return true
@@ -468,8 +467,7 @@ func DefaultServer() *Server {
 // reformat, and a user's comments in that section are worth keeping.
 //
 // The write is atomic — temp file, then rename — so a crash mid-write cannot
-// leave a config that fails to parse on next start. That would stop kishizu
-// starting at all, which is the worst possible outcome of an edit.
+// leave a config that fails to parse on next start.
 func Save(path string, cur *File, next *Server) error {
 	if cur == nil {
 		cur = &File{}

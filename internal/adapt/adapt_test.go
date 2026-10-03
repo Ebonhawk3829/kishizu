@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/match"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -143,8 +144,13 @@ func TestVocabIsSharedAcrossShows(t *testing.T) {
 func TestVocabLearnIsVisibleImmediately(t *testing.T) {
 	s := testStore(t)
 	v := NewVocab(s)
+	parse := func(title string) release.Release {
+		r := release.Parse(title)
+		v.Apply(&r)
+		return r
+	}
 
-	before := v.Parse("[Group] Show - 01 [1080p AVC]")
+	before := parse("[Group] Show - 01 [1080p AVC]")
 	if before.Codec != "" && before.Codec == "h.264" {
 		t.Fatalf("precondition: AVC already resolves to h.264 (%q)", before.Codec)
 	}
@@ -152,7 +158,7 @@ func TestVocabLearnIsVisibleImmediately(t *testing.T) {
 	if err := v.Learn(s, "codec", "AVC", "h.264"); err != nil {
 		t.Fatalf("Learn: %v", err)
 	}
-	after := v.Parse("[Group] Show - 01 [1080p AVC]")
+	after := parse("[Group] Show - 01 [1080p AVC]")
 	if after.Codec != "h.264" {
 		t.Errorf("codec = %q, want h.264: the learned token was not honoured", after.Codec)
 	}
@@ -170,7 +176,9 @@ func TestVocabRefreshKeepsTheCurrentVocabularyOnFailure(t *testing.T) {
 	s.Close() // every subsequent query fails
 
 	v.Refresh(s)
-	if got := v.Parse("[Group] Show - 01 [1080p AVC]"); got.Codec != "h.264" {
-		t.Errorf("codec = %q, want h.264: a failed refresh unlearned the vocabulary", got.Codec)
+	r := release.Parse("[Group] Show - 01 [1080p AVC]")
+	v.Apply(&r)
+	if got := r.Codec; got != "h.264" {
+		t.Errorf("codec = %q, want h.264: a failed refresh unlearned the vocabulary", got)
 	}
 }

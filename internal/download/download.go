@@ -16,11 +16,11 @@ import (
 
 // Downloader hands a torrent to a BitTorrent client.
 //
-// There is deliberately no way to query progress, list torrents or remove
-// them. kishizu reconciles completion by scanning the staging directory, not
-// by asking the client, because the client's view is not authoritative: a
-// done-script may already have removed the torrent, and a torrent the client
-// reports may not have produced the file kishizu is waiting for.
+// No way to query progress, list torrents or remove them: kishizu reconciles
+// completion by scanning the staging directory, not by asking the client,
+// because the client's view is not authoritative — a done-script may already
+// have removed the torrent, and a torrent the client reports may not have
+// produced the file kishizu is waiting for.
 type Downloader interface {
 	// Add starts a download from a magnet link, into dir.
 	//

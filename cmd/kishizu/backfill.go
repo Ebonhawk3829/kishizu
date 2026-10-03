@@ -75,15 +75,12 @@ func backfillSlugs(st *store.Store, path string) error {
 
 		// The page's Release Time is episode 1's air slot, and for an
 		// unaired show it is the only air information available. Fill it
-		// only when the show has no schedule point yet, so a live season's
-		// real next-episode time is never overwritten with its premiere
-		// date.
+		// only when the show has no anchor yet, so a live season's real
+		// next-episode time is never overwritten with its premiere date.
 		if !info.AirsAt.IsZero() {
 			if _, at, _ := st.NextEpisode(sh.ID); at == nil {
 				if err := st.SetNextEpisode(sh.ID, 1, info.AirsAt); err != nil {
 					fmt.Fprintf(os.Stderr, "  %s: set air time: %v\n", sh.CanonicalName, err)
-				} else {
-					_ = st.ProjectAirDates(sh.ID)
 				}
 			}
 		}

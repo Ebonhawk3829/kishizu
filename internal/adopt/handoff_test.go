@@ -54,7 +54,7 @@ func TestReconcileFilesAdoptedBatch(t *testing.T) {
 		}
 	}
 
-	r := grab.New(st, staging, library)
+	r := grab.NewWithScheme(st, staging, library, nil)
 	if err := r.Reconcile(); err != nil {
 		t.Fatal(err)
 	}

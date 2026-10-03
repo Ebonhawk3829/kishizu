@@ -29,10 +29,10 @@ files it in your library, and deletes it once you have watched it.
 | **Watch** | Anything that can POST JSON tells kishizu when you finish an episode |
 | **Clean** | Deletes watched episodes per the delete policy: immediately, after a delay, or never |
 
-Air times come from animeschedule.net and are cached locally, so kishizu keeps
-working when the site is down. Two background jobs keep things current: one
-refreshes air times for tracked shows daily, the other refreshes the seasonal
-browse list weekly.
+Air times come from animeschedule.net: the daily refresh stores each tracked
+show's next episode and when it airs, and the seasonal browse list is
+refreshed weekly. Both are cached locally, so kishizu keeps working when the
+site is down.
 
 ## Contents
 
@@ -389,8 +389,8 @@ A few worth knowing:
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/summary` | Dashboard widget: counts, next air time, version |
+| `GET /api/schedule` | What airs this week: every show's next episode in a window |
 | `GET /healthz` | Liveness, for container healthchecks |
-| `GET /api/version` | Build version and Go toolchain |
 | `POST /api/watched` | Mark an episode watched |
 | `POST /api/watched/verify` | Report whether an episode is marked watched |
 | `GET /api/timetable` | Browse the season, with `?q=` to filter |

@@ -130,16 +130,14 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleBrowseTitle saves just the browse display preference.
 //
-// A separate endpoint rather than reusing the full settings save, because the
-// toggle is a click-anywhere control: persisting it should be one small write,
-// not a round-trip of every setting with the secrets masked and unmasked.
+// A separate endpoint because the toggle is a click-anywhere control:
+// persisting it should be one small write, not a round-trip of every
+// setting with the secrets masked and unmasked.
 //
 // It writes to the database, not the config file. A display preference is
 // not deployment configuration: it is per-user, the UI owns it, and the
-// database is already there. The config file is the wrong home — the UI
-// would have to read-modify-write a file the operator also edits by hand,
-// with no locking, and the server re-reading the file on every list request
-// would re-assert stale values and reset the control.
+// database is already there. The config file is the operator's to edit by
+// hand, and the UI would have to read-modify-write it with no locking.
 func (s *Server) handleBrowseTitle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title string `json:"title"`
@@ -197,9 +195,8 @@ func isMasked(s string) bool {
 // than the configuration file.
 //
 // Such a value must never be written back: the whole point of supplying it by
-// environment variable is to keep it out of the file, and saving it would
-// silently undo that. It is also never sent to the browser, for the same
-// reason any other secret is masked.
+// environment variable is to keep it out of the file. It is also never sent
+// to the browser, for the same reason any other secret is masked.
 func secretFromEnv(s *config.Server) (qbitPass, gotifyToken bool) {
 	if s == nil {
 		return false, false
@@ -211,9 +208,8 @@ func secretFromEnv(s *config.Server) (qbitPass, gotifyToken bool) {
 
 // validateServer rejects a configuration kishizu could not run with.
 //
-// Checked before writing, because a config file that cannot be loaded is
-// worse than one that was never edited: kishizu would refuse to start, and
-// the user would have to fix it by hand.
+// Checked before writing: kishizu refuses to start on an unloadable config,
+// so a bad save must be caught here where the user can fix it in the form.
 func validateServer(s *config.Server) error {
 	if s.Library == "" {
 		return fmt.Errorf("library is required")

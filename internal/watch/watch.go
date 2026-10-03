@@ -73,9 +73,9 @@ func New(st *store.Store, library string, keep int, mode string, afterDelay time
 
 // Sweep deletes files for watched episodes beyond the Keep window.
 //
-// Deletion is deliberately separate from marking: a watch signal that arrives
-// while the file is still open, or while the user changes their mind, should not
-// race the file out from under them. Sweep runs on its own schedule.
+// Deletion is separate from marking: a watch signal that arrives while the
+// file is still open, or while the user changes their mind, must not race
+// the file out from under them. Sweep runs on its own schedule.
 //
 // The Delete policy gates what may be deleted at all: "off" deletes nothing,
 // "after" only episodes whose watch is older than DeleteAfter. Keep still
@@ -156,10 +156,10 @@ func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
 // CheckMissing finds episodes kishizu downloaded whose file has vanished
 // before the watch signal arrived, and marks them missing.
 //
-// Scoped deliberately to episodes with a file_path. An episode marked
-// "downloaded" by hand — the user has it on their PC, the server never had a
-// copy — has no path and is not missing. Warning about files kishizu never
-// created would be noise, and would need a "trust me" button to dismiss.
+// Scoped to episodes with a file_path. An episode marked "downloaded" by
+// hand — the user has it on their PC, the server never had a copy — has no
+// path and is not missing. Warning about files kishizu never created would
+// be noise, and would need a "trust me" button to dismiss.
 //
 // Returns the episodes newly marked, so the caller can notify.
 func (h *Handler) CheckMissing() ([]*store.Episode, error) {

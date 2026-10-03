@@ -16,8 +16,8 @@ import (
 // something.
 //
 // Caching it here means one load until something is learned. Refresh is
-// explicit rather than time-based: a TTL would either re-read constantly or
-// let a just-learned token go unhonoured, and the writer knows when it wrote.
+// explicit, not time-based: the writer knows when it wrote, so a TTL would
+// either re-read constantly or let a just-learned token go unhonoured.
 type Vocab struct {
 	mu    sync.RWMutex
 	vocab *release.Vocabulary
@@ -26,8 +26,8 @@ type Vocab struct {
 // NewVocab loads the vocabulary from the store.
 //
 // A load failure is not fatal: matching still works, the parser just reads
-// fewer titles. Failing open is deliberate — a database hiccup must not stop
-// the pipeline, and an empty vocabulary is the same state a fresh install
+// fewer titles. Failing open keeps the pipeline running through a database
+// hiccup — an empty vocabulary is the same state a fresh install
 // starts in.
 func NewVocab(st *store.Store) *Vocab {
 	v := &Vocab{vocab: release.NewVocabulary()}
@@ -63,16 +63,6 @@ func (v *Vocab) Apply(r *release.Release) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	v.vocab.ApplyVocabulary(r)
-}
-
-// Parse parses a title with the vocabulary applied.
-//
-// The same path every enforcement point uses, so a caller that only has the
-// vocabulary — no show — reads titles the way the pipeline will.
-func (v *Vocab) Parse(title string) release.Release {
-	r := release.Parse(title)
-	v.Apply(&r)
-	return r
 }
 
 // Learn records a token's canonical value in the store and in the cache.

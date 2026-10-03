@@ -47,7 +47,7 @@ func TestSeasonInProgressIsDue(t *testing.T) {
 	// Give ep 6 a past air date so it is hunting.
 	_ = st.UpsertEpisode(sh.ID, 6, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 6, time.Now().AddDate(0, 0, -1))
-	_ = st.ProjectAirDates(sh.ID)
+
 	// Trained: at least one group's offset is known.
 	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
@@ -65,7 +65,7 @@ func TestUntrainedShowIsNotDue(t *testing.T) {
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
-	_ = st.ProjectAirDates(sh.ID)
+
 	// No SetGroupOffset: the show has never been trained.
 
 	l := New(st, nil)
@@ -83,7 +83,7 @@ func TestOnUntrainedFiresForAiredShow(t *testing.T) {
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
-	_ = st.ProjectAirDates(sh.ID)
+
 	// No SetGroupOffset: the show has never been trained.
 
 	var got []string
@@ -122,7 +122,7 @@ func TestOnUntrainedSilentOnceTrained(t *testing.T) {
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
-	_ = st.ProjectAirDates(sh.ID)
+
 	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
 	var got []string
@@ -141,7 +141,7 @@ func TestUntrainedShowIsDueOnceTrained(t *testing.T) {
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
-	_ = st.ProjectAirDates(sh.ID)
+
 
 	l := New(st, nil)
 	if dueIDs(t, l, 5*time.Minute)[sh.ID] {
@@ -162,7 +162,7 @@ func TestUnknownMaxStillPolls(t *testing.T) {
 	sh, _ := st.CreateShow("Show", []string{"Show"}, 0) // max unknown
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
-	_ = st.ProjectAirDates(sh.ID)
+
 	_ = st.SetGroupOffset(sh.ID, "SomeGroup", 0, "training")
 
 	l := New(st, nil)

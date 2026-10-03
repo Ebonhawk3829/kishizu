@@ -241,17 +241,9 @@ func (s *Server) recordWatched(showID int64, epNum int, source string) error {
 		return err
 	}
 	log.Printf("watched: show %d ep %d (%s)", showID, epNum, source)
-	// Watching is progress just as a download is: if the watch point has
-	// reached the schedule's pointer, the pointer must move, or the UI
-	// keeps announcing an air date that is already in the past. Best-effort:
-	// a failed advance leaves the pointer where it was, and the daily
-	// schedule refresh corrects it anyway.
-	if err := s.st.AdvanceSchedule(showID, epNum); err != nil {
-		log.Printf("%s: advance schedule: %v", source, err)
-	}
-	if err := s.st.ProjectAirDates(showID); err != nil {
-		log.Printf("%s: project air dates: %v", source, err)
-	}
+	// The anchor is the daily refresh's to move: the site's countdown is the
+	// authority on when the next episode airs, and simulating its advance on
+	// watch events is what produced phantom dashboard entries.
 	s.sweepAfter()
 	return nil
 }

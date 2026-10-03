@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/match"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
@@ -42,9 +41,9 @@ type startRequest struct {
 // results of an alias search and the user confirms the parse of one; the
 // episode comes from the release they choose.
 //
-// No seeding, deliberately. Seeding from a "known good" release teaches only
-// what to accept — it can never show what to reject, and rejection is most of
-// what the matcher does. A raw alias search is an unbiased sample: some right,
+// No seeding. Seeding from a "known good" release teaches only what to
+// accept — it can never show what to reject, and rejection is most of what
+// the matcher does. A raw alias search is an unbiased sample: some right,
 // some wrong, some unreadable. Confirming across that gives both signals.
 //
 // There is also no paste-a-link path. If a release does not appear in the
@@ -124,26 +123,17 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // filterToSeason drops releases published before this season could have had
-// any episodes. The anchor is episode 1's projected air date minus a week's
-// slack for early uploads and timezone slop. Shows with no air date keep
-// everything: there is nothing to anchor to, and inventing a bound would be
-// guessing.
+// any episodes. The cutoff is the show's anchor minus a week's slack for
+// early uploads and timezone slop: the anchor is the next unaired episode's
+// air time, and every episode of the season aired at a weekly cadence before
+// it. Shows with no anchor keep everything — there is nothing to anchor to,
+// and inventing a bound would be guessing.
 func filterToSeason(st *store.Store, items []nyaa.Item, sh *store.Show) []nyaa.Item {
-	eps, err := st.EpisodesForShow(sh.ID)
-	if err != nil {
+	_, anchor, err := st.NextEpisode(sh.ID)
+	if err != nil || anchor == nil {
 		return items
 	}
-	var first *time.Time
-	for _, ep := range eps {
-		if ep.Number == 1 && ep.AirsAt != nil {
-			first = ep.AirsAt
-			break
-		}
-	}
-	if first == nil {
-		return items
-	}
-	cutoff := first.AddDate(0, 0, -7)
+	cutoff := anchor.AddDate(0, 0, -7)
 	var out []nyaa.Item
 	for _, it := range items {
 		if it.PubDate.IsZero() || !it.PubDate.Before(cutoff) {

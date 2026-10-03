@@ -4,9 +4,8 @@
 // It exists to keep the dependency direction honest. The matcher defines a
 // narrow interface (match.Show) so it can be tested without a database — but
 // the type that satisfies it needs a database to answer, so it cannot live in
-// match, and it must not live in store: the persistence layer would then
-// import the domain logic it is meant to be decoupled from, and touching the
-// matching model would recompile the store.
+// match, and it must not live in store: the persistence layer must not import
+// the domain logic it is meant to be decoupled from.
 //
 // Putting the adapter here leaves both sides independent. store knows nothing
 // about matching, match knows nothing about SQLite, and this package is the

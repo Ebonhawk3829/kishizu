@@ -109,18 +109,6 @@ func TestGotifySendsTokenAndPriority(t *testing.T) {
 	}
 }
 
-// TestNopDiscards: the no-op notifier lets callers skip nil checks without
-// risking a panic on a nil interface.
-func TestNopDiscards(t *testing.T) {
-	var n Notifier = Nop{}
-	if err := n.Send("t", "m", PriorityHigh); err != nil {
-		t.Errorf("Nop.Send returned %v", err)
-	}
-	if n.Name() != "none" {
-		t.Errorf("Name = %q, want none", n.Name())
-	}
-}
-
 // TestPrioritiesAreOrdered: the enum is compared by callers, so the order is
 // part of the contract.
 func TestPrioritiesAreOrdered(t *testing.T) {
@@ -142,7 +130,7 @@ func TestPrioritiesAreOrdered(t *testing.T) {
 // TestNamesAreSet: the name appears in log lines, so an empty one makes a
 // failure unattributable.
 func TestNamesAreSet(t *testing.T) {
-	for _, n := range []Notifier{NewNtfy("http://x"), NewGotify("http://x", "t"), Nop{}} {
+	for _, n := range []Notifier{NewNtfy("http://x"), NewGotify("http://x", "t")} {
 		if strings.TrimSpace(n.Name()) == "" {
 			t.Errorf("%T has an empty name", n)
 		}

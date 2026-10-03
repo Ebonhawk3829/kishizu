@@ -12,7 +12,7 @@ Errors come back as JSON with an `error` field and an appropriate status code.
 
 ---
 
-## Health and version
+## Health
 
 ### `GET /healthz`
 
@@ -21,12 +21,6 @@ so a slow upstream cannot mark a correctly-running container unhealthy.
 
 ```json
 {"status":"ok","version":"v1.3.6"}
-```
-
-### `GET /api/version`
-
-```json
-{"version":"v1.3.6","go":"go1.27.1"}
 ```
 
 ---
@@ -49,7 +43,6 @@ Every tracked show.
     "trained": true,
     "adopted": false,
     "image_url": "/art/abc123.jpg",
-    "cadence": 3,
     "next_schedule": {"episode": 10, "airs_at": "...", "status": "aired"},
     "state": "hunting",
     "needs_attention": false,
@@ -66,11 +59,11 @@ Every tracked show.
 `adopted` is true for a season taken from releases.moe. Such a show is never
 trained and never polled, so the UI suppresses training for it.
 
-`cadence` is the show's air weekday — `0` = Sunday through `6` = Saturday —
-taken from the animeschedule.net page. It is `null` when the show has no
-schedule page or the page does not say. kishizu uses it to project air dates a
-week at a time from the schedule's next-episode point, and the listener uses
-that projection to reject releases published before this week's air date.
+`next_schedule` is the show's anchor: the next unaired episode and its air
+time, exactly as animeschedule.net's countdown publishes it. It is the only
+air-date fact kishizu stores, written by the daily refresh. `status` is
+`"aired"` once the time has passed without a download confirming the episode,
+otherwise `"upcoming"`. It is absent for shows with no schedule page.
 
 ### `POST /api/shows`
 
@@ -315,6 +308,21 @@ client has no web UI.
 ### `GET /api/stats`
 
 Per-show counts: `downloading`, `downloaded`, `watched`, `deleted`.
+
+### `GET /api/schedule`
+
+Every show's anchor inside a time window, sorted by air time — the "what airs
+this week" view. The window defaults to now → now+7d; `from` and `to` override
+it as RFC3339 timestamps.
+
+```json
+{"from":"...","to":"...","count":2,
+ "episodes":[{"show":"...","episode":8,"airs_at":"...","state":"up-to-date"}]}
+```
+
+One entry per show at most: the anchor is the only air-date fact that exists,
+so a show contributes nothing when its anchor is missing, outside the window,
+or already watched.
 
 ### `GET /api/debug` / `POST /api/debug`
 

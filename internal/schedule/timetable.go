@@ -19,10 +19,9 @@ import (
 
 // Entry is one show on the seasonal timetable.
 //
-// Deliberately smaller than Show: the timetable is a browsing index, not a
-// record of truth. It carries enough to pick a show and enough to add it —
-// the slug is an exact identity, so the full record can be fetched by it
-// afterwards.
+// A browsing index, not a record of truth: it carries enough to pick a show
+// and enough to add it — the slug is an exact identity, so the full record
+// can be fetched by it afterwards.
 type Entry struct {
 	// Slug is the animeschedule identifier, an exact identity.
 	Slug string `json:"slug"`
@@ -55,10 +54,10 @@ type Entry struct {
 	// Type is the media type: TV, Movie, TV Short, OVA, ONA. Empty until
 	// enriched.
 	//
-	// Needed alongside Episodes because a Movie reports "Episodes: 1", which is
-	// true of a film and wrong as a season length. The cache has to carry the
-	// same distinction the show page does, or adding from browse would cap a
-	// film at one episode.
+	// Needed alongside Episodes because a Movie reports "Episodes: 1", which
+	// is true of a film and wrong as a season length. The cache carries the
+	// same distinction the show page does, so adding from browse never caps
+	// a film at one episode.
 	Type string `json:"type,omitempty"`
 }
 
@@ -70,8 +69,8 @@ type Timetable struct {
 	//
 	// Separate from Fetched because the two run on different schedules: the
 	// tile list is cheap (one request) and refreshes daily, while enrichment
-	// is one request per show and runs weekly. Conflating them would either
-	// re-fetch 100+ pages daily or never refresh the list.
+	// is one request per show and runs weekly. One timestamp for both would
+	// force one of the two schedules onto the other.
 	Enriched time.Time `json:"enriched,omitempty"`
 	// Entries is every show on the timetable, ordered by title.
 	Entries []Entry `json:"entries"`
@@ -126,9 +125,8 @@ const EnrichTTL = 7 * 24 * time.Hour
 //
 // "Missing" counts, not just the timestamp: a list that was refreshed recently
 // but has entries with no English title is not in a usable state for someone
-// reading it in English, and waiting out the TTL would leave it that way for
-// days. The timestamp alone only says when the last attempt was, not whether it
-// covered everything.
+// reading it in English, and the timestamp alone only says when the last
+// attempt was, not whether it covered everything.
 func (t *Timetable) NeedsEnrich() bool {
 	if time.Since(t.Enriched) >= EnrichTTL {
 		return true
@@ -145,8 +143,7 @@ func (t *Timetable) NeedsEnrich() bool {
 // slug that does not have one.
 //
 // This is what keeps a list refresh cheap. Most shows persist from one snapshot
-// to the next, so their English titles are already known and re-fetching them
-// would be ~100 requests to learn what is already on disk. Only genuinely new
+// to the next, so their English titles are already on disk; only genuinely new
 // entries need a page fetch, which is usually none at all mid-season.
 //
 // Returns how many entries still need one.
@@ -184,9 +181,8 @@ func (t *Timetable) CarryTitles(prev *Timetable) int {
 // dead page cannot cost the season its English names. The caller falls back to
 // the romaji title for entries with no English one.
 //
-// client may be nil. Concurrency is bounded because the list is ~100 shows and
-// an unbounded fan-out would look like a scraper to the site — the same
-// politeness the indexer config applies to Nyaa.
+// client may be nil. Concurrency is bounded because the list is ~100 shows:
+// the same politeness the indexer config applies to Nyaa.
 func (t *Timetable) Enrich(client *http.Client) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -307,8 +303,7 @@ func FetchTimetable(client *http.Client) (*Timetable, error) {
 	// whatever cour was current at startup. A long-running container would
 	// otherwise keep browsing a season that has ended.
 	//
-	// Skipped when a test has pinned TimetableURL to a stub, which is what
-	// RefreshSeasonURL is for.
+	// Skipped when a test has pinned TimetableURL to a stub.
 	if !pinnedTimetableURL {
 		TimetableURL = CurrentSeasonURL(time.Now())
 	}
@@ -327,8 +322,8 @@ func FetchTimetable(client *http.Client) (*Timetable, error) {
 //
 // Every field is optional: a tile with no image or no air time still yields an
 // entry, because the slug alone is enough to add the show and fetch its full
-// record. Dropping a show because its tile was incomplete would make the
-// browse list silently wrong.
+// record. The browse list must never silently drop a show over an incomplete
+// tile.
 func ParseTimetable(r interface{ Read([]byte) (int, error) }) (*Timetable, error) {
 	// Read the whole page: the parser pairs anchors with the headings that
 	// follow them, which needs the document in order rather than line by line.
@@ -346,9 +341,7 @@ func ParseTimetable(r interface{ Read([]byte) (int, error) }) (*Timetable, error
 
 func parseTimetableString(page string) (*Timetable, error) {
 	// Strip style blocks first: the page inlines its CSS, which contains the
-	// same class names as the markup and would otherwise match.
-	page = reStyleBlock.ReplaceAllString(page, "")
-
+        // same class names as the markup.
 	type tile struct {
 		slug string
 		pos  int
@@ -448,9 +441,6 @@ const DefaultTimetableTTL = 24 * time.Hour
 // The cache is written by a background job on its own schedule, so serving the
 // browse list is a disk read and nothing else. That is the same shape as the
 // tracked shows: a scheduled job writes, the UI only reads.
-//
-// Doing the fetch here instead would put ~110 requests in the request path the
-// first time the list went stale, and the modal would sit empty while they ran.
 func (c *Cache) Get() (*Timetable, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -460,14 +450,12 @@ func (c *Cache) Get() (*Timetable, error) {
 // Update refreshes the snapshot and makes sure it is in a usable state.
 //
 // This is the write half, called by the background job and by the UI's Refresh
-// button. It is deliberately not called by Get: the two halves run on
-// different schedules, and conflating them is what put network I/O in the
-// request path.
+// button. Get is the read half and never fetches: the two run on different
+// schedules, and the request path must stay free of network I/O.
 //
-// A refresh always leaves the list enriched, not merely fetched. Deferring
-// enrichment to the next pass was cheaper in requests but wrong: the list sat
-// without English titles for up to a week after every refresh, which is the
-// one thing the feature exists to prevent.
+// A refresh always leaves the list enriched, not merely fetched: a list
+// without English titles is not usable, and deferring enrichment leaves it
+// that way for up to a week.
 //
 // The cost is kept down by carrying titles forward by slug rather than
 // re-fetching them — see CarryTitles. Mid-season a refresh usually adds no new
@@ -511,12 +499,11 @@ func (c *Cache) Update(client *http.Client) (*Timetable, error) {
 	return t, nil
 }
 
-// Seed writes a snapshot into the cache without fetching it.
+// SeedForTest writes a snapshot into the cache without fetching it.
 //
-// For tests, and for seeding a cache from a saved snapshot. It exists because
-// the cache's own write path is private: a test that wants to assert on
-// reading should not have to stand up a fake site to do it.
-func (c *Cache) Seed(t *Timetable) error {
+// For tests: the cache's own write path is private, and a test that wants to
+// assert on reading should not have to stand up a fake site to do it.
+func (c *Cache) SeedForTest(t *Timetable) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.save(t)
@@ -546,9 +533,9 @@ func (c *Cache) Refresh(client *http.Client) (*Timetable, error) {
 // load reads the snapshot from disk.
 //
 // A missing file is not an error: it means the background job has not run yet,
-// which is a normal state for a container that has only just started. Only a
-// file that exists but cannot be parsed is an error — that is corruption, and
-// silently serving an empty list would hide it.
+// which is a normal state for a container that has only just started. A file
+// that exists but cannot be parsed is corruption, and must surface as an error
+// rather than as an empty list.
 func (c *Cache) load() (*Timetable, error) {
 	b, err := os.ReadFile(c.path)
 	if err != nil {

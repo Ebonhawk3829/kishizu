@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +24,15 @@ func seedWatched(t *testing.T, st *store.Store, showID int64, n int, lib string)
 	_ = st.SetFilePath(showID, n, p)
 	_ = st.UpsertEpisode(showID, n, episode.Watched, "H", "rel")
 	return p
+}
+
+// backdateWatched moves an episode's watched_at back by d. Tests need
+// watches older than the delete_after delay without sleeping.
+func backdateWatched(st *store.Store, showID int64, number int, d time.Duration) error {
+	_, err := st.Exec(
+		`UPDATE episode SET watched_at = datetime(watched_at, ?) WHERE show_id = ? AND number = ?`,
+		fmt.Sprintf("-%d seconds", int(d.Seconds())), showID, number)
+	return err
 }
 
 // TestSweepDeleteOff: "off" deletes nothing, whatever the keep window says.
@@ -73,7 +83,7 @@ func TestSweepDeleteAfterReleasesOldWatches(t *testing.T) {
 	lib := t.TempDir()
 	sh, _ := st.CreateShow("Show", nil, 12)
 	p := seedWatched(t, st, sh.ID, 1, lib)
-	if err := st.BackdateWatched(sh.ID, 1, 72*time.Hour); err != nil {
+	if err := backdateWatched(st, sh.ID, 1, 72*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,7 +107,7 @@ func TestSweepDeleteAfterWithKeep(t *testing.T) {
 	lib := t.TempDir()
 	sh, _ := st.CreateShow("Show", nil, 12)
 	old := seedWatched(t, st, sh.ID, 1, lib)
-	if err := st.BackdateWatched(sh.ID, 1, 72*time.Hour); err != nil {
+	if err := backdateWatched(st, sh.ID, 1, 72*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	fresh := seedWatched(t, st, sh.ID, 2, lib)

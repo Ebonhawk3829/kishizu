@@ -14,10 +14,10 @@ import (
 
 // Priority is how urgent a notification is.
 //
-// Deliberately not ntfy's integer levels. Those are one service's vocabulary,
-// and a caller that has to know them cannot be pointed at a different
-// service. Each backend maps these to whatever it supports; one that has no
-// notion of priority ignores the field.
+// Not ntfy's integer levels: those are one service's vocabulary, and a caller
+// that has to know them cannot be pointed at a different service. Each
+// backend maps these to whatever it supports; one that has no notion of
+// priority ignores the field.
 type Priority int
 
 const (
@@ -70,13 +70,3 @@ func ParseKind(s string) (Kind, error) {
 	}
 	return "", fmt.Errorf("unknown notifier %q (want one of: ntfy, gotify, none)", s)
 }
-
-// Nop is a Notifier that discards everything.
-//
-// Used when notifications are disabled, so callers can be written without a
-// nil check at every site. A nil Notifier is a panic waiting to happen; this
-// is the same thing without the risk.
-type Nop struct{}
-
-func (Nop) Send(title, message string, priority Priority) error { return nil }
-func (Nop) Name() string                                        { return "none" }

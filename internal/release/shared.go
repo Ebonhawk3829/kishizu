@@ -1,7 +1,8 @@
 // Package release parses Nyaa release titles into structured fields.
 //
-// The logic is deliberately dumb: regex extraction plus integer arithmetic. All
-// the intelligence lives in the alias list and the per-group offsets, not here.
+// The logic is intentionally simple: regex extraction plus integer
+// arithmetic. All the intelligence lives in the alias list and the per-group
+// offsets, not here.
 package release
 
 import (
@@ -13,9 +14,9 @@ import (
 // ResQuality orders resolutions by ascending quality, for comparing a release
 // against a floor. 0 means unknown.
 //
-// Deliberately separate from quality.Policy.ResolutionPenalty. The penalty map
-// ranks by *preference*, which is not the same thing: 2160p is acceptable but
-// not preferred, so it carries a small penalty while still being higher quality
+// Separate from quality.Policy.ResolutionPenalty. The penalty map ranks by
+// *preference*, which is not the same thing: 2160p is acceptable but not
+// preferred, so it carries a small penalty while still being higher quality
 // than 1080p. Deriving one from the other conflates the two and makes a floor
 // comparison reject resolutions it should accept.
 var ResQuality = map[string]int{

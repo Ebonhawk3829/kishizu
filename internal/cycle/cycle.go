@@ -28,8 +28,8 @@ const (
 	// Hunting: air time passed, within the window, no release grabbed yet.
 	// The listener is actively polling for this episode.
 	//
-	// Named "hunting" rather than "watching" deliberately: "watching" is what
-	// the user does with their eyes. This is the machine searching Nyaa.
+	// Named "hunting", not "watching": "watching" is what the user does
+	// with their eyes. This is the machine searching Nyaa.
 	Hunting State = "hunting"
 	// Downloading: a magnet has been handed to Transmission and the file is
 	// not on disk yet.
@@ -49,20 +49,22 @@ const (
 	NoReleaseFound State = "no release found"
 )
 
-// StateOf derives the state of one episode.
+// StateOf derives the state of one episode against the show's anchor.
 //
 // The stored lifecycle is the primary input: what has actually happened to
-// this episode decides its state, and the air date only breaks ties among
-// episodes that have not been touched yet.
+// this episode decides its state. The anchor (next_ep, next_airs_at) only
+// breaks ties among episodes that have not been touched yet: the next
+// unaired episode IS next_ep, and episodes beyond it have no air time —
+// they are simply not due yet.
 //
 //   - downloading -> downloading (handed to Transmission, not on disk yet)
 //   - downloaded  -> ready to watch (the user's queue)
 //   - missing     -> missing (was on disk, is not now)
 //   - watched/deleted -> up to date (this episode's cycle is complete)
-//   - wanted + before air time -> up to date (nothing to do yet)
+//   - wanted + before anchor air time -> up to date (nothing to do yet)
 //   - wanted + within window -> hunting
 //   - wanted + window closed -> no release found
-func StateOf(ep *store.Episode, now time.Time) State {
+func StateOf(ep *store.Episode, anchor *time.Time, now time.Time) State {
 	switch episode.ParseState(string(ep.State)) {
 	case episode.Downloading:
 		return Downloading
@@ -74,17 +76,17 @@ func StateOf(ep *store.Episode, now time.Time) State {
 		return UpToDate
 	}
 
-	// wanted: not touched yet, so the air date is the only thing that can
+	// wanted: not touched yet, so the anchor is the only thing that can
 	// place it in time.
-	if ep.AirsAt == nil {
-		// No air date: cannot place it in time. Treat as hunting so the show
+	if anchor == nil {
+		// No anchor: cannot place it in time. Treat as hunting so the show
 		// is not silently dropped; the UI flags it as needing attention.
 		return Hunting
 	}
 	switch {
-	case now.Before(*ep.AirsAt):
+	case now.Before(*anchor):
 		return UpToDate
-	case now.Before(ep.AirsAt.Add(Window)):
+	case now.Before(anchor.Add(Window)):
 		return Hunting
 	default:
 		return NoReleaseFound
@@ -98,10 +100,10 @@ func StateOf(ep *store.Episode, now time.Time) State {
 // keeps a slow safety-net poll, because late re-uploads are normal in this
 // workflow. Everything else needs nothing.
 //
-// Downloading deliberately does not trigger polling. An episode in flight
-// cannot be re-grabbed, so polling on its behalf would evaluate releases the
-// listener is unable to act on. Quality is settled before the grab instead,
-// by the global rules and the group order.
+// Downloading does not trigger polling. An episode in flight cannot be
+// re-grabbed, so polling on its behalf evaluates releases the listener is
+// unable to act on. Quality is settled before the grab instead, by the global
+// rules and the group order.
 func PollInterval(states []State) (time.Duration, bool) {
 	for _, s := range states {
 		if s == Hunting {

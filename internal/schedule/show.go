@@ -71,7 +71,7 @@ type Show struct {
 
 // Aliases returns the names worth matching a release against.
 //
-// Only Romaji, English and Synonyms. Two kinds are deliberately excluded:
+// Only Romaji, English and Synonyms. Two kinds are excluded:
 //
 //   - Japanese. Nyaa release titles are romanised; Japanese names never appear
 //     in them, so they are dead weight in the alias set. Worse, they are what

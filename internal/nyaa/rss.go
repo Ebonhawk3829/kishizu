@@ -63,14 +63,13 @@ func DefaultIndexer() Indexer {
 
 // Client queries one indexer.
 //
-// The indexer and the rate limiter are fields rather than package state.
-// Package state would make every call site depend on an ordering nothing
-// enforces: a query issued before configuration silently used the default
-// indexer, and tests mutating shared state could not run in parallel.
+// The indexer and the rate limiter are fields, not package state: package
+// state makes every call site depend on an ordering nothing enforces, and
+// tests mutating shared state cannot run in parallel.
 //
 // As fields, a Client is constructed with its configuration and cannot be
 // half-configured. Two clients with different indexers can coexist, which is
-// what a test wants and what a future multi-indexer deployment would need.
+// what a test wants and what a future multi-indexer deployment needs.
 type Client struct {
 	ix Indexer
 	// hc is the HTTP client. Nil means a default one is built per call, which
@@ -112,18 +111,15 @@ func NewDefault() *Client { return New(DefaultIndexer()) }
 
 // WithHTTPClient returns a copy of c that uses hc for requests.
 //
-// A copy rather than a mutation: the caller that built c may still be using
-// it, and swapping its transport underneath it would be a data race. The
-// limiter is shared with the original, so the copy cannot be used to spend a
-// second request budget against the same indexer.
+// A copy, not a mutation: the caller that built c may still be using it, and
+// swapping its transport underneath it is a data race. The limiter is shared
+// with the original, so the copy cannot be used to spend a second request
+// budget against the same indexer.
 func (c *Client) WithHTTPClient(hc *http.Client) *Client {
 	out := *c
 	out.hc = hc
 	return &out
 }
-
-// Indexer returns the indexer this client queries.
-func (c *Client) Indexer() Indexer { return c.ix }
 
 // FeedURL builds a per-show RSS URL.
 //

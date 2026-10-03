@@ -115,7 +115,7 @@ func TestReconcileMovesStagedFile(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	r := New(st, staging, library)
+	r := NewWithScheme(st, staging, library, nil)
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestReconcileIgnoresNonDownloading(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	r := New(st, staging, library)
+	r := NewWithScheme(st, staging, library, nil)
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestReconcileCreatesLibraryDir(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	r := New(st, staging, library)
+	r := NewWithScheme(st, staging, library, nil)
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestFinaliseUsesRenameNotCopy(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	r := New(st, staging, library)
+	r := NewWithScheme(st, staging, library, nil)
 	if err := r.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}

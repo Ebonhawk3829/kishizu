@@ -260,8 +260,8 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 }
 
 // Resolved returns releases the model matched on its own from a known group
-// offset. These are deliberately excluded from Propose; they are surfaced
-// separately so the user can see the model applying what it has learned.
+// offset. Excluded from Propose; surfaced separately so the user can see the
+// model applying what it has learned.
 func (s *Session) Resolved(items []nyaa.Item, n int) []Candidate {
 	var out []Candidate
 	for _, it := range items {
@@ -350,15 +350,13 @@ func (s *Session) Offsets() map[string]int {
 
 // Commit persists what the session learned.
 //
-// Aliases are deliberately not written here. The animeschedule page is the
-// sole alias source: it publishes every name a show is known by, and names
-// scraped from release titles have already poisoned one show's alias set with
-// quality tokens ("1080p"), which made every release on the indexer eligible.
+// Aliases are not written here. The animeschedule page is the sole alias
+// source: it publishes every name a show is known by, and names scraped from
+// release titles have already poisoned one show's alias set with quality
+// tokens ("1080p"), which made every release on the indexer eligible.
 //
 // Confirmed infohashes are recorded as seen, so a fresh session does not
-// re-offer what the user already worked through. Without this, re-opening
-// training showed the same candidates again — double handling for no new
-// information.
+// re-offer what the user already worked through.
 func (s *Session) Commit() error {
 	for g, off := range s.m.Offsets {
 		if err := s.st.SetGroupOffset(s.show.ID, g, off, "training"); err != nil {

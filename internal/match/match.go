@@ -47,23 +47,24 @@ func (r Result) Confident() bool { return r.Confidence >= ConfidentThreshold }
 // Measured gap on real data: accepted releases 1.00, best non-match 0.33 — so
 // this sits in empty space.
 //
-// It is a GATE, not a score. A release either clears it or it does not; how far
-// it clears it by is deliberately discarded. See AliasGate for why.
+// It is a GATE, not a score. A release either clears it or it does not; how
+// far it clears it by is discarded. See AliasGate for why.
 const Threshold = 0.6
 
 // ConfidentThreshold is the confidence at which the model stops asking.
 const ConfidentThreshold = 0.75
 
-// Evidence weights. Deliberately hand-tuned rather than learned: with a handful
-// of examples per show, fitted weights overfit immediately. The structure is
-// fixed but the inputs accumulate, so the estimate sharpens with context.
+// Evidence weights. Hand-tuned, not learned: with a handful of examples per
+// show, fitted weights overfit immediately. The structure is fixed but the
+// inputs accumulate, so the estimate sharpens with context.
 //
-// There is deliberately no wAlias. The alias is an eligibility gate, not a
+// There is no alias weight. The alias is an eligibility gate, not a
 // contributor: once a release is eligible, ranking it is the job of the
 // release's own properties (group, resolution, codec, source), which the
-// preference ranker already does. Folding alias quality into confidence made a
-// short alias like "ReZero 4" score a perfect 1.0 against anything containing
-// those tokens, inflating confidence for releases that merely looked similar.
+// preference ranker already does. Folding alias quality into confidence made
+// a short alias like "ReZero 4" score a perfect 1.0 against anything
+// containing those tokens, inflating confidence for releases that merely
+// looked similar.
 const (
 	wGroupKnown = 0.6 // do we have this exact group's offset
 	wAgreement  = 0.4 // do the known offsets agree with each other
@@ -74,10 +75,10 @@ const (
 // Exact match first, then a punctuation-normalised comparison, then a
 // substring fallback restricted to names of four characters or more.
 //
-// Substring matching is deliberately restricted: a group named "A" would
-// otherwise match almost anything, and an unrelated group silently borrowing
-// another's offset both mis-resolves the episode and inflates confidence,
-// since the offset would look known.
+// Substring matching is restricted to names of four characters or more: a
+// group named "A" would otherwise match almost anything, and an unrelated
+// group silently borrowing another's offset both mis-resolves the episode
+// and inflates confidence, since the offset would look known.
 //
 // One implementation, shared by every Show implementation. Duplicating it in
 // an adapter would let the two copies drift — the logic must have one home.
@@ -251,11 +252,11 @@ func Match(s Show, title string) Result {
 
 // plausible bounds what counts as a readable episode number.
 //
-// There is deliberately no upper bound. The season length is unknown for
-// exactly the shows most at risk of mis-matching — mid-premiere, run length
-// unannounced — so a bound taken from it would be absent when needed and
-// present only when unneeded. A wrong episode number is caught by the air-date
-// window instead: an episode that has not aired yet is not hunted at all.
+// No upper bound: the season length is unknown for exactly the shows most at
+// risk of mis-matching — mid-premiere, run length unannounced — so a bound
+// taken from it is absent when needed and present only when unneeded. A wrong
+// episode number is caught by the air-date window instead: an episode that
+// has not aired yet is not hunted at all.
 func plausible(ep int) bool {
 	return ep >= 1
 }

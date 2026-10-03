@@ -7,6 +7,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/adapt"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
+	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
@@ -264,7 +265,8 @@ func TestRankUsesTheVocabAppliedParse(t *testing.T) {
 	}
 	// Attach the vocab-applied parse the way evaluate does.
 	for i := range decisions {
-		r := vocab.Parse(decisions[i].Item.Title)
+		r := release.Parse(decisions[i].Item.Title)
+		vocab.Apply(&r)
 		decisions[i].parsed = &r
 	}
 

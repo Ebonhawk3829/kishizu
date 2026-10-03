@@ -22,13 +22,9 @@ CREATE TABLE IF NOT EXISTS show (
     canonical_name TEXT    NOT NULL UNIQUE,
     max_episode    INTEGER NOT NULL DEFAULT 0,   -- 0 = unknown, no upper bound
     source         TEXT    NOT NULL DEFAULT 'manual',  -- schedule | manual
-    cadence_weekday INTEGER,                     -- 0-6, NULL when unknown
-    cadence_source TEXT,                         -- where cadence came from
-    cadence_fetched_at TEXT,                     -- when, for staleness
     -- The schedule's authoritative next-episode point, from animeschedule.net.
-    -- Held until a download confirms that episode is real: when ep N is
-    -- grabbed, next_ep becomes N+1 and next_airs_at is projected forward a
-    -- week. NULL when the show is not on the schedule.
+    -- The ONLY stored air-date fact, written solely by the daily refresh.
+    -- NULL when the show is not on the schedule.
     next_ep         INTEGER,
     next_airs_at    TEXT,
     schedule_fetched_at TEXT,
@@ -93,10 +89,6 @@ CREATE TABLE IF NOT EXISTS episode (
     infohash      TEXT,
     release_title TEXT,
     file_path     TEXT,
-    -- When this episode is expected to air, projected from the schedule's
-    -- next-episode point and the cadence weekday. NULL when unknown. This is
-    -- what distinguishes "hasn't aired yet" from "should have aired".
-    airs_at       TEXT,
     downloaded_at TEXT,
     watched_at    TEXT,
     PRIMARY KEY (show_id, number)

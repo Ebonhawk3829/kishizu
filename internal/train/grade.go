@@ -90,10 +90,10 @@ func InspectWithConfidence(title string, resolvedEp int, conf float64) GradedRel
 		RawEpisode: r.RawEpisode(),
 		Confidence: conf,
 	}
-	// Every attribute is editable. The parser is deliberately dumb, so it will
-	// always meet titles it reads wrongly — a group at the end instead of in
-	// brackets, a codec written unusually. Letting the user correct the value
-	// is cheaper and more reliable than widening the regexes forever.
+	// Every attribute is editable. The parser is intentionally simple, so it
+	// will always meet titles it reads wrongly — a group at the end instead
+	// of in brackets, a codec written unusually. Letting the user correct the
+	// value is cheaper and more reliable than widening the regexes forever.
 	g.Attrs = []AttrValue{
 		{
 			Key:      AttrEpisode,

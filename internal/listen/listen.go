@@ -1,9 +1,8 @@
 // Package listen polls Nyaa RSS feeds per show and decides what to grab.
 //
-// The design is deliberately simple: one feed per show, every poll, dedupe on
-// infohash, match, filter, then hand the best candidate for each episode to the
-// downloader. RSS covers 14-33 days per show, so backfill after downtime is
-// free — just read the feed.
+// One feed per show, every poll, dedupe on infohash, match, filter, then hand
+// the best candidate for each episode to the downloader. RSS covers 14-33
+// days per show, so backfill after downtime is free — just read the feed.
 package listen
 
 import (
@@ -94,7 +93,7 @@ func NewWithPolicy(st *store.Store, indexer *nyaa.Client, p *quality.Policy) *Li
 // A show is due when any of its episodes is hunting (aggressive rate) or
 // no-release-found (slow safety net). Shows with no air date at all are polled
 // on the legacy interval: without a schedule point there is no window to
-// reason about, and silently dropping them would be worse than polling.
+// reason about, and polling is the safer default over silence.
 //
 // An UNTRAINED show is never due. Training is what teaches the per-group
 // episode offsets, and without them the matcher has nothing to work with:
@@ -135,13 +134,18 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			continue
 		}
 
+		// The anchor is the show's single air-date fact: the next unaired
+		// episode is next_ep and it airs at next_airs_at. Episodes beyond it
+		// are not due yet; episodes before it are placed by their own state.
+		_, anchor, err := l.st.NextEpisode(sh.ID)
+		if err != nil {
+			debug.Log("due shows: %s: %v", sh.CanonicalName, err)
+			continue
+		}
+
 		var states []cycle.State
-		hasAirDate := false
 		for _, ep := range eps {
-			if ep.AirsAt != nil {
-				hasAirDate = true
-			}
-			states = append(states, cycle.StateOf(ep, now))
+			states = append(states, cycle.StateOf(ep, anchor, now))
 		}
 
 		if d, ok := cycle.PollInterval(states); ok {
@@ -150,10 +154,10 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			if !l.isTrained(sh) {
 				debug.Log("%s: untrained, not polling", sh.CanonicalName)
 				// Episode 1 has aired (a state past up-to-date exists, or the
-				// first episode's air time has passed), so there is something
-				// to hunt — the show just cannot hunt yet. That is worth a
-				// signal; an unaired show is not.
-				if l.OnUntrained != nil && l.hasAired(eps, now) {
+				// anchor's air time has passed), so there is something to hunt
+				// — the show just cannot hunt yet. That is worth a signal; an
+				// unaired show is not.
+				if l.OnUntrained != nil && l.hasAired(eps, anchor, now) {
 					l.OnUntrained(sh.CanonicalName)
 				}
 				continue
@@ -161,7 +165,7 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			out[sh] = d
 			continue
 		}
-		if !hasAirDate && l.isTrained(sh) {
+		if anchor == nil && l.isTrained(sh) {
 			out[sh] = legacy
 		}
 	}
@@ -186,12 +190,11 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 }
 
 // hasAired reports whether episode 1 of this show has aired, from the
-// episode rows: any state past "wanted" means a release was seen, and a
-// first-episode air time in the past means the season has started even if
-// nothing was grabbed. An announced-but-unscheduled show has neither, and
-// there is nothing to train on yet — asking for training then would be
-// asking for something that cannot be done.
-func (l *Listener) hasAired(eps []*store.Episode, now time.Time) bool {
+// episode rows and the anchor: any state past "wanted" means a release was
+// seen, and an anchor air time in the past means the season has started even
+// if nothing was grabbed. An announced-but-unscheduled show has neither, and
+// there is nothing to train on yet.
+func (l *Listener) hasAired(eps []*store.Episode, anchor *time.Time, now time.Time) bool {
 	for _, ep := range eps {
 		if ep.Number != 1 {
 			continue
@@ -200,11 +203,8 @@ func (l *Listener) hasAired(eps []*store.Episode, now time.Time) bool {
 		case episode.Downloading, episode.Downloaded, episode.Watched, episode.Deleted, episode.Missing:
 			return true
 		}
-		if ep.AirsAt != nil && ep.AirsAt.Before(now) {
-			return true
-		}
 	}
-	return false
+	return anchor != nil && anchor.Before(now)
 }
 
 // PollShow fetches one show's feed and evaluates each item.
@@ -295,9 +295,8 @@ func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decisio
 	// rejected; codec, dub and uncensored are ranked later.
 	//
 	// The parse is kept on the decision: the ranking path reads the same
-	// release, and re-parsing there without the vocabulary would rank a
-	// learned-token release as if its attributes were empty — which scores
-	// better than anything the parser read correctly.
+	// release, parsed the same way, so a learned-token release ranks on
+	// its real attributes everywhere.
 	r := m.Parse(it.Title)
 	d.parsed = &r
 	if rejected, why := l.Policy.Reject(&r); rejected {
@@ -306,8 +305,8 @@ func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decisio
 	}
 
 	// 5. Episode must be readable. A release whose episode number cannot be
-	// read cannot be grabbed: there is nothing to record it against, and it
-	// would bypass every per-episode guard above.
+	// read cannot be grabbed: there is nothing to record it against, and
+	// the per-episode guards above all key on the episode number.
 	if res.Episode <= 0 {
 		d.Reason = "episode unreadable, cannot grab"
 		return d
@@ -319,7 +318,7 @@ func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decisio
 	// grabbing the wrong episode during a show's first run.
 	//
 	// Lower bound only: v2 re-uploads and remakes land LATE and are good
-	// candidates, so there is deliberately no upper bound.
+	// candidates.
 	if !l.airDateOK(sh, it) {
 		d.Reason = "published before this week's air date"
 		return d
@@ -345,7 +344,7 @@ func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decisio
 // cannot predate a week before the oldest such episode. Shows with no
 // schedule point are always accepted: the guard is diagnostic-quality data and
 // must never block a good grab. Lower bound only — v2 re-uploads land LATE
-// and are good candidates, so there is deliberately no upper bound.
+// and are good candidates.
 func (l *Listener) airDateOK(sh *store.Show, it nyaa.Item) bool {
 	if it.PubDate.IsZero() {
 		return true
@@ -454,8 +453,7 @@ func (d Decision) parsedRelease() release.Release {
 // FilterPreferences reduces grab decisions to one per (show, episode), keeping
 // the best-ranked candidate.
 //
-// Called by the run loop: without it, every release for an episode would be
-// handed off instead of the best one.
+// Called by the run loop, which hands off exactly one release per episode.
 func (l *Listener) FilterPreferences(decisions []Decision) []Decision {
 	var out []Decision
 	byShow := map[int64][]Decision{}
@@ -477,8 +475,5 @@ func (l *Listener) MarkGrabbed(d Decision) error {
 	if err := l.st.MarkSeen(d.Item.InfoHash, d.ShowID, d.Episode); err != nil {
 		return err
 	}
-	if err := l.st.UpsertEpisode(d.ShowID, d.Episode, episode.Downloading, d.Item.InfoHash, d.Item.Title); err != nil {
-		return err
-	}
-	return l.st.AdvanceSchedule(d.ShowID, d.Episode)
+	return l.st.UpsertEpisode(d.ShowID, d.Episode, episode.Downloading, d.Item.InfoHash, d.Item.Title)
 }

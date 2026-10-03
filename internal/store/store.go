@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ebonhawk3829/kishizu/internal/episode"
-
 	_ "modernc.org/sqlite"
 )
 
@@ -21,6 +19,13 @@ var schemaFS embed.FS
 // Store wraps the database.
 type Store struct {
 	db *sql.DB
+}
+
+// Exec runs a raw SQL statement. Exported for tests in other packages that
+// need to arrange state the store's own methods do not model (backdating a
+// timestamp, for instance); production code should use the typed methods.
+func (s *Store) Exec(query string, args ...any) (sql.Result, error) {
+	return s.db.Exec(query, args...)
 }
 
 // Open opens (or creates) the database at path and applies the schema.
@@ -123,6 +128,59 @@ func (s *Store) migrateSteps() error {
 			}
 			return nil
 		}},
+		{2, "drop per-episode air dates and cadence columns", func(s *Store) error {
+			// The schedule's countdown is the only air-date fact anyone
+			// needs: the next unaired episode is next_ep and it airs at
+			// next_airs_at. Per-episode projections simulated what the site
+			// publishes, and every deviation from weekly cadence (hiatus,
+			// delay, special) corrupted them into phantom dashboard entries.
+			// The cadence columns were never written by any code path.
+			//
+			// SQLite cannot DROP COLUMN before 3.35, so the tables are
+			// rebuilt. Every column except the dropped ones is copied
+			// verbatim, so episode history and show identity survive intact.
+			for _, stmt := range []string{
+				`CREATE TABLE episode_new (
+					show_id       INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
+					number        INTEGER NOT NULL,
+					state         TEXT    NOT NULL DEFAULT 'wanted',
+					infohash      TEXT,
+					release_title TEXT,
+					file_path     TEXT,
+					downloaded_at TEXT,
+					watched_at    TEXT,
+					PRIMARY KEY (show_id, number)
+				)`,
+				`INSERT INTO episode_new
+					SELECT show_id, number, state, infohash, release_title, file_path, downloaded_at, watched_at FROM episode`,
+				`DROP TABLE episode`,
+				`ALTER TABLE episode_new RENAME TO episode`,
+				`CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state)`,
+				`CREATE TABLE show_new (
+					id             INTEGER PRIMARY KEY AUTOINCREMENT,
+					canonical_name TEXT    NOT NULL UNIQUE,
+					max_episode    INTEGER NOT NULL DEFAULT 0,
+					source         TEXT    NOT NULL DEFAULT 'manual',
+					next_ep         INTEGER,
+					next_airs_at    TEXT,
+					schedule_fetched_at TEXT,
+					image_url       TEXT,
+					slug            TEXT,
+					airing_status   TEXT,
+					created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+				)`,
+				`INSERT INTO show_new
+					SELECT id, canonical_name, max_episode, source, next_ep, next_airs_at, schedule_fetched_at, image_url, slug, airing_status, created_at FROM show`,
+				`DROP TABLE show`,
+				`ALTER TABLE show_new RENAME TO show`,
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL`,
+			} {
+				if _, err := s.db.Exec(stmt); err != nil {
+					return fmt.Errorf("exec: %w", err)
+				}
+			}
+			return nil
+		}},
 	}
 	for _, st := range steps {
 		var n int
@@ -157,7 +215,6 @@ func (s *Store) addColumns() error {
 		{"show", "slug", "TEXT"},
 		{"show", "airing_status", "TEXT"},
 		{"alias", "source", "TEXT NOT NULL DEFAULT 'manual'"},
-		{"episode", "airs_at", "TEXT"},
 	}
 	for _, c := range cols {
 		rows, err := s.db.Query(
@@ -189,9 +246,6 @@ type Show struct {
 	CanonicalName  string
 	MaxEpisode     int
 	Source         string
-	CadenceWeekday *int
-	CadenceSource  string
-	CadenceFetched *time.Time
 	// ImageURL is the season's cover art from the schedule, for the UI.
 	ImageURL string
 	// Slug is the animeschedule.net slug, an exact identity for the show on
@@ -245,25 +299,17 @@ func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
 	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, source,
-		cadence_weekday, cadence_source, cadence_fetched_at, image_url, slug,
-		airing_status, created_at FROM show WHERE id = ?`, id)
+		image_url, slug, airing_status, created_at FROM show WHERE id = ?`, id)
 
 	var sh Show
-	var weekday sql.NullInt64
-	var src, source, fetched, created, image, slug, airing sql.NullString
+	var source, created, image, slug, airing sql.NullString
 	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &source,
-		&weekday, &src, &fetched, &image, &slug, &airing, &created); err != nil {
+		&image, &slug, &airing, &created); err != nil {
 		return nil, err
 	}
 	sh.Slug = slug.String
 	sh.AiringStatus = airing.String
-	if weekday.Valid {
-		w := int(weekday.Int64)
-		sh.CadenceWeekday = &w
-	}
 	sh.Source = source.String
-	sh.CadenceSource = src.String
-	sh.CadenceFetched = parseTime(fetched)
 	sh.ImageURL = image.String
 	sh.CreatedAt = derefTime(parseTime(created))
 
@@ -339,9 +385,9 @@ func (s *Store) AddAliasFrom(showID int64, alias, source string) error {
 
 // LearnVocabulary records that a title token means a canonical value.
 //
-// Both halves are required. The canonical value alone tells us the answer but
-// not which word produced it, so there would be nothing to apply to the next
-// release that uses the same spelling.
+// Both halves are required: the canonical value alone tells us the answer but
+// not which word produced it, so nothing can be applied to the next release
+// that uses the same spelling.
 func (s *Store) LearnVocabulary(kind, token, canonical string) error {
 	token = strings.TrimSpace(token)
 	canonical = strings.TrimSpace(canonical)
@@ -419,10 +465,10 @@ const (
 	// SourceManual is a show added by name, with no schedule identity.
 	SourceManual = "manual"
 	// SourceSchedule is a show added from an animeschedule.net URL. It has a
-	// slug and air dates, so the airing pipeline applies to it.
+	// slug and an anchor, so the airing pipeline applies to it.
 	SourceSchedule = "schedule"
 	// SourceSeaDex is a finished season adopted from releases.moe. It has no
-	// air dates and is never trained, so the airing pipeline must skip it and
+	// anchor and is never trained, so the airing pipeline must skip it and
 	// the UI must not ask whether it has aired or needs training.
 	SourceSeaDex = "seadex"
 )
@@ -473,8 +519,12 @@ func (sh *Show) Finished() bool {
 }
 
 // SetNextEpisode records the schedule's authoritative next-episode point:
-// episode n airs at t. This is the one fact animeschedule.net gives us, and it
-// is held until a download confirms the episode is real.
+// episode n airs at t. This is the ONLY stored air-date fact, and the daily
+// refresh is its only writer. Every consumer that needs to know when the next
+// unaired episode airs reads it through NextEpisode; nothing else about the
+// airing schedule is stored, because the site publishes exactly this and
+// simulating more (projecting N+1/N+2, advancing on grab) is how phantom
+// dashboard entries happen.
 //
 // n is clamped to at least 1. The page renders "Ep 0" for a show that has
 // been announced but has not premiered, and storing that verbatim breaks
@@ -531,118 +581,11 @@ func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
 	return int(n.Int64), t, nil
 }
 
-// ProjectAirDates fills in airs_at for episodes around the schedule's next
-// episode, by stepping a week at a time from the known air time.
-//
-// The schedule only exposes the NEXT episode's timestamp, but the cadence is
-// weekly, so ep n-1 aired seven days earlier, and so on.
-//
-// It also projects FORWARD when watch progress has passed the schedule point.
-// If the user has watched ep 11 but the schedule still says "ep 11 airs Sep 6",
-// then ep 12 is the one actually due — and without a forward projection it has
-// no row and no air date, so it is invisible to the cycle and never hunted.
-//
-// Episodes that are already watched or deleted keep the air date they earned:
-// they aired when they aired, and a hiatus moving the schedule anchor weeks
-// forward must not rewrite their history. Re-projecting them invented future
-// dates for past episodes, which surfaced as phantom entries on any schedule
-// view built from episode rows.
-func (s *Store) ProjectAirDates(showID int64) error {
-	n, at, err := s.NextEpisode(showID)
-	if err != nil || at == nil || n < 1 {
-		return err
-	}
-
-	// How far ahead of the schedule point has the user watched?
-	watched := 0
-	if eps, err := s.EpisodesForShow(showID); err == nil {
-		for _, ep := range eps {
-			if ep.State == episode.Watched || ep.State == episode.Deleted {
-				if ep.Number > watched {
-					watched = ep.Number
-				}
-			}
-		}
-	}
-	// Project at least one episode beyond what has been watched, so the next
-	// due episode always has an air date.
-	target := n
-	if watched+1 > target {
-		target = watched + 1
-	}
-
-	for i := 1; i <= target; i++ {
-		airs := at.AddDate(0, 0, 7*(i-n))
-		if err := s.setAirsAt(showID, i, airs); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// setAirsAt records an episode's expected air time, creating the episode row as
-// wanted if it does not exist yet.
-//
-// Watched and deleted episodes are skipped: their air date is history, not a
-// projection. A hiatus moves the schedule anchor forward, and re-projecting
-// from that anchor would stamp future dates onto episodes that aired weeks
-// ago — phantom entries on any schedule view built from episode rows.
-func (s *Store) setAirsAt(showID int64, number int, t time.Time) error {
-	ep, err := s.GetEpisode(showID, number)
-	if err != nil {
-		return err
-	}
-	if ep != nil && (ep.State == episode.Watched || ep.State == episode.Deleted) {
-		return nil
-	}
-	return s.seedAirsAt(showID, number, t)
-}
-
-// seedAirsAt writes an air date unconditionally. Not exported for general
-// use: it exists so tests can reconstruct the air history a season earned
-// before the current anchor, which setAirsAt must never rewrite.
-func (s *Store) seedAirsAt(showID int64, number int, t time.Time) error {
-	ep, err := s.GetEpisode(showID, number)
-	if err != nil {
-		return err
-	}
-	stamp := t.UTC().Format("2006-01-02 15:04:05")
-	if ep == nil {
-		_, err := s.db.Exec(`INSERT INTO episode (show_id, number, state, airs_at)
-			VALUES (?, ?, 'wanted', ?)`, showID, number, stamp)
-		return err
-	}
-	_, err = s.db.Exec(`UPDATE episode SET airs_at = ? WHERE show_id = ? AND number = ?`,
-		stamp, showID, number)
-	return err
-}
-
-// AdvanceSchedule moves the schedule's pointer forward when episode n is
-// grabbed: next_ep becomes n+1 and the air time projects forward a week.
-//
-// Called when a download is confirmed, per the contract: the schedule point is
-// held until a download confirms that episode is real.
-func (s *Store) AdvanceSchedule(showID int64, confirmedEp int) error {
-	n, at, err := s.NextEpisode(showID)
-	if err != nil || at == nil || n == 0 {
-		return err
-	}
-	if confirmedEp < n {
-		// An older episode was grabbed (backfill); the pointer stays.
-		return nil
-	}
-	next := confirmedEp + 1
-	nextAt := at.AddDate(0, 0, 7*(next-n))
-	_, err = s.db.Exec(`UPDATE show SET next_ep = ?, next_airs_at = ? WHERE id = ?`,
-		next, nextAt.UTC().Format("2006-01-02 15:04:05"), showID)
-	return err
-}
-
 // DeleteShow removes a show and everything hanging off it (cascade).
 //
 // Child tables declare ON DELETE CASCADE, so aliases, offsets, filters,
 // preferences, episodes and rejections go with it. `seen` has no foreign key,
-// so it is cleared explicitly — leaving rows behind would keep dedupe entries
+// so it is cleared explicitly: leftover rows would keep dedupe entries alive
 // for a show that no longer exists.
 func (s *Store) DeleteShow(id int64) error {
 	tx, err := s.db.Begin()

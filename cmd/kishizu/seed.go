@@ -43,15 +43,12 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 				return err
 			}
 		}
-		// A seed entry without a slug gets no air date: there is no page
+		// A seed entry without a slug gets no anchor: there is no page
 		// to read it from.
 		if sh.Slug != "" {
 			if info, err := schedule.FetchShow(nil, sh.Slug); err == nil &&
 				info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
-					return err
-				}
-				if err := st.ProjectAirDates(sh.ID); err != nil {
 					return err
 				}
 				fmt.Printf("  %-52s seeded, ep %d airs %s\n",
@@ -82,9 +79,6 @@ func listShowsWithSchedule(st *store.Store) error {
 				info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				line += fmt.Sprintf("  | ep %d airs %s", info.LatestEpisode, info.NextAirsAt.Format("Mon 2 Jan 15:04"))
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
-					return err
-				}
-				if err := st.ProjectAirDates(sh.ID); err != nil {
 					return err
 				}
 			}
