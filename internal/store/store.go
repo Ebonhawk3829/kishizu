@@ -541,6 +541,12 @@ func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
 // If the user has watched ep 11 but the schedule still says "ep 11 airs Sep 6",
 // then ep 12 is the one actually due — and without a forward projection it has
 // no row and no air date, so it is invisible to the cycle and never hunted.
+//
+// Episodes that are already watched or deleted keep the air date they earned:
+// they aired when they aired, and a hiatus moving the schedule anchor weeks
+// forward must not rewrite their history. Re-projecting them invented future
+// dates for past episodes, which surfaced as phantom entries on any schedule
+// view built from episode rows.
 func (s *Store) ProjectAirDates(showID int64) error {
 	n, at, err := s.NextEpisode(showID)
 	if err != nil || at == nil || n < 1 {
@@ -576,7 +582,26 @@ func (s *Store) ProjectAirDates(showID int64) error {
 
 // setAirsAt records an episode's expected air time, creating the episode row as
 // wanted if it does not exist yet.
+//
+// Watched and deleted episodes are skipped: their air date is history, not a
+// projection. A hiatus moves the schedule anchor forward, and re-projecting
+// from that anchor would stamp future dates onto episodes that aired weeks
+// ago — phantom entries on any schedule view built from episode rows.
 func (s *Store) setAirsAt(showID int64, number int, t time.Time) error {
+	ep, err := s.GetEpisode(showID, number)
+	if err != nil {
+		return err
+	}
+	if ep != nil && (ep.State == episode.Watched || ep.State == episode.Deleted) {
+		return nil
+	}
+	return s.seedAirsAt(showID, number, t)
+}
+
+// seedAirsAt writes an air date unconditionally. Not exported for general
+// use: it exists so tests can reconstruct the air history a season earned
+// before the current anchor, which setAirsAt must never rewrite.
+func (s *Store) seedAirsAt(showID int64, number int, t time.Time) error {
 	ep, err := s.GetEpisode(showID, number)
 	if err != nil {
 		return err

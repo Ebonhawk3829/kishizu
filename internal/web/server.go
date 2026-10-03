@@ -576,6 +576,11 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 // the endpoint honest from a bare curl: a schedule with no arguments should
 // mean "the coming week", not an error or an unbounded dump.
 //
+// Watched and deleted episodes are excluded. This answers "what is coming",
+// and an episode the user has finished is not coming, however its projected
+// air date reads. It also makes the endpoint robust against projection
+// drift: a watched episode keeping a stale date must not resurface here.
+//
 // Air times are projected weekly by the store (ProjectAirDates), so this
 // reads the database and nothing else — no schedule fetch, no network I/O.
 // A dashboard widget must render even when animeschedule is unreachable.
@@ -627,6 +632,9 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, ep := range showEps {
+			if ep.State == episode.Watched || ep.State == episode.Deleted {
+				continue
+			}
 			if ep.AirsAt == nil || ep.AirsAt.Before(from) || ep.AirsAt.After(to) {
 				continue
 			}
