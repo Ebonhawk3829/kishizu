@@ -139,23 +139,29 @@ func (s *Store) migrateSteps() error {
 			// SQLite cannot DROP COLUMN before 3.35, so the tables are
 			// rebuilt. Every column except the dropped ones is copied
 			// verbatim, so episode history and show identity survive intact.
+			//
+			// The rebuild runs with foreign_keys OFF. With it ON, DROP TABLE
+			// on a parent performs an implicit DELETE FROM that fires ON
+			// DELETE CASCADE in every child still referencing it: dropping
+			// the old show table cascade-deletes every episode, alias and
+			// group-offset row before they can be copied. The pragma is
+			// per-connection and the pool holds a single connection, so the
+			// OFF here cannot leak into other callers. FK enforcement is
+			// restored before the step returns, and the final foreign_key_check
+			// proves the rebuilt tables are consistent — the OFF window is
+			// for DDL mechanics only, never for writing through a constraint.
+			if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+				return fmt.Errorf("disable foreign keys: %w", err)
+			}
+			defer func() {
+				if _, err := s.db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+					// Enforcement must come back on: leaving it off would
+					// let orphan rows accumulate silently for the process
+					// lifetime. Nothing below can run if this fails.
+					panic(fmt.Sprintf("restore foreign keys: %v", err))
+				}
+			}()
 			for _, stmt := range []string{
-				`CREATE TABLE episode_new (
-					show_id       INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
-					number        INTEGER NOT NULL,
-					state         TEXT    NOT NULL DEFAULT 'wanted',
-					infohash      TEXT,
-					release_title TEXT,
-					file_path     TEXT,
-					downloaded_at TEXT,
-					watched_at    TEXT,
-					PRIMARY KEY (show_id, number)
-				)`,
-				`INSERT INTO episode_new
-					SELECT show_id, number, state, infohash, release_title, file_path, downloaded_at, watched_at FROM episode`,
-				`DROP TABLE episode`,
-				`ALTER TABLE episode_new RENAME TO episode`,
-				`CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state)`,
 				`CREATE TABLE show_new (
 					id             INTEGER PRIMARY KEY AUTOINCREMENT,
 					canonical_name TEXT    NOT NULL UNIQUE,
@@ -174,6 +180,26 @@ func (s *Store) migrateSteps() error {
 				`DROP TABLE show`,
 				`ALTER TABLE show_new RENAME TO show`,
 				`CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL`,
+				`CREATE TABLE episode_new (
+					show_id       INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
+					number        INTEGER NOT NULL,
+					state         TEXT    NOT NULL DEFAULT 'wanted',
+					infohash      TEXT,
+					release_title TEXT,
+					file_path     TEXT,
+					downloaded_at TEXT,
+					watched_at    TEXT,
+					PRIMARY KEY (show_id, number)
+				)`,
+				`INSERT INTO episode_new
+					SELECT show_id, number, state, infohash, release_title, file_path, downloaded_at, watched_at FROM episode`,
+				`DROP TABLE episode`,
+				`ALTER TABLE episode_new RENAME TO episode`,
+				`CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state)`,
+				// The rebuild is only safe to hand back with proof that no
+				// child row lost its parent along the way. A violation here
+				// means the copy itself was wrong, not the pragma window.
+				`PRAGMA foreign_key_check`,
 			} {
 				if _, err := s.db.Exec(stmt); err != nil {
 					return fmt.Errorf("exec: %w", err)
