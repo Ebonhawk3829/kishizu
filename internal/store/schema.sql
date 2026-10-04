@@ -91,9 +91,32 @@ CREATE TABLE IF NOT EXISTS episode (
     file_path     TEXT,
     downloaded_at TEXT,
     watched_at    TEXT,
+    exposed_at    TEXT,
     PRIMARY KEY (show_id, number)
 );
 CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state);
+
+-- Air times the schedule has published, one row per (show, episode).
+--
+-- The site's countdown names only the NEXT episode, so as the season runs the
+-- refresh sees each episode's slot exactly once — the day it becomes "next".
+-- Recording each sighting builds the per-episode history that the countdown
+-- alone cannot answer later: when the watch gate anchors kishizu behind the
+-- site's cursor (the user is still watching ep2 while the site advertises
+-- ep5), the cached slot gives that older episode a real air time and a real
+-- hunting window instead of a guess.
+--
+-- A watch or delete signal clears the episode's row: consumed episodes have
+-- no future, and keeping their slots would grow the table forever.
+--
+-- The refresh writes here; nothing else does. A row is a fact the site
+-- published, never an inference.
+CREATE TABLE IF NOT EXISTS air_cache (
+    show_id  INTEGER NOT NULL REFERENCES show(id) ON DELETE CASCADE,
+    episode  INTEGER NOT NULL,
+    airs_at  TEXT    NOT NULL,
+    PRIMARY KEY (show_id, episode)
+);
 
 -- Every infohash we have ever acted on, so a release that reappears after its
 -- episode row is gone is still recognised as seen.

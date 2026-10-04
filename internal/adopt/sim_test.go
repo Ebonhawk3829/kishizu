@@ -30,7 +30,7 @@ func TestSimAdoptedSeason(t *testing.T) {
 	eps, _ := st.EpisodesForShow(sh.ID)
 	var states []cycle.State
 	for _, ep := range eps {
-		states = append(states, cycle.StateOf(ep, nil, time.Now()))
+		states = append(states, cycle.StateOf(ep, 0, nil, time.Now()))
 	}
 	t.Logf("DOWNLOADING states: %v", states)
 	if d, ok := cycle.PollInterval(states); ok {
@@ -48,7 +48,7 @@ func TestSimAdoptedSeason(t *testing.T) {
 	eps, _ = st.EpisodesForShow(sh.ID)
 	states = nil
 	for _, ep := range eps {
-		states = append(states, cycle.StateOf(ep, nil, time.Now()))
+		states = append(states, cycle.StateOf(ep, 0, nil, time.Now()))
 	}
 	t.Logf("FINALISED states: %v", states)
 	t.Logf("NextUnwatched: %d", st.NextUnwatched(sh.ID))

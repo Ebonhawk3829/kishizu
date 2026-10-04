@@ -241,5 +241,16 @@ func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 	if err := root.Remove(rel); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return h.st.UpsertEpisode(showID, ep.Number, episode.Deleted, "", "")
+	if err := h.st.UpsertEpisode(showID, ep.Number, episode.Deleted, "", ""); err != nil {
+		return err
+	}
+	// Deleted is consumed, same as watched: the cached air slot has no future,
+	// and the gate's next exposure gets its hunting window stamped from now.
+	if err := h.st.ClearAirCache(showID, ep.Number); err != nil {
+		return err
+	}
+	if next := h.st.NextUnwatched(showID); next > 0 {
+		return h.st.StampExposure(showID, next)
+	}
+	return nil
 }

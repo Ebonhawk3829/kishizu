@@ -50,9 +50,11 @@ func TestSetNextEpisodeKeepsRealNumbers(t *testing.T) {
 	if err := s.SetNextEpisode(sh.ID, 7, at); err != nil {
 		t.Fatalf("SetNextEpisode: %v", err)
 	}
-	n, _, err := s.NextEpisode(sh.ID)
+	// The clamp protects the site fact, so it is read through SiteNextEpisode:
+	// the effective anchor is watch-gated and would read 1 with nothing watched.
+	n, _, err := s.SiteNextEpisode(sh.ID)
 	if err != nil {
-		t.Fatalf("NextEpisode: %v", err)
+		t.Fatalf("SiteNextEpisode: %v", err)
 	}
 	if n != 7 {
 		t.Errorf("next_ep = %d, want 7", n)

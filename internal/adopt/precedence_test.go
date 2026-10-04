@@ -33,5 +33,5 @@ func TestAiringDownloadingStillHunting(t *testing.T) {
 	ep, _ := st.GetEpisode(sh.ID, 5)
 	_, anchor, _ := st.NextEpisode(sh.ID)
 	t.Logf("anchor set: %v", anchor != nil)
-	t.Logf("state: %s", cycle.StateOf(ep, anchor, time.Now()))
+	t.Logf("state: %s", cycle.StateOf(ep, 0, anchor, time.Now()))
 }

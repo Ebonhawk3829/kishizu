@@ -66,7 +66,10 @@ func TestClearNextEpisodeRemovesAnchor(t *testing.T) {
 	if err := st.ClearNextEpisode(sh.ID); err != nil {
 		t.Fatal(err)
 	}
-	n, at, err := st.NextEpisode(sh.ID)
+	// The site fact is what clear removes; read it through SiteNextEpisode.
+	// The effective anchor still reads the user's progress (ep1) — that is
+	// the gate working, not a stale anchor.
+	n, at, err := st.SiteNextEpisode(sh.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

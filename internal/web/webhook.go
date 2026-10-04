@@ -240,6 +240,20 @@ func (s *Server) recordWatched(showID int64, epNum int, source string) error {
 	if err := s.st.UpsertEpisode(showID, epNum, episode.Watched, "", ""); err != nil {
 		return err
 	}
+	// The episode is consumed: its cached air slot has no future. Clearing it
+	// here (not on the next refresh) is what lets the watch gate take effect
+	// immediately — the effective anchor advances the moment the signal lands.
+	if err := s.st.ClearAirCache(showID, epNum); err != nil {
+		log.Printf("watched: clear air cache show %d up to %d: %v", showID, epNum, err)
+	}
+	// The gate just exposed the next episode to hunting. Stamping now is what
+	// bounds its hunting window when the air window already closed (catch-up):
+	// the window measures real opportunity from this moment.
+	if next := s.st.NextUnwatched(showID); next > 0 {
+		if err := s.st.StampExposure(showID, next); err != nil {
+			log.Printf("watched: stamp exposure show %d ep %d: %v", showID, next, err)
+		}
+	}
 	log.Printf("watched: show %d ep %d (%s)", showID, epNum, source)
 	// The anchor is the daily refresh's to move: the site's countdown is the
 	// authority on when the next episode airs, and simulating its advance on

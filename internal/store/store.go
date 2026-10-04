@@ -189,10 +189,11 @@ func (s *Store) migrateSteps() error {
 					file_path     TEXT,
 					downloaded_at TEXT,
 					watched_at    TEXT,
+					exposed_at    TEXT,
 					PRIMARY KEY (show_id, number)
 				)`,
 				`INSERT INTO episode_new
-					SELECT show_id, number, state, infohash, release_title, file_path, downloaded_at, watched_at FROM episode`,
+					SELECT show_id, number, state, infohash, release_title, file_path, downloaded_at, watched_at, exposed_at FROM episode`,
 				`DROP TABLE episode`,
 				`ALTER TABLE episode_new RENAME TO episode`,
 				`CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state)`,
@@ -254,6 +255,7 @@ func (s *Store) addColumns() error {
 		{"show", "airing_status", "TEXT"},
 		{"alias", "source", "TEXT NOT NULL DEFAULT 'manual'"},
 		{"seen", "origin", "TEXT NOT NULL DEFAULT 'grab'"},
+		{"episode", "exposed_at", "TEXT"},
 	}
 	for _, c := range cols {
 		rows, err := s.db.Query(
@@ -576,6 +578,13 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 	if n < 1 {
 		n = 1
 	}
+	// Record the slot in the air cache as well as the anchor. The countdown
+	// moves on and never mentions this episode again, so this is the one
+	// chance to keep the fact; the cache is what lets the watch gate anchor
+	// behind the site's cursor and still know when that older episode aired.
+	if err := s.CacheAirTime(showID, n, t); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`UPDATE show SET next_ep = ?, next_airs_at = ?,
 		schedule_fetched_at = datetime('now') WHERE id = ?`,
 		n, t.UTC().Format("2006-01-02 15:04:05"), showID)
@@ -614,7 +623,16 @@ func (s *Store) SetImageURL(showID int64, url string) error {
 }
 
 // NextEpisode returns the schedule's next-episode point, if known.
-func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
+// SiteNextEpisode returns the schedule's raw next-episode point: episode n
+// airs at t, exactly as the site's countdown says. This is the fact the daily
+// refresh writes, and the UI's air line renders it verbatim — it is true
+// regardless of where kishizu's own work is up to.
+//
+// The listener and the cycle logic must NOT consume this directly: they read
+// the effective anchor through NextEpisode, which caps it at the user's
+// watching progress. Consuming the site's cursor directly is what made a show
+// forget its unaired-but-released episodes the moment the countdown moved on.
+func (s *Store) SiteNextEpisode(showID int64) (int, *time.Time, error) {
 	var n sql.NullInt64
 	var at sql.NullString
 	err := s.db.QueryRow(`SELECT next_ep, next_airs_at FROM show WHERE id = ?`, showID).
@@ -633,6 +651,138 @@ func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
 		return int(n.Int64), nil, nil
 	}
 	return int(n.Int64), t, nil
+}
+
+// NextEpisode returns the show's effective anchor: the episode kishizu should
+// act on next, and when it airs.
+//
+// The anchor is the earlier of two facts: the site's next episode (what the
+// season is publishing) and the user's progress (the first episode without a
+// watched or deleted signal). Whichever is behind wins, because an episode the
+// user has not consumed is not done with — the site advertising ep5 while ep2
+// sits unwatched does not make ep2 somebody else's problem.
+//
+// The air time follows the effective episode: the site's slot when the two
+// coincide, otherwise the slot recorded in the air cache when the site
+// published that episode back when it was "next". No cached slot means the
+// time is unknown and the episode hunts immediately — the honest reading of
+// "this aired, and we never saw when".
+//
+// When the gate exposes an episode long after its air window closed (a
+// catch-up binge: the site is at ep8 and the user just watched ep1), the
+// cached air time would place the episode's 72-hour hunting window in the
+// past before the listener ever looked. The exposure stamp fixes that: the
+// consume paths stamp the newly exposed episode at the moment the gate
+// advanced to it, and the effective time is the LATER of air time and
+// exposure. The window then measures real opportunity to grab — 72 hours of
+// actual hunting from exposure — instead of a deadline that expired before
+// the episode was huntable.
+//
+// Progress is max-based (see NextUnwatched): a gap in watched history is a
+// failed watch signal, not out-of-order viewing, so the gate never skips ahead
+// of a hole.
+func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
+	siteN, siteAt, err := s.SiteNextEpisode(showID)
+	if err != nil {
+		return 0, nil, err
+	}
+	progress := s.NextUnwatched(showID)
+
+	n, at := siteN, siteAt
+	if progress < n || n <= 0 {
+		// The user is behind the site's cursor: the effective episode is the
+		// first unconsumed one, and its air time comes from the cache — the
+		// site published that slot when the episode was next, and the refresh
+		// has since moved the countdown past it.
+		n = progress
+		at = s.cachedAirTime(showID, n)
+		// The window opens no earlier than exposure: a stale air time must
+		// not close a window that never got to open.
+		if exp := s.exposureTime(showID, n); exp != nil && (at == nil || exp.After(*at)) {
+			at = exp
+		}
+	}
+	if n <= 0 {
+		return 0, nil, nil
+	}
+	return n, at, nil
+}
+
+// exposureTime reads when the gate exposed an episode to hunting. nil when
+// the episode has no row or no stamp — the window then runs from the air
+// time alone.
+func (s *Store) exposureTime(showID int64, episode int) *time.Time {
+	var at sql.NullString
+	err := s.db.QueryRow(`SELECT exposed_at FROM episode WHERE show_id = ? AND number = ?`,
+		showID, episode).Scan(&at)
+	if err != nil {
+		return nil
+	}
+	return parseTime(at)
+}
+
+// cachedAirTime reads one episode's slot from the air cache. nil when the
+// cache has no row — the caller treats that as "aired, time unknown".
+func (s *Store) cachedAirTime(showID int64, episode int) *time.Time {
+	var at sql.NullString
+	err := s.db.QueryRow(`SELECT airs_at FROM air_cache WHERE show_id = ? AND episode = ?`,
+		showID, episode).Scan(&at)
+	if err != nil {
+		return nil
+	}
+	return parseTime(at)
+}
+
+// CacheAirTime records a slot the schedule published: episode n airs at t.
+// The daily refresh is the only writer; a row is a fact, never an inference.
+func (s *Store) CacheAirTime(showID int64, n int, t time.Time) error {
+	if n < 1 || t.IsZero() {
+		return nil
+	}
+	_, err := s.db.Exec(`INSERT INTO air_cache (show_id, episode, airs_at) VALUES (?, ?, ?)
+		ON CONFLICT(show_id, episode) DO UPDATE SET airs_at = excluded.airs_at`,
+		showID, n, t.UTC().Format("2006-01-02 15:04:05"))
+	return err
+}
+
+// ClearAirCache drops the cached slots for episodes 1..n. A watch or delete
+// signal calls this: consumed episodes have no future, so their slots are
+// dead weight the cache should not carry.
+func (s *Store) ClearAirCache(showID int64, upTo int) error {
+	if upTo < 1 {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM air_cache WHERE show_id = ? AND episode <= ?`, showID, upTo)
+	return err
+}
+
+// StampExposure records the moment the gate exposed an episode to hunting.
+//
+// A consume signal (watched or deleted) advances the effective anchor to the
+// next unconsumed episode. If that episode's air window already closed — a
+// catch-up binge, where the site sits episodes ahead of the user — its
+// 72-hour window would expire before the listener ever looked at it. The
+// exposure stamp is the fix: the window opens no earlier than this moment,
+// so it measures real hunting time.
+//
+// The stamp lives on a wanted episode row, created here if absent. A wanted
+// row is inert everywhere else — the resurrection guard only stops terminal
+// states, NextUnwatched counts only watched/deleted, and the UI renders
+// wanted as the anchor's state — so creating one has no side effects beyond
+// carrying the stamp.
+//
+// Re-watching an already-consumed episode refreshes the stamp, extending the
+// window 72 hours. Harmless: the episode is consumed either way, and the
+// gate does not move.
+func (s *Store) StampExposure(showID int64, episode int) error {
+	if episode < 1 {
+		return nil
+	}
+	_, err := s.db.Exec(`INSERT INTO episode (show_id, number, state, exposed_at)
+		VALUES (?, ?, 'wanted', datetime('now'))
+		ON CONFLICT(show_id, number) DO UPDATE SET exposed_at = datetime('now')`,
+		showID, episode)
+	return err
 }
 
 // DeleteShow removes a show and everything hanging off it (cascade).

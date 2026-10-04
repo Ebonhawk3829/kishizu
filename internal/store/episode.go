@@ -182,6 +182,19 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int, force bool) (int, error) {
 		}
 		marked++
 	}
+	// Consumed episodes have no future: drop their cached air slots so the
+	// cache only ever holds episodes the gate can still act on.
+	if marked > 0 {
+		if err := s.ClearAirCache(showID, n); err != nil {
+			return marked, err
+		}
+		// The gate just exposed the next episode: stamp its hunting window's
+		// opening so a catch-up binge hunts from now, not from a long-past
+		// air time.
+		if err := s.StampExposure(showID, s.NextUnwatched(showID)); err != nil {
+			return marked, err
+		}
+	}
 	return marked, nil
 }
 

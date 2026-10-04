@@ -49,22 +49,28 @@ const (
 	NoReleaseFound State = "no release found"
 )
 
-// StateOf derives the state of one episode against the show's anchor.
+// StateOf derives the state of one episode against the show's effective
+// anchor.
 //
 // The stored lifecycle is the primary input: what has actually happened to
-// this episode decides its state. The anchor (next_ep, next_airs_at) only
-// breaks ties among episodes that have not been touched yet: the next
-// unaired episode IS next_ep, and episodes beyond it have no air time —
-// they are simply not due yet.
+// this episode decides its state. The anchor (next_ep, next_airs_at) places
+// the episodes that have not been touched yet. The anchor is watch-gated
+// (see store.NextEpisode): it never sits ahead of the user's progress, so a
+// wanted episode is always the anchor itself or beyond it — there is no
+// "wanted but behind the anchor" case to reason about, and no projection of
+// air times backwards through hiatuses and skipped weeks, which the site's
+// countdown cannot support.
 //
 //   - downloading -> downloading (handed to Transmission, not on disk yet)
 //   - downloaded  -> ready to watch (the user's queue)
 //   - missing     -> missing (was on disk, is not now)
 //   - watched/deleted -> up to date (this episode's cycle is complete)
-//   - wanted + before anchor air time -> up to date (nothing to do yet)
-//   - wanted + within window -> hunting
-//   - wanted + window closed -> no release found
-func StateOf(ep *store.Episode, anchor *time.Time, now time.Time) State {
+//   - beyond the anchor -> up to date (not due yet)
+//   - anchor with a future air time -> up to date (nothing to do yet)
+//   - anchor with no air time -> hunting (aired; the slot was never seen)
+//   - anchor within window -> hunting
+//   - anchor past window -> no release found
+func StateOf(ep *store.Episode, anchorEp int, anchor *time.Time, now time.Time) State {
 	switch episode.ParseState(string(ep.State)) {
 	case episode.Downloading:
 		return Downloading
@@ -78,9 +84,15 @@ func StateOf(ep *store.Episode, anchor *time.Time, now time.Time) State {
 
 	// wanted: not touched yet, so the anchor is the only thing that can
 	// place it in time.
+	if ep.Number > anchorEp {
+		// Beyond the anchor: the season has not reached this episode.
+		return UpToDate
+	}
 	if anchor == nil {
-		// No anchor: cannot place it in time. Treat as hunting so the show
-		// is not silently dropped; the UI flags it as needing attention.
+		// The anchor episode has no known air time. Under the watch gate this
+		// means one of two things, and both hunt: the episode aired and its
+		// slot was never published to us, or the show has no schedule point at
+		// all. Either way the listener should be looking, not waiting.
 		return Hunting
 	}
 	switch {

@@ -137,7 +137,7 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 		// The anchor is the show's single air-date fact: the next unaired
 		// episode is next_ep and it airs at next_airs_at. Episodes beyond it
 		// are not due yet; episodes before it are placed by their own state.
-		_, anchor, err := l.st.NextEpisode(sh.ID)
+		anchorEp, anchor, err := l.st.NextEpisode(sh.ID)
 		if err != nil {
 			debug.Log("due shows: %s: %v", sh.CanonicalName, err)
 			continue
@@ -145,7 +145,7 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 
 		var states []cycle.State
 		for _, ep := range eps {
-			states = append(states, cycle.StateOf(ep, anchor, now))
+			states = append(states, cycle.StateOf(ep, anchorEp, anchor, now))
 		}
 
 		if d, ok := cycle.PollInterval(states); ok {
@@ -189,11 +189,12 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 	return len(offsets) > 0
 }
 
-// hasAired reports whether episode 1 of this show has aired, from the
-// episode rows and the anchor: any state past "wanted" means a release was
-// seen, and an anchor air time in the past means the season has started even
-// if nothing was grabbed. An announced-but-unscheduled show has neither, and
-// there is nothing to train on yet.
+// hasAired reports whether episode 1 of this show has aired. Three proofs,
+// any one of which settles it: an episode row past wanted (a release was
+// seen), the site's countdown pointing past ep1 (the site only advances the
+// cursor because the premiere aired), or the effective anchor's air time in
+// the past. An announced-but-unscheduled show has none of these, and there is
+// nothing to train on yet.
 func (l *Listener) hasAired(eps []*store.Episode, anchor *time.Time, now time.Time) bool {
 	for _, ep := range eps {
 		if ep.Number != 1 {
@@ -201,6 +202,11 @@ func (l *Listener) hasAired(eps []*store.Episode, anchor *time.Time, now time.Ti
 		}
 		switch episode.ParseState(string(ep.State)) {
 		case episode.Downloading, episode.Downloaded, episode.Watched, episode.Deleted, episode.Missing:
+			return true
+		}
+	}
+	if len(eps) > 0 {
+		if siteN, _, err := l.st.SiteNextEpisode(eps[0].ShowID); err == nil && siteN > 1 {
 			return true
 		}
 	}

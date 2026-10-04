@@ -21,34 +21,47 @@ func at(offset time.Duration) *time.Time {
 	return &t
 }
 
-// The anchor is the show's single air-date fact: the next unaired episode
-// airs at next_airs_at. Every wanted episode is placed against that one
-// time — there are no per-episode dates to consult.
+// The anchor is the show's effective next episode: watch-gated, so it never
+// sits ahead of the user's progress. A wanted episode is the anchor itself
+// or beyond it — there is no wanted-but-behind case to place.
 func TestStateCycle(t *testing.T) {
 	cases := []struct {
-		name   string
-		ep     *store.Episode
-		anchor *time.Time
-		want   State
+		name     string
+		ep       *store.Episode
+		anchorEp int
+		anchor   *time.Time
+		want     State
 	}{
-		{"watched is up to date", ep(episode.Watched), at(-time.Hour), UpToDate},
-		{"deleted is up to date", ep(episode.Deleted), at(-time.Hour), UpToDate},
-		{"downloaded is ready to watch", ep(episode.Downloaded), at(-time.Hour), ReadyToWatch},
-		{"wanted before anchor is up to date", ep(episode.Wanted), at(time.Hour), UpToDate},
-		{"wanted just after anchor is hunting", ep(episode.Wanted), at(-time.Hour), Hunting},
-		{"wanted near window edge is hunting", ep(episode.Wanted), at(-Window + time.Minute), Hunting},
-		{"wanted past window is no release found", ep(episode.Wanted), at(-Window - time.Minute), NoReleaseFound},
-		{"wanted with no anchor is hunting", ep(episode.Wanted), nil, Hunting},
+		{"watched is up to date", ep(episode.Watched), 1, at(-time.Hour), UpToDate},
+		{"deleted is up to date", ep(episode.Deleted), 1, at(-time.Hour), UpToDate},
+		{"downloaded is ready to watch", ep(episode.Downloaded), 1, at(-time.Hour), ReadyToWatch},
+		{"anchor with future air time is up to date", ep(episode.Wanted), 1, at(time.Hour), UpToDate},
+		{"anchor just after air time is hunting", ep(episode.Wanted), 1, at(-time.Hour), Hunting},
+		{"anchor near window edge is hunting", ep(episode.Wanted), 1, at(-Window + time.Minute), Hunting},
+		{"anchor past window is no release found", ep(episode.Wanted), 1, at(-Window - time.Minute), NoReleaseFound},
+		{"anchor with no air time is hunting", ep(episode.Wanted), 1, nil, Hunting},
 		// Downloading is its own state, not a form of hunting: the episode
 		// is in flight and cannot be re-grabbed, so claiming the listener
 		// is still hunting for it is wrong.
-		{"downloading is downloading", ep(episode.Downloading), at(-time.Hour), Downloading},
-		{"downloading with no anchor is downloading", ep(episode.Downloading), nil, Downloading},
+		{"downloading is downloading", ep(episode.Downloading), 1, at(-time.Hour), Downloading},
+		{"downloading with no anchor is downloading", ep(episode.Downloading), 1, nil, Downloading},
 	}
 	for _, c := range cases {
-		if got := StateOf(c.ep, c.anchor, ref); got != c.want {
+		if got := StateOf(c.ep, c.anchorEp, c.anchor, ref); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// TestBeyondAnchorIsNotDue: an episode past the effective anchor has not been
+// reached yet, whatever its state. The gate keeps the anchor at the user's
+// progress, so "beyond" is exactly "the season has not got here".
+func TestBeyondAnchorIsNotDue(t *testing.T) {
+	future := ep(episode.Wanted)
+	future.Number = 3
+	// Anchor at ep2 with a past air time: ep3 is still not due.
+	if got := StateOf(future, 2, at(-time.Hour), ref); got != UpToDate {
+		t.Errorf("ep3 with anchor at ep2 = %q, want %q", got, UpToDate)
 	}
 }
 

@@ -42,7 +42,10 @@ func TestAdoptedEpisodeStatesRender(t *testing.T) {
 		if err != nil || ep == nil {
 			t.Fatalf("episode for state %s: %v", s, err)
 		}
-		if got := cycle.StateOf(ep, nil, time.Now()); got != want {
+		// anchorEp matches the episode: adoption has no watch gate and no
+		// schedule, so the episode is its own anchor and the nil air time
+		// reads as hunting.
+		if got := cycle.StateOf(ep, 1, nil, time.Now()); got != want {
 			t.Errorf("state %s with no air date renders as %q, want %q", s, got, want)
 		}
 	}

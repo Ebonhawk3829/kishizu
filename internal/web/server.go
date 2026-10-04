@@ -485,12 +485,12 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// The anchor is the show's single air-date fact.
-		_, anchor, err := s.st.NextEpisode(sh.ID)
+		anchorEp, anchor, err := s.st.NextEpisode(sh.ID)
 		if err != nil {
 			continue
 		}
 		for _, ep := range eps {
-			switch cycle.StateOf(ep, anchor, now) {
+			switch cycle.StateOf(ep, anchorEp, anchor, now) {
 			case cycle.ReadyToWatch:
 				ready++
 			case cycle.Downloading:
@@ -611,7 +611,11 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	eps := []entry{}
 	for _, sh := range shows {
-		n, at, err := s.st.NextEpisode(sh.ID)
+		// The timetable answers "what airs this week" — the site's countdown,
+		// not the watch-gated anchor. The gate anchors kishizu at the user's
+		// progress, which can sit episodes behind the season with no date;
+		// those are the listener's business, not the calendar's.
+		n, at, err := s.st.SiteNextEpisode(sh.ID)
 		if err != nil || at == nil || n <= 0 {
 			continue
 		}
@@ -636,7 +640,7 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		state := cycle.Hunting
 		if ep != nil {
-			state = cycle.StateOf(ep, at, now)
+			state = cycle.StateOf(ep, n, at, now)
 		} else if at.After(now) {
 			state = cycle.UpToDate
 		}
@@ -749,7 +753,10 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 	out := make([]showInfo, 0, len(shows))
 	for _, sh := range shows {
 		si := showInfo{Name: sh.CanonicalName, NextEp: s.st.NextUnwatched(sh.ID)}
-		if n, at, _ := s.st.NextEpisode(sh.ID); at != nil && n > 0 {
+		// The air line is the site's countdown, verbatim: a true fact about
+		// the season. NextEp above is the user's progress — the two can
+		// legitimately differ, and both are honest.
+		if n, at, _ := s.st.SiteNextEpisode(sh.ID); at != nil && n > 0 {
 			si.NextEp = n
 			formatted := at.Format(time.RFC3339)
 			si.NextAirsAt = &formatted
@@ -759,10 +766,10 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 
 		eps, err := s.st.EpisodesForShow(sh.ID)
 		if err == nil {
-			_, anchor, _ := s.st.NextEpisode(sh.ID)
+			anchorEp, anchor, _ := s.st.NextEpisode(sh.ID)
 			var states []cycle.State
 			for _, ep := range eps {
-				states = append(states, cycle.StateOf(ep, anchor, now))
+				states = append(states, cycle.StateOf(ep, anchorEp, anchor, now))
 				ei := epInfo{Number: ep.Number, State: string(ep.State), Path: ep.FilePath}
 				si.Episodes = append(si.Episodes, ei)
 			}
@@ -1358,9 +1365,14 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Finished: sh.Finished(),
 			ImageURL: s.imageFor(sh),
 		}
-		// The anchor is the show's single air-date fact: the next unaired
-		// episode is next_ep and it airs at next_airs_at. The UI's air line
-		// reads it directly; there are no per-episode dates behind it.
+		// The air line renders the site's countdown verbatim: it is a true
+		// fact about the season regardless of where kishizu's work is. The
+		// card's state comes from the watch-gated anchor, which can sit
+		// episodes behind — two honest numbers instead of one fudged one.
+		siteEp, siteAt, err := s.st.SiteNextEpisode(sh.ID)
+		if err != nil {
+			siteEp, siteAt = 0, nil
+		}
 		anchorEp, anchorAt, err := s.st.NextEpisode(sh.ID)
 		if err != nil {
 			anchorEp, anchorAt = 0, nil
@@ -1368,7 +1380,7 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 		if eps, err := s.st.EpisodesForShow(sh.ID); err == nil {
 			var states []cycle.State
 			for _, ep := range eps {
-				states = append(states, cycle.StateOf(ep, anchorAt, time.Now()))
+				states = append(states, cycle.StateOf(ep, anchorEp, anchorAt, time.Now()))
 				switch episode.ParseState(string(ep.State)) {
 				case episode.Downloaded:
 					j.Downloaded++
@@ -1378,35 +1390,29 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 					j.Deleted++
 				}
 			}
-			// Aired means episode 1 has happened. Until then there is nothing
-			// to train on and nothing to hunt for, so the show is simply
-			// waiting. An unknown anchor counts as not yet aired: the site
-			// lists announced-but-unscheduled shows, and we cannot claim an
-			// episode exists when we do not know when it would.
-			//
-			// Episode 1 specifically — not the next unwatched one. Mid-way
-			// through a season the next episode is always in the future, which
-			// made every airing show read as unaired.
-			//
-			// anchorEp >= 1, not <= 1: the anchor is 1-based, so a stored 0 is
-			// corruption (a pre-clamp "Ep 0" premiere countdown), not an early
-			// episode. Treating 0 as aired would flag a show whose premiere
-			// the site no longer even lists as needing training.
-			aired := (anchorEp == 1 && anchorAt != nil && !anchorAt.After(time.Now())) ||
-				j.Downloaded > 0 || j.Watched > 0 || j.Deleted > 0
+			// Aired means episode 1 has happened. Three proofs, any one of
+			// which settles it: an episode row past wanted (direct evidence),
+			// the site's countdown pointing past ep1 (the site only advances
+			// the cursor because the premiere aired), or the effective anchor
+			// being ep1 with its air time passed. An unknown site cursor
+			// proves nothing either way: the site lists announced-but-
+			// unscheduled shows, and an announced show has not premiered.
+			aired := j.Downloaded > 0 || j.Watched > 0 || j.Deleted > 0 ||
+				siteEp > 1 ||
+				(anchorEp == 1 && anchorAt != nil && !anchorAt.After(time.Now()))
 			j.State, j.NeedsAttention = showState(states, j.Trained, aired, sh.Source == store.SourceSeaDex, sh.Finished())
 		}
-		// A 0 anchor is corruption, not a schedule (see the aired calculation
-		// above): serving it would render an "Ep 0" line for a premiere the
-		// site does not list. Nothing is the honest value.
-		if anchorAt != nil && anchorEp >= 1 {
+		// A 0 site cursor is corruption, not a schedule (see the aired
+		// calculation above): serving it would render an "Ep 0" line for a
+		// premiere the site does not list. Nothing is the honest value.
+		if siteAt != nil && siteEp >= 1 {
 			status := "upcoming"
-			if anchorAt.Before(time.Now()) {
+			if siteAt.Before(time.Now()) {
 				status = "aired"
 			}
 			j.NextSchedule = &scheduleJSON{
-				Episode: anchorEp,
-				AirsAt:  anchorAt.Format(time.RFC3339),
+				Episode: siteEp,
+				AirsAt:  siteAt.Format(time.RFC3339),
 				Status:  status,
 			}
 		}
