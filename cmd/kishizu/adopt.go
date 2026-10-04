@@ -119,7 +119,7 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 		}
 	}
 	// Record the infohash so a later re-grab skips this release.
-	if err := st.MarkSeen(plan.Torrent.InfoHash, sh.ID, 0); err != nil {
+	if err := st.MarkSeen(plan.Torrent.InfoHash, sh.ID, 0, store.SeenGrab); err != nil {
 		return fmt.Errorf("mark seen: %w", err)
 	}
 

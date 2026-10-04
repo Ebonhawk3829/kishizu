@@ -24,7 +24,7 @@ func TestRegrabSkipsPreviousRelease(t *testing.T) {
 	sh, _ := st.CreateShow("Show", nil, 12)
 
 	// Grab release A, then it lands on disk.
-	if err := st.MarkSeen("HASH_A", sh.ID, 5); err != nil {
+	if err := st.MarkSeen("HASH_A", sh.ID, 5, store.SeenGrab); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.UpsertEpisode(sh.ID, 5, episode.Downloading, "HASH_A", "Release A"); err != nil {
@@ -46,8 +46,8 @@ func TestRegrabSkipsPreviousRelease(t *testing.T) {
 	t.Logf("after unlatch:  state=%s hash=%q title=%q path=%q", ep.State, ep.InfoHash, ep.ReleaseTitle, ep.FilePath)
 
 	// The seen check is what excludes the old release on the next grab.
-	seenA, _ := st.HasSeen("HASH_A")
-	seenB, _ := st.HasSeen("HASH_B")
+	seenA, _ := st.HasSeen("HASH_A", store.SeenGrab)
+	seenB, _ := st.HasSeen("HASH_B", store.SeenGrab)
 	t.Logf("HasSeen(A)=%v (must be true: skipped next time)", seenA)
 	t.Logf("HasSeen(B)=%v (must be false: eligible)", seenB)
 

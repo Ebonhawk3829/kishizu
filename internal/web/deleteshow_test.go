@@ -27,7 +27,7 @@ func TestDeleteShowRemovesEverything(t *testing.T) {
 	sh, _ := st.CreateShow("Show", []string{"Alt Name"}, 12)
 	_ = st.SetGroupOffset(sh.ID, "VARYG", 40, "test")
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Watched, "", "")
-	_ = st.MarkSeen("deadbeef", sh.ID, 1)
+	_ = st.MarkSeen("deadbeef", sh.ID, 1, store.SeenGrab)
 
 	s := &Server{st: st}
 	body := `{"id": ` + fmt.Sprintf("%d", sh.ID) + `}`
@@ -53,7 +53,7 @@ func TestDeleteShowRemovesEverything(t *testing.T) {
 	if offs, _ := st.GroupOffsets(again.ID); len(offs) != 0 {
 		t.Errorf("%d offsets inherited by the re-created show", len(offs))
 	}
-	if seen, _ := st.HasSeen("deadbeef"); seen {
+	if seen, _ := st.HasSeen("deadbeef", store.SeenGrab); seen {
 		t.Error("dedupe entry survived the delete")
 	}
 }

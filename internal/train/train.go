@@ -222,7 +222,12 @@ func (s *Session) Propose(items []nyaa.Item, n int) []Candidate {
 		}
 		// Releases this show has already acted on — grabbed by the listener,
 		// or confirmed in an earlier training session — carry nothing new.
-		if seen, err := s.st.HasSeen(it.InfoHash); err == nil && seen {
+		// Both origins are skipped here: a grabbed release teaches nothing,
+		// and a confirmed one has already been worked through.
+		if seenGrab, err := s.st.HasSeen(it.InfoHash, store.SeenGrab); err == nil && seenGrab {
+			continue
+		}
+		if seenTrain, err := s.st.HasSeen(it.InfoHash, store.SeenTrain); err == nil && seenTrain {
 			continue
 		}
 		if ok, _ := match.AliasGate(s.m.Aliases(), it.Title); !ok {
@@ -366,9 +371,10 @@ func (s *Session) Commit() error {
 	for hash := range s.Asked {
 		// Asked holds both infohashes (40 hex chars) and titles; only
 		// infohashes are meaningful across sessions. Anything else is a
-		// title, which the seen table does not key on.
+		// title, which the seen table does not key on. Tagged SeenTrain:
+		// the listener must still grab a confirmed release.
 		if len(hash) == 40 && isHex(hash) {
-			if err := s.st.MarkSeen(hash, s.show.ID, 0); err != nil {
+			if err := s.st.MarkSeen(hash, s.show.ID, 0, store.SeenTrain); err != nil {
 				return err
 			}
 		}

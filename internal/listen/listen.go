@@ -256,9 +256,12 @@ func truncate(s string, n int) string {
 func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decision {
 	d := Decision{Item: it, ShowID: sh.ID, Show: sh.CanonicalName}
 
-	// 1. Dedupe on infohash. The identity of a release is its infohash, and it
-	// is in the RSS, so this works without downloading anything.
-	if seen, err := l.st.HasSeen(it.InfoHash); err != nil {
+	// 1. Dedupe on infohash — but only on rows the listener itself wrote.
+	// Training also records confirms here, and a confirmed release is
+	// exactly the one that should be grabbed: skipping it left a trained
+	// show hunting forever while every correct release was rejected as
+	// "already seen".
+	if seen, err := l.st.HasSeen(it.InfoHash, store.SeenGrab); err != nil {
 		d.Reason = fmt.Sprintf("seen check: %v", err)
 		return d
 	} else if seen {
@@ -472,7 +475,7 @@ func (l *Listener) FilterPreferences(decisions []Decision) []Decision {
 // and advances the schedule pointer: the schedule's next-episode point is held
 // until a download confirms that episode is real.
 func (l *Listener) MarkGrabbed(d Decision) error {
-	if err := l.st.MarkSeen(d.Item.InfoHash, d.ShowID, d.Episode); err != nil {
+	if err := l.st.MarkSeen(d.Item.InfoHash, d.ShowID, d.Episode, store.SeenGrab); err != nil {
 		return err
 	}
 	return l.st.UpsertEpisode(d.ShowID, d.Episode, episode.Downloading, d.Item.InfoHash, d.Item.Title)

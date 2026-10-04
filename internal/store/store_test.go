@@ -149,22 +149,57 @@ func TestGroupOffsets(t *testing.T) {
 func TestSeenInfohash(t *testing.T) {
 	s := testStore(t)
 
-	if seen, _ := s.HasSeen("abc"); seen {
+	if seen, _ := s.HasSeen("abc", SeenGrab); seen {
 		t.Error("nothing seen yet")
 	}
-	if err := s.MarkSeen("abc", 1, 7); err != nil {
+	if err := s.MarkSeen("abc", 1, 7, SeenGrab); err != nil {
 		t.Fatal(err)
 	}
-	if seen, _ := s.HasSeen("abc"); !seen {
+	if seen, _ := s.HasSeen("abc", SeenGrab); !seen {
 		t.Error("should be seen after MarkSeen")
 	}
 	// Idempotent.
-	if err := s.MarkSeen("abc", 1, 7); err != nil {
+	if err := s.MarkSeen("abc", 1, 7, SeenGrab); err != nil {
 		t.Fatalf("MarkSeen twice: %v", err)
 	}
 	// Empty hash is a no-op, not an error.
-	if err := s.MarkSeen("", 1, 7); err != nil {
+	if err := s.MarkSeen("", 1, 7, SeenGrab); err != nil {
 		t.Errorf("empty hash: %v", err)
+	}
+}
+
+// TestSeenOriginsDoNotCross: the two consumers of the seen table ask
+// different questions, and a row from one must never answer the other's.
+// A training confirm must not block the listener's grab — that collision
+// left a trained show hunting forever while every correct release was
+// rejected as "already seen".
+func TestSeenOriginsDoNotCross(t *testing.T) {
+	s := testStore(t)
+
+	// Training confirms a release.
+	if err := s.MarkSeen("hash-train", 1, 0, SeenTrain); err != nil {
+		t.Fatal(err)
+	}
+	// Training sees it; the listener does not.
+	if seen, _ := s.HasSeen("hash-train", SeenTrain); !seen {
+		t.Error("training should see its own confirm")
+	}
+	if seen, _ := s.HasSeen("hash-train", SeenGrab); seen {
+		t.Error("a training confirm must not block the listener's grab")
+	}
+
+	// The listener grabs a release.
+	if err := s.MarkSeen("hash-grab", 1, 7, SeenGrab); err != nil {
+		t.Fatal(err)
+	}
+	// The listener sees it; training does not (a grabbed release has
+	// nothing left to teach, but that is training's own skip, not a
+	// shared one).
+	if seen, _ := s.HasSeen("hash-grab", SeenGrab); !seen {
+		t.Error("listener should see its own grab")
+	}
+	if seen, _ := s.HasSeen("hash-grab", SeenTrain); seen {
+		t.Error("a listener grab must not read as a training confirm")
 	}
 }
 

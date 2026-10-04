@@ -207,6 +207,18 @@ func (s *Store) migrateSteps() error {
 			}
 			return nil
 		}},
+		{3, "backfill seen.origin for rows written before the column existed", func(s *Store) error {
+			// Every pre-column row was written by the listener's grab path or
+			// the adopt path — training only started writing here when the
+			// origin column arrived. Defaulting to 'grab' preserves exactly
+			// the behaviour those rows had before the split: the listener
+			// skips them, training skips them (they were grabbed, so there
+			// is nothing new to learn).
+			if _, err := s.db.Exec(`UPDATE seen SET origin = 'grab' WHERE origin IS NULL OR origin = ''`); err != nil {
+				return fmt.Errorf("backfill origin: %w", err)
+			}
+			return nil
+		}},
 	}
 	for _, st := range steps {
 		var n int
@@ -241,6 +253,7 @@ func (s *Store) addColumns() error {
 		{"show", "slug", "TEXT"},
 		{"show", "airing_status", "TEXT"},
 		{"alias", "source", "TEXT NOT NULL DEFAULT 'manual'"},
+		{"seen", "origin", "TEXT NOT NULL DEFAULT 'grab'"},
 	}
 	for _, c := range cols {
 		rows, err := s.db.Query(
@@ -690,25 +703,54 @@ func (s *Store) GroupOffsets(showID int64) (map[string]int, error) {
 
 // ---------- seen infohashes ----------
 
-// MarkSeen records an infohash we have acted on. Persisted separately from
-// episode rows so a release that reappears after its episode is deleted is
-// still recognised.
-func (s *Store) MarkSeen(infohash string, showID int64, episode int) error {
+// SeenOrigin records who wrote a seen row. The two consumers of the table ask
+// different questions, and a row from one must never answer the other's:
+//
+//	SeenGrab  — the listener downloaded it (or an adoption did). The listener
+//	            skips these: never re-grab. Training skips them too — a
+//	            downloaded release has nothing left to teach.
+//	SeenTrain — training confirmed it. Training skips these: do not re-offer.
+//	            The listener must NOT skip them — a confirmed release is
+//	            exactly the one that should be grabbed.
+type SeenOrigin string
+
+const (
+	SeenGrab  SeenOrigin = "grab"
+	SeenTrain SeenOrigin = "train"
+)
+
+// MarkSeen records an infohash we have acted on, tagged with who acted.
+// Persisted separately from episode rows so a release that reappears after
+// its episode is deleted is still recognised.
+func (s *Store) MarkSeen(infohash string, showID int64, episode int, origin SeenOrigin) error {
 	if infohash == "" {
 		return nil
 	}
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO seen (infohash, show_id, episode) VALUES (?, ?, ?)`,
-		infohash, showID, episode)
+	if origin == "" {
+		origin = SeenGrab
+	}
+	_, err := s.db.Exec(`INSERT INTO seen (infohash, show_id, episode, origin)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(infohash) DO UPDATE SET origin = excluded.origin`,
+		infohash, showID, episode, string(origin))
 	return err
 }
 
-// HasSeen reports whether we have acted on this infohash before.
-func (s *Store) HasSeen(infohash string) (bool, error) {
+// HasSeen reports whether we have acted on this infohash before, from the
+// given consumer's perspective.
+//
+// The origin split is the point. A training confirm and a listener grab both
+// write here, but they mean different things: training must not re-offer a
+// confirmed release, while the listener must happily grab one. Reading all
+// origins made a training confirm permanently block the grab — the bug that
+// left Black Clover hunting forever.
+func (s *Store) HasSeen(infohash string, origin SeenOrigin) (bool, error) {
 	if infohash == "" {
 		return false, nil
 	}
 	var n int
-	err := s.db.QueryRow(`SELECT 1 FROM seen WHERE infohash = ?`, infohash).Scan(&n)
+	err := s.db.QueryRow(`SELECT 1 FROM seen WHERE infohash = ? AND origin = ?`,
+		infohash, string(origin)).Scan(&n)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

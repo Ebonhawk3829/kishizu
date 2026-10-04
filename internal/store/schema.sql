@@ -97,10 +97,21 @@ CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state);
 
 -- Every infohash we have ever acted on, so a release that reappears after its
 -- episode row is gone is still recognised as seen.
+--
+-- origin records WHO acted on it, because the two consumers ask different
+-- questions and must never read each other's rows:
+--
+--   grab   — the listener downloaded it. The listener skips these (never
+--            re-grab), and training skips them too (nothing new to learn).
+--   train  — training confirmed it. Training skips these (do not re-offer),
+--            but the listener MUST NOT: a confirmed release is exactly the
+--            one that should be grabbed.
+--   adopt  — a finished-season adoption downloaded it. Skipped like grab.
 CREATE TABLE IF NOT EXISTS seen (
     infohash  TEXT PRIMARY KEY,
     show_id   INTEGER,
     episode   INTEGER,
+    origin    TEXT NOT NULL DEFAULT 'grab',
     seen_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

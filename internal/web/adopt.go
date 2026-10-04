@@ -217,7 +217,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Record the infohash so a later re-grab skips this release.
-	if err := s.st.MarkSeen(req.InfoHash, sh.ID, 0); err != nil {
+	if err := s.st.MarkSeen(req.InfoHash, sh.ID, 0, store.SeenGrab); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}

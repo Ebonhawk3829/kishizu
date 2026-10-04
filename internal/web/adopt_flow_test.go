@@ -89,7 +89,7 @@ func TestAdoptEndToEnd(t *testing.T) {
 	}
 
 	// The infohash is recorded, so a later re-grab skips this release.
-	seen, _ := st.HasSeen("HASH123")
+	seen, _ := st.HasSeen("HASH123", store.SeenGrab)
 	if !seen {
 		t.Error("infohash not recorded as seen")
 	}
