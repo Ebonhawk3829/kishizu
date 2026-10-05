@@ -24,7 +24,7 @@ func TestDeleteShowRemovesEverything(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("Show", []string{"Alt Name"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Alt Name"})
 	_ = st.SetGroupOffset(sh.ID, "VARYG", 40, "test")
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Watched, "", "")
 	_ = st.MarkSeen("deadbeef", sh.ID, 1, store.SeenGrab)
@@ -43,7 +43,7 @@ func TestDeleteShowRemovesEverything(t *testing.T) {
 	}
 	// A re-created show must come back clean: no aliases, episodes or
 	// offsets inherited from the deleted one.
-	again, err := st.CreateShow("Show", nil, 12)
+	again, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

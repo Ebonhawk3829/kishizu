@@ -17,7 +17,7 @@ import (
 // animeschedule to hold its next-episode air point where known.
 func seedFromConfig(st *store.Store, shows []config.Show) error {
 	for _, cs := range shows {
-		sh, err := st.CreateShow(cs.Name, cs.Aliases, cs.Max)
+		sh, err := st.CreateShow(cs.Name, cs.Aliases)
 		if err != nil {
 			// Already present: update its aliases so editing kishizu.yaml
 			// takes effect on an existing database.
@@ -28,11 +28,6 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 			sh = existing
 			for _, a := range cs.Aliases {
 				if err := st.AddAlias(sh.ID, a); err != nil {
-					return err
-				}
-			}
-			if cs.Max > 0 {
-				if err := st.SetMaxEpisode(sh.ID, cs.Max); err != nil {
 					return err
 				}
 			}

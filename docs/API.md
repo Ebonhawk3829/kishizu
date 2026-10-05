@@ -37,7 +37,6 @@ Every tracked show.
     "id": 1,
     "name": "Tomb Raider King",
     "next": 10,
-    "max": 12,
     "aliases": ["Dogul Wang"],
     "offsets": {"VARYG": 0},
     "trained": true,
@@ -69,12 +68,11 @@ otherwise `"upcoming"`. It is absent for shows with no schedule page.
 
 Add a show. `name` accepts either a plain name or an animeschedule.net URL (or
 a bare slug). A URL is better: the slug is an exact identity, and the page
-carries the season length, cover art and every alternative name.
+carries the cover art and every alternative name.
 
 ```json
 {"name":"https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4",
- "aliases":["ReZero 4"],
- "max_episode":0}
+ "aliases":["ReZero 4"]}
 ```
 
 ### `DELETE /api/shows`

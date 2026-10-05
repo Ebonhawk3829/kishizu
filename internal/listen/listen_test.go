@@ -29,7 +29,7 @@ func item(hash, title string) nyaa.Item {
 // skipped without downloading. Infohash is the identity of a release.
 func TestDedupesOnInfohash(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	l := New(st, nil)
@@ -59,7 +59,7 @@ func TestDedupesOnInfohash(t *testing.T) {
 // how good it is.
 func TestTerminalEpisodeIsNeverRegrabbed(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	// Episode 9 was watched and deleted.
@@ -87,7 +87,7 @@ func TestTerminalEpisodeIsNeverRegrabbed(t *testing.T) {
 // mid-watch.
 func TestDownloadedEpisodeIsNotRegrabbed(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "OLD", "old")
 
@@ -103,7 +103,7 @@ func TestDownloadedEpisodeIsNotRegrabbed(t *testing.T) {
 // floor comes from the quality policy — training cannot change it.
 func TestResolutionFloor(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	l := New(st, nil)
@@ -126,7 +126,7 @@ func TestResolutionFloor(t *testing.T) {
 // unusually, the fix is to teach the vocabulary, not to lower the guard.
 func TestUnreadableResolutionIsRejected(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	l := New(st, nil)
@@ -145,7 +145,7 @@ func TestUnreadableResolutionIsRejected(t *testing.T) {
 // point of enforcement, not only in the training panel.
 func TestVocabularyReadsUnusualResolution(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 	if err := st.LearnVocabulary("resolution", "FHD", "1080p"); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestVocabularyReadsUnusualResolution(t *testing.T) {
 // TestBatchIsRejected: batches are out of scope globally.
 func TestBatchIsRejected(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	l := New(st, nil)
@@ -180,7 +180,7 @@ func TestBatchIsRejected(t *testing.T) {
 // download. A wrong grab is worse than a missed one.
 func TestLowConfidenceIsNotGrabbed(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	// Offsets disagree, so an unseen group is a coin flip.
 	_ = st.SetGroupOffset(sh.ID, "A", 0, "training")
 	_ = st.SetGroupOffset(sh.ID, "B", 40, "training")
@@ -198,7 +198,7 @@ func TestLowConfidenceIsNotGrabbed(t *testing.T) {
 // OtherGroup is not.
 func TestBestPicksPreferredGroup(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 	_ = st.SetGroupOffset(sh.ID, "OtherGroup", 0, "training")
 
@@ -241,7 +241,7 @@ func TestBestBreaksTiesOnSeeders(t *testing.T) {
 // less-preferred group.
 func TestRankUsesTheVocabAppliedParse(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 	_ = st.SetGroupOffset(sh.ID, "OtherGroup", 0, "training")
 

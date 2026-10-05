@@ -22,7 +22,7 @@ func TestAdoptedShowThroughAPI(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("DanMachi III", nil, 12)
+	sh, _ := st.CreateShow("DanMachi III", nil)
 	if err := st.SetSource(sh.ID, store.SourceSeaDex); err != nil {
 		t.Fatal(err)
 	}

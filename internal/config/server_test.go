@@ -172,8 +172,8 @@ shows:
 	if len(f.Shows[0].Aliases) != 1 || f.Shows[0].Aliases[0] != "Dogul Wang" {
 		t.Errorf("aliases = %v", f.Shows[0].Aliases)
 	}
-	if f.Shows[0].Watched != 9 || f.Shows[0].Max != 12 {
-		t.Errorf("watched/max = %d/%d, want 9/12", f.Shows[0].Watched, f.Shows[0].Max)
+	if f.Shows[0].Watched != 9 {
+		t.Errorf("watched = %d, want 9", f.Shows[0].Watched)
 	}
 }
 

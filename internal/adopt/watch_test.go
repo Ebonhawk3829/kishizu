@@ -18,7 +18,7 @@ func TestSimWatchSignal(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("DanMachi III", nil, 12)
+	sh, _ := st.CreateShow("DanMachi III", nil)
 	// Adoption never trains, so there are no offsets at all.
 	path := filepath.Join("/media/anime", "DanMachi III", "DanMachi III - E05.mkv")
 	if err := st.FinaliseEpisode(sh.ID, 5, path); err != nil {

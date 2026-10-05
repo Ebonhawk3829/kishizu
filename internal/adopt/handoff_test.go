@@ -27,7 +27,7 @@ func TestReconcileFilesAdoptedBatch(t *testing.T) {
 	library := t.TempDir()
 	title := "DanMachi III"
 
-	sh, _ := st.CreateShow(title, nil, 12)
+	sh, _ := st.CreateShow(title, nil)
 	if err := st.SetSource(sh.ID, store.SourceSeaDex); err != nil {
 		t.Fatal(err)
 	}

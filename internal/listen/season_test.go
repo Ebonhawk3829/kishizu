@@ -25,7 +25,7 @@ func dueIDs(t *testing.T, l *Listener, legacy time.Duration) map[int64]bool {
 // that will never exist.
 func TestSeasonCompleteIsNotDue(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	// Every episode watched — the season is over.
 	for i := 1; i <= 12; i++ {
 		_ = st.UpsertEpisode(sh.ID, i, episode.Watched, "", "")
@@ -40,7 +40,7 @@ func TestSeasonCompleteIsNotDue(t *testing.T) {
 // TestSeasonInProgressIsDue: a TRAINED show mid-season must still be polled.
 func TestSeasonInProgressIsDue(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	for i := 1; i <= 5; i++ {
 		_ = st.UpsertEpisode(sh.ID, i, episode.Watched, "", "")
 	}
@@ -62,7 +62,7 @@ func TestSeasonInProgressIsDue(t *testing.T) {
 // burn requests to conclude what was already known.
 func TestUntrainedShowIsNotDue(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 
@@ -80,7 +80,7 @@ func TestUntrainedShowIsNotDue(t *testing.T) {
 // signal it can produce, and it must fire.
 func TestOnUntrainedFiresForAiredShow(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 
@@ -101,7 +101,7 @@ func TestOnUntrainedFiresForAiredShow(t *testing.T) {
 // no signal.
 func TestOnUntrainedSilentForUnairedShow(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	// No air date at all: the show is waiting for a slot.
 	// No SetGroupOffset: never trained.
@@ -119,7 +119,7 @@ func TestOnUntrainedSilentForUnairedShow(t *testing.T) {
 // show. Once an offset exists the show hunts normally and must not signal.
 func TestOnUntrainedSilentOnceTrained(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 
@@ -138,7 +138,7 @@ func TestOnUntrainedSilentOnceTrained(t *testing.T) {
 // the show. Learning one offset is enough to start polling.
 func TestUntrainedShowIsDueOnceTrained(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 
@@ -158,7 +158,7 @@ func TestUntrainedShowIsDueOnceTrained(t *testing.T) {
 // not be treated as complete.
 func TestUnknownMaxStillPolls(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 0) // max unknown
+	sh, _ := st.CreateShow("Show", []string{"Show"}) // max unknown
 	_ = st.UpsertEpisode(sh.ID, 1, episode.Wanted, "", "")
 	_ = st.SetNextEpisode(sh.ID, 1, time.Now().AddDate(0, 0, -1))
 

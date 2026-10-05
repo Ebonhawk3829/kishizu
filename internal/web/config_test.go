@@ -159,8 +159,8 @@ shows:
 	if len(after.Shows[0].Aliases) != 1 || after.Shows[0].Aliases[0] != "Dogul Wang" {
 		t.Errorf("aliases = %v", after.Shows[0].Aliases)
 	}
-	if after.Shows[0].Watched != 9 || after.Shows[0].Max != 12 {
-		t.Errorf("watched/max = %d/%d, want 9/12", after.Shows[0].Watched, after.Shows[0].Max)
+	if after.Shows[0].Watched != 9 {
+		t.Errorf("watched = %d, want 9", after.Shows[0].Watched)
 	}
 }
 
@@ -381,7 +381,7 @@ func TestTimetableMarksTracked(t *testing.T) {
 	}
 	srv.SetTimetable(c)
 
-	sh, err := st.CreateShow("Tracked Show", nil, 12)
+	sh, err := st.CreateShow("Tracked Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

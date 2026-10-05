@@ -20,17 +20,13 @@ func testStore(t *testing.T) *Store {
 func TestCreateShowRoundTrip(t *testing.T) {
 	s := testStore(t)
 
-	sh, err := s.CreateShow("Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh, err := s.CreateShow("Tomb Raider King", []string{"Dogul Wang"})
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
 	if sh.ID == 0 {
 		t.Fatal("want non-zero id")
 	}
-	if sh.MaxEpisode != 12 {
-		t.Errorf("max_episode = %d, want 12", sh.MaxEpisode)
-	}
-
 	// The canonical name must be an alias too, so matching never special-cases it.
 	want := map[string]bool{"Tomb Raider King": true, "Dogul Wang": true}
 	if len(sh.Aliases) != len(want) {
@@ -53,17 +49,17 @@ func TestCreateShowRoundTrip(t *testing.T) {
 
 func TestCreateShowIsUnique(t *testing.T) {
 	s := testStore(t)
-	if _, err := s.CreateShow("Dupe", nil, 0); err != nil {
+	if _, err := s.CreateShow("Dupe", nil); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if _, err := s.CreateShow("Dupe", nil, 0); err == nil {
+	if _, err := s.CreateShow("Dupe", nil); err == nil {
 		t.Error("duplicate canonical name should fail")
 	}
 }
 
 func TestAddAliasIsIdempotent(t *testing.T) {
 	s := testStore(t)
-	sh, err := s.CreateShow("Show", []string{"Alt"}, 0)
+	sh, err := s.CreateShow("Show", []string{"Alt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +75,7 @@ func TestAddAliasIsIdempotent(t *testing.T) {
 func TestListShows(t *testing.T) {
 	s := testStore(t)
 	for _, n := range []string{"B", "A", "C"} {
-		if _, err := s.CreateShow(n, nil, 0); err != nil {
+		if _, err := s.CreateShow(n, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -97,7 +93,7 @@ func TestListShows(t *testing.T) {
 
 func TestDeleteShowCascades(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Gone", []string{"Alt"}, 0)
+	sh, _ := s.CreateShow("Gone", []string{"Alt"})
 	_ = s.SetGroupOffset(sh.ID, "SubsPlease", 40, "seed")
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloaded, "hash", "title")
 
@@ -118,7 +114,7 @@ func TestDeleteShowCascades(t *testing.T) {
 
 func TestGroupOffsets(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("BLEACH", nil, 30)
+	sh, _ := s.CreateShow("BLEACH", nil)
 
 	if err := s.SetGroupOffset(sh.ID, "Erai-raws", 0, "seed"); err != nil {
 		t.Fatal(err)
@@ -208,7 +204,7 @@ func TestSeenOriginsDoNotCross(t *testing.T) {
 // late release for it is refused.
 func TestDeletedEpisodeIsNotResurrected(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh, _ := s.CreateShow("Tomb Raider King", []string{"Dogul Wang"})
 
 	flow := []episode.State{
 		episode.Wanted,
@@ -251,7 +247,7 @@ func TestDeletedEpisodeIsNotResurrected(t *testing.T) {
 // user action, and it must work when asked for.
 func TestUnlatchAllowsRedownload(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 
 	for _, st := range []episode.State{episode.Wanted, episode.Downloading, episode.Downloaded, episode.Watched, episode.Deleted} {
 		_ = s.UpsertEpisode(sh.ID, 3, st, "hash", "title")
@@ -282,7 +278,7 @@ func TestUnlatchAllowsRedownload(t *testing.T) {
 // cleared so nothing is left pointing at a release being replaced.
 func TestUnlatchResetsDownloaded(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloaded, "hash", "title")
 
 	if err := s.Unlatch(sh.ID, 1); err != nil {
@@ -302,7 +298,7 @@ func TestUnlatchResetsDownloaded(t *testing.T) {
 // disruptive at worst.
 func TestUnlatchOnInFlightIsNoOp(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloading, "hash", "title")
 
 	if err := s.Unlatch(sh.ID, 1); err != nil {

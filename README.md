@@ -31,7 +31,9 @@ files it in your library, and deletes it once you have watched it.
 
 Air times come from animeschedule.net: the daily refresh stores each tracked
 show's next episode and when it airs, and the seasonal browse list is
-refreshed weekly. Both are cached locally, so kishizu keeps working when the
+refreshed weekly. A watch signal also re-reads just that show's page, so a
+season the site marks Finished reclassifies when you finish watching it, not
+a day later. Everything is cached locally, so kishizu keeps working when the
 site is down.
 
 ## Contents
@@ -174,7 +176,6 @@ shows:
     aliases:
       - Example Show Romaji Title
     watched: 0
-    max: 12
 ```
 
 See [`kishizu.yaml.example`](kishizu.yaml.example) for the annotated version.
@@ -230,8 +231,8 @@ A custom pattern uses `{show}`, `{season}`, `{season:2}`, `{episode}`,
 Everything lives under **Add a show**.
 
 **Browse the season.** Open **Browse this season** for the cached timetable.
-Pick a show and the slug fills in the season length, cover art and alternative
-names automatically. The list shows romaji or English names (toggle in the
+Pick a show and the slug fills in the cover art and alternative names
+automatically. The list shows romaji or English names (toggle in the
 panel or set `browse.title` in the config); the filter matches both either way.
 
 The browse list is cached on disk — it works even when animeschedule is down.
@@ -279,11 +280,9 @@ yet aired appears as *upcoming*.
 
 The schedule page's own status decides when a season is over. When it reports
 *Finished*, the show stops polling and moves to the **Complete** section of the
-UI. The daily refresh picks this up within a day. A show on hiatus keeps
-polling.
-
-The episode count is recorded for display where available ("Ep 4 of 12") but
-is not used to determine season end.
+UI. A watch signal picks this up within seconds of you finishing the last
+episode; the daily refresh covers shows nobody is watching. A show on hiatus
+keeps polling.
 
 ## Episode states
 

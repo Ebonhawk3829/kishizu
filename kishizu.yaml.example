@@ -130,7 +130,8 @@ server:
 #              their Korean name, e.g. Tomb Raider King airs as "Dogul Wang").
 #   watched  - how many episodes you have already seen. Episodes 1..watched
 #              are latched as watched, so they are never grabbed.
-#   max      - total episodes in the season. 0 = unknown, no upper bound.
+#   max      - accepted but ignored. Season length is the schedule's fact,
+#              not the user's; the line is tolerated so old files still load.
 #
 # Apply with: kishizu -db kishizu.db -config kishizu.yaml -seed
 
@@ -139,4 +140,4 @@ shows:
     aliases:
       - Example Show Romaji Title
     watched: 0
-    max: 12
+    max: 12   # ignored; kept only so old files load unchanged

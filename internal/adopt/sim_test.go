@@ -20,7 +20,7 @@ func TestSimAdoptedSeason(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("DanMachi III", nil, 12)
+	sh, _ := st.CreateShow("DanMachi III", nil)
 	for i := 1; i <= 12; i++ {
 		if err := st.UpsertEpisode(sh.ID, i, episode.Downloading, "HASH", "rel"); err != nil {
 			t.Fatal(err)

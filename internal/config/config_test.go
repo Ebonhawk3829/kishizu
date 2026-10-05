@@ -32,14 +32,14 @@ shows:
 	if len(shows[0].Aliases) != 2 || shows[0].Aliases[0] != "Dogul Wang" {
 		t.Errorf("aliases = %v", shows[0].Aliases)
 	}
-	if shows[0].Watched != 9 || shows[0].Max != 12 {
-		t.Errorf("watched/max = %d/%d, want 9/12", shows[0].Watched, shows[0].Max)
+	if shows[0].Watched != 9 {
+		t.Errorf("watched = %d, want 9", shows[0].Watched)
 	}
 	if shows[1].Name != "BLEACH: Thousand-Year Blood War" {
 		t.Errorf("second name = %q", shows[1].Name)
 	}
-	if shows[1].Watched != 7 || shows[1].Max != 13 {
-		t.Errorf("second watched/max = %d/%d, want 7/13", shows[1].Watched, shows[1].Max)
+	if shows[1].Watched != 7 {
+		t.Errorf("second watched = %d, want 7", shows[1].Watched)
 	}
 }
 

@@ -87,7 +87,16 @@ type Server struct {
 	// downloaderURL is the torrent client's web address, shown as a link
 	// when a download needs manual attention. Empty means no link.
 	downloaderURL string
+	// refreshShow re-fetches one show's schedule page and applies what it
+	// publishes. Wired by main to the same logic the daily refresh runs;
+	// nil means the hook is unavailable and watch signals skip it.
+	refreshShow func(showID int64)
 }
+
+// SetRefreshShow wires the per-show schedule refresh. Watch signals fire it
+// for the show just watched, so a season the site just marked Finished is
+// reclassified in seconds rather than at the next daily pass.
+func (s *Server) SetRefreshShow(fn func(showID int64)) { s.refreshShow = fn }
 
 // SetIndexer sets the indexer used by the training endpoints. Training must
 // query the same indexer the listener polls, so learned offsets describe
@@ -1033,13 +1042,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 //
 // The show's NAME comes from the fetched page — the URL itself is never
 // stored as a name. The canonical name is stored as an alias of itself, so
-// matching needs no special case. Max episode 0 means the season length is
-// unknown; the cycle then uses a generous window.
+// matching needs no special case.
 func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name       string   `json:"name"`
-		Aliases    []string `json:"aliases"`
-		MaxEpisode int      `json:"max_episode"`
+		Name    string   `json:"name"`
+		Aliases []string `json:"aliases"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -1050,21 +1057,17 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("name is required"))
 		return
 	}
-	if req.MaxEpisode < 0 {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("max_episode must be >= 0"))
-		return
-	}
 
 	// The URL is the identity-bearing input. Resolve it FIRST so the show is
-	// created under its real title, and so enrichment fills in the season
-	// length, art and aliases for the user.
+	// created under its real title, and so enrichment fills in the art and
+	// aliases for the user.
 	slug := schedule.SlugFromURL(req.Name)
 	if slug == "" {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf(
 			"add shows by pasting an animeschedule.net URL, or from the browse list — a plain name has no schedule identity, so there is no anchor to hunt from"))
 		return
 	}
-	sh, err := s.createShowFromSlug(slug, req.Aliases, req.MaxEpisode)
+	sh, err := s.createShowFromSlug(slug, req.Aliases)
 	if err != nil {
 		// A 404 from the schedule is the user's typo, not a server failure:
 		// the site is up and says this slug is not a show. That is a bad
@@ -1079,33 +1082,33 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that show's page: %v", err))
 		return
 	}
-	log.Printf("add-show: %s (max %d, %d aliases, slug %q)",
-		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases), sh.Slug)
+	log.Printf("add-show: %s (%d aliases, slug %q)",
+		sh.CanonicalName, len(sh.Aliases), sh.Slug)
 	writeJSON(w, map[string]any{
-		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "max_episode": sh.MaxEpisode,
+		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug,
 	})
 }
 
 // createShowFromSlug adds a show by its animeschedule identity. The page's
 // own title becomes the canonical name; the slug is recorded so the daily
-// refresh matches exactly; enrichment fills in season length, aliases and
-// art. Best-effort throughout — a partial record is still a usable show.
+// refresh matches exactly; enrichment fills in aliases and art. Best-effort
+// throughout — a partial record is still a usable show.
 //
 // The timetable cache is the fast path for shows on the current season's
 // list, but its tile air time is not the anchor — the anchor comes from the
 // show's own page. So the cache-hit path also fetches the page in the
 // background: a show added from browse gets a real anchor immediately
 // instead of waiting up to a day for the daily refresh.
-func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode int) (*store.Show, error) {
+func (s *Server) createShowFromSlug(slug string, aliases []string) (*store.Show, error) {
 	// The cache is the fast path: the browse list already holds the title, the
-	// English name, the season length and the art, so adding from browse costs
-	// no network I/O and works when animeschedule is unreachable.
+	// English name and the art, so adding from browse costs no network I/O and
+	// works when animeschedule is unreachable.
 	if e := s.lookupTimetable(slug); e != nil {
 		name := e.Title
 		if name == "" {
 			name = slug
 		}
-		sh, err := s.st.CreateShow(name, aliases, maxEpisode)
+		sh, err := s.st.CreateShow(name, aliases)
 		if err != nil {
 			return nil, err
 		}
@@ -1139,7 +1142,7 @@ func (s *Server) createShowFromSlug(slug string, aliases []string, maxEpisode in
 	if name == "" {
 		name = slug
 	}
-	sh, err := s.st.CreateShow(name, aliases, maxEpisode)
+	sh, err := s.st.CreateShow(name, aliases)
 	if err != nil {
 		return nil, err
 	}
@@ -1168,17 +1171,8 @@ func (s *Server) lookupTimetable(slug string) *schedule.Entry {
 // applyTimetableEntry fills a new show in from its cached timetable entry.
 //
 // The cache carries the same fields the show page does, so this is the
-// offline equivalent of enrichFromSchedule. Season length uses the same
-// SeasonLength rule: a film reports one episode, and a one-episode cap
-// marks the season complete after a single download.
+// offline equivalent of enrichFromSchedule.
 func (s *Server) applyTimetableEntry(sh *store.Show, e *schedule.Entry) {
-	if e.Episodes > 0 && e.Type != "Movie" && e.Episodes != sh.MaxEpisode {
-		if err := s.st.SetMaxEpisode(sh.ID, e.Episodes); err != nil {
-			log.Printf("add-show: set max %s: %v", e.Slug, err)
-		} else {
-			sh.MaxEpisode = e.Episodes
-		}
-	}
 	if e.EnglishTitle != "" {
 		if err := s.st.AddAliasFrom(sh.ID, e.EnglishTitle, "schedule"); err != nil {
 			log.Printf("add-show: add english alias %s: %v", e.Slug, err)
@@ -1193,8 +1187,8 @@ func (s *Server) applyTimetableEntry(sh *store.Show, e *schedule.Entry) {
 	}
 }
 
-// enrichFromSchedule fills a show in from its animeschedule page: the season
-// length, every alternative name, and the cover art.
+// enrichFromSchedule fills a show in from its animeschedule page: every
+// alternative name, the airing status and the cover art.
 //
 // Best-effort throughout. A failure here leaves the show exactly as the user
 // typed it, which is still a usable show — the schedule is an enrichment, never
@@ -1207,20 +1201,6 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 	if err != nil {
 		log.Printf("schedule: fetch %s: %v", sh.Slug, err)
 		return
-	}
-
-	// The season length is the plausibility bound the matcher uses and the
-	// signal that a season has finished. The site knows it; the user usually
-	// does not, so most shows sat at 0 (unknown) before this.
-	//
-	// SeasonLength, not Episodes: a film reports "1", and a one-episode cap
-	// marks the season complete after a single download.
-	if n := info.SeasonLength(); n > 0 && n != sh.MaxEpisode {
-		if err := s.st.SetMaxEpisode(sh.ID, n); err != nil {
-			log.Printf("schedule: set max %s: %v", sh.Slug, err)
-		} else {
-			sh.MaxEpisode = n
-		}
 	}
 
 	// The page's Status is the season-complete signal, recorded verbatim so
@@ -1272,8 +1252,8 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 	if fresh, err := s.st.GetShow(sh.ID); err == nil && fresh != nil {
 		*sh = *fresh
 	}
-	log.Printf("schedule: enriched %s (max %d, %d aliases)",
-		sh.CanonicalName, sh.MaxEpisode, len(sh.Aliases))
+	log.Printf("schedule: enriched %s (%d aliases)",
+		sh.CanonicalName, len(sh.Aliases))
 }
 
 // handleDeleteShow removes a show and everything learned about it.
@@ -1306,7 +1286,6 @@ type showJSON struct {
 	ID      int64          `json:"id"`
 	Name    string         `json:"name"`
 	Next    int            `json:"next"`
-	Max     int            `json:"max"`
 	Aliases []string       `json:"aliases"`
 	Offsets map[string]int `json:"offsets"`
 	Trained bool           `json:"trained"`
@@ -1357,7 +1336,6 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			ID:       sh.ID,
 			Name:     sh.CanonicalName,
 			Next:     next,
-			Max:      sh.MaxEpisode,
 			Aliases:  sh.Aliases,
 			Offsets:  offsets,
 			Trained:  len(offsets) > 0,

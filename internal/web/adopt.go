@@ -179,7 +179,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	show := release.Sanitise(req.Title)
 	stagingDir := filepath.Join(s.adopt.staging, show)
 
-	sh, err := s.st.CreateShow(req.Title, nil, maxOf(eps))
+	sh, err := s.st.CreateShow(req.Title, nil)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("create show: %w", err))
 		return
@@ -239,14 +239,4 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 		"staging":   stagingDir,
 		"info_hash": req.InfoHash,
 	})
-}
-
-func maxOf(ns []int) int {
-	best := 0
-	for _, n := range ns {
-		if n > best {
-			best = n
-		}
-	}
-	return best
 }

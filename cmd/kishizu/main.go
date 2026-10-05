@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Ebonhawk3829/kishizu/internal/art"
 	"github.com/Ebonhawk3829/kishizu/internal/config"
@@ -209,6 +210,14 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go runLoop(ctx, st, artCache, dl, scheme, cfg, n, ttCache, indexer)
+	// Watch signals re-read the watched show's own page, so a season the site
+	// just marked Finished reclassifies in seconds rather than at the next
+	// daily pass. runLoop assigns RefreshShow synchronously at startup, but
+	// the goroutine may not have run yet — wait briefly for it.
+	for i := 0; i < 100 && RefreshShow == nil; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	srv.SetRefreshShow(RefreshShow)
 	if err := srv.ListenAndServe(ctx, f.serve); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 		os.Exit(1)

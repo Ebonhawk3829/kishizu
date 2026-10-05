@@ -26,7 +26,7 @@ func testStore(t *testing.T) *store.Store {
 // latch the handler depends on rather than a wrapper around it.
 func TestWatchedLatchIsTerminal(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Downloaded, "H", "rel")
 
 	if err := st.UpsertEpisode(sh.ID, 5, episode.Watched, "", ""); err != nil {
@@ -52,7 +52,7 @@ func TestWatchedLatchIsTerminal(t *testing.T) {
 func TestSweepDeletesBeyondKeep(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	// Three watched episodes with real files.
 	for _, n := range []int{3, 4, 5} {
@@ -91,7 +91,7 @@ func TestSweepDeletesBeyondKeep(t *testing.T) {
 // in the database safe.
 func TestSweepRefusesOutsideLibrary(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	// A path outside any library.
 	outside := filepath.Join(t.TempDir(), "elsewhere", "file.mkv")
@@ -141,7 +141,7 @@ func TestSweepRefusesSymlinkEscape(t *testing.T) {
 	}
 
 	st := testStore(t)
-	sh, err := st.CreateShow("Show", nil, 12)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSweepRefusesParentTraversal(t *testing.T) {
 	}
 
 	st := testStore(t)
-	sh, err := st.CreateShow("Show", nil, 12)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

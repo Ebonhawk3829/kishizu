@@ -73,10 +73,6 @@ func TestAdoptEndToEnd(t *testing.T) {
 	if shows[0].Source != store.SourceSeaDex {
 		t.Errorf("source = %q, want seadex", shows[0].Source)
 	}
-	if shows[0].MaxEpisode != 2 {
-		t.Errorf("max_episode = %d, want 2", shows[0].MaxEpisode)
-	}
-
 	// Two episodes downloading, the excluded one not created at all.
 	eps, _ := st.EpisodesForShow(shows[0].ID)
 	if len(eps) != 2 {

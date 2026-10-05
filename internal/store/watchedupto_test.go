@@ -21,7 +21,7 @@ func TestMarkWatchedUpToLatchesWantedEpisodes(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	// Simulate what ProjectAirDates leaves behind: wanted rows with air dates.
 	for i := 1; i <= 5; i++ {
 		if err := s.UpsertEpisode(sh.ID, i, episode.Wanted, "", ""); err != nil {
@@ -53,7 +53,7 @@ func TestMarkWatchedUpToLeavesInFlightAlone(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	if err := s.UpsertEpisode(sh.ID, 1, episode.Watched, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestMarkWatchedUpToIsIdempotent(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	first, err := s.MarkWatchedUpTo(sh.ID, 4, false)
 	if err != nil {
 		t.Fatal(err)

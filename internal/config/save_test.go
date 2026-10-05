@@ -18,7 +18,7 @@ func TestSaveRoundTrips(t *testing.T) {
 	cur := &File{
 		Server: DefaultServer(),
 		Shows: []Show{
-			{Name: "Tomb Raider King", Aliases: []string{"Dogul Wang"}, Watched: 9, Max: 12},
+			{Name: "Tomb Raider King", Aliases: []string{"Dogul Wang"}, Watched: 9},
 		},
 	}
 	next := DefaultServer()

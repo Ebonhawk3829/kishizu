@@ -15,7 +15,7 @@ func TestNextEpisodeRoundTrip(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	airs := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
 	if err := s.SetNextEpisode(sh.ID, 8, airs); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestNextEpisodeNilWhenUnknown(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	n, at, err := s.SiteNextEpisode(sh.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestNextEpisodeNilWhenUnknown(t *testing.T) {
 // consumed are not done with, whatever the countdown says.
 func TestWatchGateCapsAnchorAtProgress(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	airs := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
 	if err := s.SetNextEpisode(sh.ID, 8, airs); err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestWatchGateCapsAnchorAtProgress(t *testing.T) {
 // published time — no projection invents an intermediate date.
 func TestWatchGateHiatusNoPhantomDates(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	ep2 := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 	ep3 := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
 	// The refresh saw ep2 when it was next, then ep3 after the skip.
@@ -144,7 +144,7 @@ func TestWatchGateHiatusNoPhantomDates(t *testing.T) {
 // as hunting instead of "no release found" before the listener ever looked.
 func TestCatchUpWindowOpensAtExposure(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	// The refresh saw ep2 when it was next, long ago.
 	ep2 := time.Now().AddDate(0, 0, -30)
 	if err := s.SetNextEpisode(sh.ID, 2, ep2); err != nil {
@@ -180,7 +180,7 @@ func TestCatchUpWindowOpensAtExposure(t *testing.T) {
 // end state as any other dead window.
 func TestCatchUpWindowClosesEventually(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	if err := s.SetNextEpisode(sh.ID, 2, time.Now().AddDate(0, 0, -30)); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestCatchUpWindowClosesEventually(t *testing.T) {
 // forget it.
 func TestWatchGateBehindSiteHuntsImmediately(t *testing.T) {
 	s := testStore(t)
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	if err := s.SetNextEpisode(sh.ID, 8, time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}

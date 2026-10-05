@@ -95,22 +95,6 @@ func (c *Cache) Ensure(rawURL string) (string, error) {
 	return name, nil
 }
 
-// Release deletes the cached copy for a URL. Missing files are not an error:
-// releasing is idempotent, and a season can be marked complete more than once.
-func (c *Cache) Release(rawURL string) error {
-	if rawURL == "" {
-		return nil
-	}
-	name, err := fileName(rawURL)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Join(c.dir, name)); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
 // fileName maps a URL to a stable local filename. The hash keeps it unique
 // without trusting the remote path; the extension is kept so the content type
 // is right when served.

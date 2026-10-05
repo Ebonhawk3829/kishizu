@@ -90,7 +90,7 @@ func TestLookupOffsetToleratesPunctuation(t *testing.T) {
 // final name and advances the latch.
 func TestReconcileMovesStagedFile(t *testing.T) {
 	st := newTestStore(t)
-	sh, err := st.CreateShow("BLEACH: Thousand-Year Blood War - The Calamity", nil, 10)
+	sh, err := st.CreateShow("BLEACH: Thousand-Year Blood War - The Calamity", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestReconcileMovesStagedFile(t *testing.T) {
 // worse than leaving it in staging.
 func TestReconcileIgnoresNonDownloading(t *testing.T) {
 	st := newTestStore(t)
-	sh, err := st.CreateShow("BLEACH: Thousand-Year Blood War - The Calamity", nil, 10)
+	sh, err := st.CreateShow("BLEACH: Thousand-Year Blood War - The Calamity", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestReconcileIgnoresNonDownloading(t *testing.T) {
 // left with no media files, so the destination cannot be assumed to exist.
 func TestReconcileCreatesLibraryDir(t *testing.T) {
 	st := newTestStore(t)
-	sh, err := st.CreateShow("Firefly Wedding", nil, 12)
+	sh, err := st.CreateShow("Firefly Wedding", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -249,7 +249,7 @@ func newTestStore(t *testing.T) *store.Store {
 // check built on mv passes while the code is broken.
 func TestFinaliseUsesRenameNotCopy(t *testing.T) {
 	st := newTestStore(t)
-	sh, err := st.CreateShow("EXDEV Show", nil, 12)
+	sh, err := st.CreateShow("EXDEV Show", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestFinaliseUsesRenameNotCopy(t *testing.T) {
 // TestSweepDeletesAllWhenKeepZero: the user wants no watched episodes retained.
 func TestSweepDeletesAllWhenKeepZero(t *testing.T) {
 	st := newTestStore(t)
-	sh, err := st.CreateShow("Tidy Show", nil, 12)
+	sh, err := st.CreateShow("Tidy Show", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestStallDetection(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 12)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

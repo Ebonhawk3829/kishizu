@@ -14,7 +14,7 @@ import (
 func TestZeroAnchorIsNotAired(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Unaired Show", nil, 12)
+	sh, _ := st.CreateShow("Unaired Show", nil)
 	// The corrupt row: episode 0 with a past air time. SetNextEpisode clamps
 	// now, so the row is written directly the way the pre-clamp build left it.
 	if _, err := st.Exec(`UPDATE show SET next_ep = 0, next_airs_at = ? WHERE id = ?`,
@@ -56,7 +56,7 @@ func TestZeroAnchorIsNotAired(t *testing.T) {
 func TestClearNextEpisodeRemovesAnchor(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Stale Show", nil, 12)
+	sh, _ := st.CreateShow("Stale Show", nil)
 	if err := st.SetNextEpisode(sh.ID, 0, time.Now().AddDate(0, 0, -16)); err != nil {
 		t.Fatal(err)
 	}

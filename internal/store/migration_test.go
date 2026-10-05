@@ -40,7 +40,7 @@ func v139Schema(t *testing.T) *Store {
 func TestMigrationStep2KeepsChildRows(t *testing.T) {
 	s := v139Schema(t)
 
-	sh, err := s.CreateShow("Test Show", []string{"Test Alias"}, 12)
+	sh, err := s.CreateShow("Test Show", []string{"Test Alias"})
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}

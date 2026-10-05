@@ -20,7 +20,6 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (0);
 CREATE TABLE IF NOT EXISTS show (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_name TEXT    NOT NULL UNIQUE,
-    max_episode    INTEGER NOT NULL DEFAULT 0,   -- 0 = unknown, no upper bound
     source         TEXT    NOT NULL DEFAULT 'manual',  -- schedule | manual
     -- The schedule's authoritative next-episode point, from animeschedule.net.
     -- The ONLY stored air-date fact, written solely by the daily refresh.

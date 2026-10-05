@@ -29,10 +29,6 @@ type Show struct {
 	// common for shows announced before their run is confirmed.
 	Episodes int
 	// Type is the media type: TV, Movie, TV Short, OVA, ONA.
-	//
-	// It matters because a Movie reports "Episodes: 1", which is a true
-	// statement about a film and a disastrous one about a season. Callers
-	// filling in a season length must check this first.
 	Type string
 	// Status is the airing status: "Ongoing", "Finished", "Upcoming".
 	Status string
@@ -82,22 +78,6 @@ type Show struct {
 //     release containing those tokens.
 func (s *Show) Aliases() []string {
 	return s.namesOf("Romaji", "English", "Synonyms")
-}
-
-// SeasonLength returns the episode count to use as a season length, or 0 when
-// the page does not give one.
-//
-// A Movie reports "Episodes: 1", and that is the correct answer, not a special
-// case: a film IS one download. The season-complete check is `next > max`, so
-// max=1 still allows episode 1 to be hunted and stops cleanly once it is
-// watched. Suppressing it would be worse than using it — with max=0 the
-// plausibility bound is lost, and a mis-numbered release could be accepted as
-// episode 5 of a film.
-func (s *Show) SeasonLength() int {
-	if s.Episodes <= 0 {
-		return 0
-	}
-	return s.Episodes
 }
 
 func (s *Show) namesOf(kinds ...string) []string {

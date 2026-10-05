@@ -15,7 +15,7 @@ import (
 // daily refresh corrects the time once the show actually appears.
 func TestSetNextEpisodeClampsZero(t *testing.T) {
 	s := testStore(t)
-	sh, err := s.CreateShow("Show", nil, 12)
+	sh, err := s.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSetNextEpisodeClampsZero(t *testing.T) {
 // mid-season episode number.
 func TestSetNextEpisodeKeepsRealNumbers(t *testing.T) {
 	s := testStore(t)
-	sh, err := s.CreateShow("Show", nil, 12)
+	sh, err := s.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}

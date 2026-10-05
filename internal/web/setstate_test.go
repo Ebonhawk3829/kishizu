@@ -11,7 +11,7 @@ import (
 // marked downloaded, so it stops being hunted and shows as ready to watch.
 func TestSetStateMarksDownloaded(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Show", nil, 12)
+	sh, _ := srv.st.CreateShow("Show", nil)
 	_ = srv.st.UpsertEpisode(sh.ID, 5, episode.Wanted, "", "")
 
 	rec := post(t, srv, "/api/set-state",
@@ -29,7 +29,7 @@ func TestSetStateMarksDownloaded(t *testing.T) {
 // sent backwards — that would resurrect something already consumed.
 func TestSetStateRefusesTerminalRewind(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Show", nil, 12)
+	sh, _ := srv.st.CreateShow("Show", nil)
 	_ = srv.st.UpsertEpisode(sh.ID, 5, episode.Watched, "", "")
 
 	rec := post(t, srv, "/api/set-state",
@@ -47,7 +47,7 @@ func TestSetStateRefusesTerminalRewind(t *testing.T) {
 // timestamp and triggers the sweep. Allowing it here would bypass that.
 func TestSetStateRejectsWatched(t *testing.T) {
 	srv := testServer(t)
-	_, _ = srv.st.CreateShow("Show", nil, 12)
+	_, _ = srv.st.CreateShow("Show", nil)
 
 	rec := post(t, srv, "/api/set-state",
 		`{"show_id":1,"episode":5,"state":"watched"}`)

@@ -165,7 +165,6 @@ func (s *Store) migrateSteps() error {
 				`CREATE TABLE show_new (
 					id             INTEGER PRIMARY KEY AUTOINCREMENT,
 					canonical_name TEXT    NOT NULL UNIQUE,
-					max_episode    INTEGER NOT NULL DEFAULT 0,
 					source         TEXT    NOT NULL DEFAULT 'manual',
 					next_ep         INTEGER,
 					next_airs_at    TEXT,
@@ -176,7 +175,7 @@ func (s *Store) migrateSteps() error {
 					created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 				)`,
 				`INSERT INTO show_new
-					SELECT id, canonical_name, max_episode, source, next_ep, next_airs_at, schedule_fetched_at, image_url, slug, airing_status, created_at FROM show`,
+					SELECT id, canonical_name, source, next_ep, next_airs_at, schedule_fetched_at, image_url, slug, airing_status, created_at FROM show`,
 				`DROP TABLE show`,
 				`ALTER TABLE show_new RENAME TO show`,
 				`CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL`,
@@ -285,7 +284,6 @@ func (s *Store) addColumns() error {
 type Show struct {
 	ID            int64
 	CanonicalName string
-	MaxEpisode    int
 	Source        string
 	// ImageURL is the season's cover art from the schedule, for the UI.
 	ImageURL string
@@ -303,14 +301,14 @@ type Show struct {
 
 // CreateShow inserts a show with its aliases. The canonical name is always
 // stored as an alias too, so matching never has to special-case it.
-func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (*Show, error) {
+func (s *Store) CreateShow(canonical string, aliases []string) (*Show, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(`INSERT INTO show (canonical_name, max_episode) VALUES (?, ?)`, canonical, maxEpisode)
+	res, err := tx.Exec(`INSERT INTO show (canonical_name) VALUES (?)`, canonical)
 	if err != nil {
 		return nil, fmt.Errorf("insert show: %w", err)
 	}
@@ -339,12 +337,12 @@ func (s *Store) CreateShow(canonical string, aliases []string, maxEpisode int) (
 
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
-	row := s.db.QueryRow(`SELECT id, canonical_name, max_episode, source,
+	row := s.db.QueryRow(`SELECT id, canonical_name, source,
 		image_url, slug, airing_status, created_at FROM show WHERE id = ?`, id)
 
 	var sh Show
 	var source, created, image, slug, airing sql.NullString
-	if err := row.Scan(&sh.ID, &sh.CanonicalName, &sh.MaxEpisode, &source,
+	if err := row.Scan(&sh.ID, &sh.CanonicalName, &source,
 		&image, &slug, &airing, &created); err != nil {
 		return nil, err
 	}
@@ -517,12 +515,6 @@ const (
 // SetSource records where a show came from.
 func (s *Store) SetSource(showID int64, source string) error {
 	_, err := s.db.Exec(`UPDATE show SET source = ? WHERE id = ?`, source, showID)
-	return err
-}
-
-// SetMaxEpisode updates the plausibility bound used by the matcher.
-func (s *Store) SetMaxEpisode(showID int64, max int) error {
-	_, err := s.db.Exec(`UPDATE show SET max_episode = ? WHERE id = ?`, max, showID)
 	return err
 }
 

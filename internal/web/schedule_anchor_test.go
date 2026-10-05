@@ -60,7 +60,7 @@ func decodeSchedule(t *testing.T, rec *httptest.ResponseRecorder) struct {
 func TestScheduleServesTheAnchor(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	if err := st.SetNextEpisode(sh.ID, 8, time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestScheduleServesTheAnchor(t *testing.T) {
 func TestScheduleExcludesWatchedAnchor(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	if err := st.SetNextEpisode(sh.ID, 8, time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestScheduleExcludesWatchedAnchor(t *testing.T) {
 func TestScheduleExcludesOutOfWindow(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	if err := st.SetNextEpisode(sh.ID, 8, time.Now().Add(30*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestScheduleExcludesOutOfWindow(t *testing.T) {
 func TestScheduleWindowParameter(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	// 40 days out: outside the default window, inside a 60-day one.
 	airTime := time.Now().Add(40 * 24 * time.Hour)
 	if err := st.SetNextEpisode(sh.ID, 8, airTime); err != nil {

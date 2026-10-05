@@ -28,7 +28,6 @@ type Show struct {
 	Name    string
 	Aliases []string
 	Watched int
-	Max     int
 }
 
 // File is the whole configuration file.
@@ -534,7 +533,6 @@ func renderShows(shows []Show) string {
 			}
 		}
 		b.WriteString("    watched: " + strconv.Itoa(sh.Watched) + "\n")
-		b.WriteString("    max: " + strconv.Itoa(sh.Max) + "\n")
 	}
 	return b.String()
 }
@@ -663,14 +661,12 @@ func parseShows(s string) ([]Show, error) {
 			inAliases = false
 
 		case strings.HasPrefix(trimmed, "max:"):
+			// Accepted and ignored: season length is the schedule's fact,
+			// not the user's, and nothing reads it anymore. Keeping the
+			// line parseable means an old kishizu.yaml still loads.
 			if cur == nil {
 				return nil, fmt.Errorf("line %d: max outside a show", lineNo)
 			}
-			n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(trimmed, "max:")))
-			if err != nil {
-				return nil, fmt.Errorf("line %d: bad max", lineNo)
-			}
-			cur.Max = n
 			inAliases = false
 
 		default:

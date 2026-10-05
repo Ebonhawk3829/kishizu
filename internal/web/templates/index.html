@@ -491,11 +491,10 @@
 <details class="disc" id="disc-add">
   <summary><span class="chev">&rsaquo;</span> Add a show</summary>
   <div class="body">
-    <p class="hint">Two ways to add a show, both anchored to the schedule: paste the show's animeschedule.net URL, or pick it from the season list. The page is fetched on add, so the season length, cover art and every alternative name are filled in for you.</p>
+    <p class="hint">Two ways to add a show, both anchored to the schedule: paste the show's animeschedule.net URL, or pick it from the season list. The page is fetched on add, so the cover art and every alternative name are filled in for you.</p>
     <div class="fields">
       <div><label for="add-name">animeschedule.net URL</label><input id="add-name" type="url" placeholder="https://animeschedule.net/anime/..."></div>
       <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
-      <div><label for="add-max">Episodes</label><input id="add-max" type="number" min="0" value="0"></div>
       <div><button class="btn" id="btn-add">Add</button></div>
     </div>
     <div class="field-error" id="add-error"></div>
@@ -812,10 +811,9 @@ async function addShow() {
   }
   fieldError('add-error', '');
   const aliases = el('add-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
-  const max = parseInt(el('add-max').value, 10) || 0;
   try {
-    const r = await api('/api/shows', { name, aliases, max_episode: max });
-    el('add-name').value = ''; el('add-aliases').value = ''; el('add-max').value = '0';
+    const r = await api('/api/shows', { name, aliases });
+    el('add-name').value = ''; el('add-aliases').value = '';
     toast(`Added ${r.name}.`);
     loadShows();
   } catch (e) { fieldError('add-error', e.message); }
@@ -1311,17 +1309,14 @@ function card(s) {
   }[st] || 'st-idle';
 
   // Air line: the next episode the user actually owes, with its air time when
-  // the projection knows it. Tense matters — "airs" for a future point,
-  // "aired" for one already past. Past the season length, say so.
+  // the schedule knows it. Tense matters — "airs" for a future point,
+  // "aired" for one already past. A finished show has no next episode, so
+  // the card carries no air line at all: the section says complete.
   let air;
-  if (s.max && s.next > s.max) {
-    air = `Season complete — ${s.max} episodes`;
-  } else if (s.next_schedule) {
+  if (s.next_schedule) {
     const sc = s.next_schedule;
     const past = new Date(sc.airs_at) < Date.now();
     air = `Ep ${sc.episode} ${past ? 'aired' : 'airs'} <b>${when(sc.airs_at)}</b> (${rel(sc.airs_at)})`;
-  } else {
-    air = `Ep ${s.next}${s.max ? ' of ' + s.max : ''}`;
   }
 
   // A downloading episode may need manual intervention — a dead swarm, a

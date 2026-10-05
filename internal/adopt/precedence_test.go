@@ -20,7 +20,7 @@ func TestAiringDownloadingStillHunting(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("Airing Show", nil, 12)
+	sh, _ := st.CreateShow("Airing Show", nil)
 	// Anchor 1 hour ago: inside the 72h window.
 	aired := time.Now().Add(-time.Hour)
 	if err := st.SetNextEpisode(sh.ID, 5, aired); err != nil {

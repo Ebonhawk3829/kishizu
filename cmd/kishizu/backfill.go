@@ -16,10 +16,8 @@ import (
 // to a slug needs a judgement about which season is meant, and the site's own
 // search is not reliable enough to do it automatically.
 //
-// For each mapped show this records the slug, fills max_episode when the
-// database has 0, and adds every alternative name as an alias. It never
-// overwrites a deliberate max_episode and never removes anything. Safe to
-// re-run.
+// For each mapped show this records the slug and adds every alternative
+// name as an alias. It never removes anything. Safe to re-run.
 func backfillSlugs(st *store.Store, path string) error {
 	mapping, err := loadSlugMapping(path)
 	if err != nil {
@@ -53,17 +51,6 @@ func backfillSlugs(st *store.Store, path string) error {
 			continue
 		}
 
-		// Only fill a season length we do not have: a non-zero max was set
-		// by the user or learned from a real release. SeasonLength rather
-		// than Episodes, because a film reports "1".
-		if n := info.SeasonLength(); n > 0 && sh.MaxEpisode == 0 {
-			if err := st.SetMaxEpisode(sh.ID, n); err != nil {
-				fmt.Fprintf(os.Stderr, "  %s: set max: %v\n", sh.CanonicalName, err)
-			} else {
-				sh.MaxEpisode = n
-			}
-		}
-
 		added := 0
 		for _, a := range info.Aliases() {
 			if err := st.AddAliasFrom(sh.ID, a, "schedule"); err != nil {
@@ -90,8 +77,8 @@ func backfillSlugs(st *store.Store, path string) error {
 		}
 
 		enriched++
-		fmt.Printf("  %-52s %-46s max %-3d +%d aliases\n",
-			truncate(sh.CanonicalName, 50), slug, sh.MaxEpisode, added)
+		fmt.Printf("  %-52s %-46s +%d aliases\n",
+			truncate(sh.CanonicalName, 50), slug, added)
 	}
 
 	fmt.Printf("\nbackfill: %d slugged, %d enriched, %d without a mapping\n",

@@ -255,9 +255,16 @@ func (s *Server) recordWatched(showID int64, epNum int, source string) error {
 		}
 	}
 	log.Printf("watched: show %d ep %d (%s)", showID, epNum, source)
-	// The anchor is the daily refresh's to move: the site's countdown is the
+	// The anchor is the schedule's to move: the site's countdown is the
 	// authority on when the next episode airs, and simulating its advance on
-	// watch events is what produced phantom dashboard entries.
+	// watch events is what produced phantom dashboard entries. But finishing
+	// an episode is exactly when the page's other facts may have changed —
+	// most visibly Status, the season-complete signal — so the show's own
+	// page is re-read now rather than at the next daily pass. One request,
+	// the same fetch the daily refresh makes.
+	if s.refreshShow != nil {
+		go s.refreshShow(showID)
+	}
 	s.sweepAfter()
 	return nil
 }

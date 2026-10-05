@@ -17,7 +17,7 @@ func TestFindByFileNameExact(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Re:ZERO -Starting Life in Another World- Season 4", nil, 25)
+	sh, _ := s.CreateShow("Re:ZERO -Starting Life in Another World- Season 4", nil)
 	_ = s.UpsertEpisode(sh.ID, 16, episode.Downloaded, "", "")
 	// The name kishizu actually writes: colon stripped for Windows.
 	const name = "ReZERO -Starting Life in Another World- Season 4 - E16.mkv"
@@ -46,7 +46,7 @@ func TestFindByFileNameMisses(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloaded, "", "")
 	_ = s.SetFilePath(sh.ID, 1, "/media/anime/Show - E01.mkv")
 

@@ -17,7 +17,7 @@ import (
 func TestWatchedAcceptsLibraryFilename(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Clevatess Season 2", []string{"Clevatess"}, 13)
+	sh, _ := st.CreateShow("Clevatess Season 2", []string{"Clevatess"})
 	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "H", "rel")
 
 	// A Windows path, as a player on the user's machine would send it.
@@ -40,7 +40,7 @@ func TestWatchedAcceptsLibraryFilename(t *testing.T) {
 // could delete a file the user wants.
 func TestWatchedStillRejectsUncertainNonLibraryNames(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := srv.st.CreateShow("Show", []string{"Show"})
 	// Offsets disagree, so an unseen group is a coin flip.
 	_ = srv.st.SetGroupOffset(sh.ID, "A", 0, "training")
 	_ = srv.st.SetGroupOffset(sh.ID, "B", 40, "training")

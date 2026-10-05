@@ -113,7 +113,7 @@ func TestReconcileAdoptedPack(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 3)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestReconcileLeavesUnrecognisedFiles(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 1)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

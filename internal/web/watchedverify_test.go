@@ -13,7 +13,7 @@ import (
 func TestWatchedVerifyReportsState(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Clevatess Season 2", []string{"Clevatess"}, 13)
+	sh, _ := st.CreateShow("Clevatess Season 2", []string{"Clevatess"})
 	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "H", "rel")
 
 	body := `{"path":"D:\\Anime\\Clevatess Season 2\\Clevatess Season 2 - E09.mkv"}`
@@ -50,7 +50,7 @@ func TestWatchedVerifyReportsState(t *testing.T) {
 // a path cannot verify it either.
 func TestWatchedVerifyRejectsUnmatched(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := srv.st.CreateShow("Show", []string{"Show"})
 	_ = srv.st.SetGroupOffset(sh.ID, "A", 0, "training")
 	_ = srv.st.SetGroupOffset(sh.ID, "B", 40, "training")
 

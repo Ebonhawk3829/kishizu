@@ -32,7 +32,7 @@ func TestAdoptedShowIsFlaggedAdopted(t *testing.T) {
 	}
 	defer st.Close()
 
-	adopted, err := st.CreateShow("Adopted Season", nil, 12)
+	adopted, err := st.CreateShow("Adopted Season", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestAdoptedShowIsFlaggedAdopted(t *testing.T) {
 	}
 	_ = st.UpsertEpisode(adopted.ID, 1, episode.Downloaded, "", "")
 
-	airing, err := st.CreateShow("Airing Show", nil, 12)
+	airing, err := st.CreateShow("Airing Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestAdoptedFlagIndependentOfWatchState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sh, err := st.CreateShow("Adopted", nil, 3)
+	sh, err := st.CreateShow("Adopted", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

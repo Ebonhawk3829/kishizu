@@ -39,7 +39,7 @@ func backdateWatched(st *store.Store, showID int64, number int, d time.Duration)
 func TestSweepDeleteOff(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	p := seedWatched(t, st, sh.ID, 1, lib)
 
 	h := New(st, lib, 0, DeleteOff, 0)
@@ -60,7 +60,7 @@ func TestSweepDeleteOff(t *testing.T) {
 func TestSweepDeleteAfterProtectsFreshWatches(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	p := seedWatched(t, st, sh.ID, 1, lib)
 
 	h := New(st, lib, 0, DeleteAfterMode, 48*time.Hour)
@@ -81,7 +81,7 @@ func TestSweepDeleteAfterProtectsFreshWatches(t *testing.T) {
 func TestSweepDeleteAfterReleasesOldWatches(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	p := seedWatched(t, st, sh.ID, 1, lib)
 	if err := backdateWatched(st, sh.ID, 1, 72*time.Hour); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestSweepDeleteAfterReleasesOldWatches(t *testing.T) {
 func TestSweepDeleteAfterWithKeep(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 	old := seedWatched(t, st, sh.ID, 1, lib)
 	if err := backdateWatched(st, sh.ID, 1, 72*time.Hour); err != nil {
 		t.Fatal(err)

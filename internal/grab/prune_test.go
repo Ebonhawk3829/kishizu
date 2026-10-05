@@ -22,7 +22,7 @@ func TestPruneRemovesUnselectedOnceComplete(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 2)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestPruneWaitsForCompletion(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 2)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestPruneOffByDefault(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 1)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestPruneNeverLeavesStaging(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, err := st.CreateShow("Show", nil, 1)
+	sh, err := st.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

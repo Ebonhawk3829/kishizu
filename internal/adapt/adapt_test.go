@@ -35,7 +35,7 @@ func TestShowResolvesTwoConventions(t *testing.T) {
 	sh, err := s.CreateShow("BLEACH: Thousand-Year Blood War - The Calamity", []string{
 		"Bleach: Sennen Kessen Hen - Kashin Tan",
 		"BLEACH Thousand Year Blood War",
-	}, 30)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestShowResolvesTwoConventions(t *testing.T) {
 // offset. Both implementations must behave the same way.
 func TestGroupOffsetDoesNotMatchBySubstring(t *testing.T) {
 	s := testStore(t)
-	sh, err := s.CreateShow("Show", nil, 12)
+	sh, err := s.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestGroupOffsetDoesNotMatchBySubstring(t *testing.T) {
 // punctuation must still resolve.
 func TestGroupOffsetNormalisesPunctuation(t *testing.T) {
 	s := testStore(t)
-	sh, err := s.CreateShow("Show", nil, 12)
+	sh, err := s.CreateShow("Show", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +115,11 @@ func TestGroupOffsetNormalisesPunctuation(t *testing.T) {
 // scan every tick.
 func TestVocabIsSharedAcrossShows(t *testing.T) {
 	s := testStore(t)
-	a, err := s.CreateShow("A", nil, 12)
+	a, err := s.CreateShow("A", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.CreateShow("B", nil, 12)
+	b, err := s.CreateShow("B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

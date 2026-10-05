@@ -25,7 +25,7 @@ func watchedThrough(t *testing.T, st interface {
 // episode 7) yields offset 40. Derived from the numbering alone — no dates.
 func TestInferOffsetsAbsoluteNumbering(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("BLEACH", []string{"BLEACH"}, 13)
+	sh, _ := st.CreateShow("BLEACH", []string{"BLEACH"})
 	watchedThrough(t, st, sh.ID, 7) // watched through ep 7
 	items := []nyaa.Item{
 		{Title: "[VARYG] BLEACH - 47 (1080p)"},
@@ -45,7 +45,7 @@ func TestInferOffsetsAbsoluteNumbering(t *testing.T) {
 // (raw 7 for episode 7) yields offset 0.
 func TestInferOffsetsRestartedNumbering(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("BLEACH", []string{"BLEACH"}, 13)
+	sh, _ := st.CreateShow("BLEACH", []string{"BLEACH"})
 	watchedThrough(t, st, sh.ID, 7)
 	items := []nyaa.Item{
 		{Title: "[Erai-raws] BLEACH - 07 (1080p)"},
@@ -65,7 +65,7 @@ func TestInferOffsetsRestartedNumbering(t *testing.T) {
 // correctly, which is the whole point of per-group offsets.
 func TestInferOffsetsTwoConventions(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("BLEACH", []string{"BLEACH"}, 13)
+	sh, _ := st.CreateShow("BLEACH", []string{"BLEACH"})
 	watchedThrough(t, st, sh.ID, 7)
 	items := []nyaa.Item{
 		{Title: "[VARYG] BLEACH - 47 (1080p)"},
@@ -89,7 +89,7 @@ func TestInferOffsetsTwoConventions(t *testing.T) {
 // gets the right offset, because dates are irrelevant to the numbering.
 func TestInferOffsetsBulkDrop(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	watchedThrough(t, st, sh.ID, 9) // current position 10
 	var items []nyaa.Item
 	for i := 1; i <= 9; i++ {
@@ -108,7 +108,7 @@ func TestInferOffsetsBulkDrop(t *testing.T) {
 // nothing rather than skewing the result.
 func TestInferOffsetsIgnoresUnparseable(t *testing.T) {
 	st := testStore(t)
-	sh, _ := st.CreateShow("Show", []string{"Show"}, 12)
+	sh, _ := st.CreateShow("Show", []string{"Show"})
 	watchedThrough(t, st, sh.ID, 4)
 	items := []nyaa.Item{
 		{Title: "[G] Show - 05 (1080p)"},

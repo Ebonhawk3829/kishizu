@@ -24,7 +24,7 @@ func TestAdoptedEpisodeStatesRender(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("DanMachi III", nil, 12)
+	sh, _ := st.CreateShow("DanMachi III", nil)
 
 	// Every lifecycle state, with NO air date, as adoption would create it.
 	cases := map[episode.State]cycle.State{

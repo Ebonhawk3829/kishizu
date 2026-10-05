@@ -46,6 +46,12 @@ func alert(n notify.Notifier, title, message string, priority notify.Priority) {
 //
 // The loop exits when ctx is cancelled, so SIGINT/SIGTERM stop the pollers,
 // the sweepers and the schedule refresh together with the HTTP server.
+// RefreshShow is the per-show schedule refresh the web server fires on watch
+// signals. runLoop assigns it during startup; nil until then, so a watch
+// arriving before the loop is up simply skips the refresh and the daily pass
+// covers it.
+var RefreshShow func(showID int64)
+
 func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl download.Downloader, scheme *naming.Scheme, cfg *config.File, n notify.Notifier, ttCache *schedule.Cache, indexer *nyaa.Client) {
 	s := cfg.Server
 	interval, err := time.ParseDuration(s.Interval)
@@ -198,6 +204,49 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	// it survives between refreshes.
 	misses := map[int64]int{}
 
+	// refreshOne re-fetches one show's page and applies what it publishes:
+	// status, anchor, art. The same writes the daily refresh makes, scoped to
+	// one show so a watch signal can afford it.
+	refreshOne := func(sh *store.Show) {
+		info, err := schedule.FetchShow(nil, sh.Slug)
+		if err != nil {
+			log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+			return
+		}
+		if err := st.SetAiringStatus(sh.ID, info.Status); err != nil {
+			log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+		}
+		if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
+			if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
+				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+			}
+		} else if !sh.Finished() {
+			if n, _, err := st.NextEpisode(sh.ID); err == nil && n > 0 {
+				if err := st.ClearNextEpisode(sh.ID); err != nil {
+					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+				}
+			}
+		}
+		if info.ImageURL != "" && info.ImageURL != sh.ImageURL {
+			_ = st.SetImageURL(sh.ID, info.ImageURL)
+		}
+		if artCache != nil {
+			if _, err := artCache.Ensure(info.ImageURL); err != nil {
+				log.Printf("art: cache %s: %v", sh.CanonicalName, err)
+			}
+		}
+		log.Printf("schedule refresh: %s: refreshed after watch signal", sh.CanonicalName)
+	}
+	// RefreshShow is the hook the web server fires on watch signals. Nil-safe:
+	// a show with no slug has no page to fetch.
+	RefreshShow = func(showID int64) {
+		sh, err := st.GetShow(showID)
+		if err != nil || sh == nil || sh.Slug == "" {
+			return
+		}
+		refreshOne(sh)
+	}
+
 	refreshSchedule := func() {
 		shows, err := st.ListShows()
 		if err != nil {
@@ -288,26 +337,6 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			if artCache != nil {
 				if _, err := artCache.Ensure(info.ImageURL); err != nil {
 					log.Printf("art: cache %s: %v", sh.CanonicalName, err)
-				}
-			}
-		}
-		// Release art for finished seasons. The signal is the page's own
-		// countdown being absent AND the next episode being past the season
-		// length — either alone can be a hiatus or a late slot.
-		if artCache != nil {
-			for _, sh := range shows {
-				if sh.ImageURL == "" || sh.MaxEpisode <= 0 {
-					continue
-				}
-				n, _, err := st.NextEpisode(sh.ID)
-				if err != nil || n <= sh.MaxEpisode {
-					continue
-				}
-				if err := artCache.Release(sh.ImageURL); err != nil {
-					log.Printf("art: release %s: %v", sh.CanonicalName, err)
-				} else {
-					log.Printf("art: released %s (season complete)", sh.CanonicalName)
-					_ = st.SetImageURL(sh.ID, "")
 				}
 			}
 		}

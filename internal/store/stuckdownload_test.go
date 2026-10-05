@@ -20,7 +20,7 @@ func TestMarkWatchedUpToForce(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloading, "hash1", "rel")
 
 	// Without force, the in-flight episode is left alone.
@@ -49,7 +49,7 @@ func TestMarkWatchedUpToForceRespectsTerminal(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Watched, "", "")
 	_ = s.UpsertEpisode(sh.ID, 2, episode.Deleted, "", "")
 
@@ -72,7 +72,7 @@ func TestUpsertEpisodeKeepsFirstTorrent(t *testing.T) {
 	}
 	defer s.Close()
 
-	sh, _ := s.CreateShow("Show", nil, 12)
+	sh, _ := s.CreateShow("Show", nil)
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloading, "hash-first", "first")
 	_ = s.UpsertEpisode(sh.ID, 1, episode.Downloading, "hash-second", "second")
 

@@ -62,31 +62,6 @@ func TestEnsureEmptyURL(t *testing.T) {
 	}
 }
 
-// TestRelease: a finished season's art is deleted, and releasing twice is fine.
-func TestRelease(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("x"))
-	}))
-	defer srv.Close()
-
-	c, _ := New(filepath.Join(t.TempDir(), "art"))
-	url := srv.URL + "/cover.jpg"
-	name, err := c.Ensure(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Release(url); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(c.dir, name)); !os.IsNotExist(err) {
-		t.Errorf("file still present after release (stat err = %v)", err)
-	}
-	// Idempotent: a season can be marked complete more than once.
-	if err := c.Release(url); err != nil {
-		t.Errorf("second release: %v", err)
-	}
-}
-
 // TestFileNameStable: the same URL always maps to the same file, and the
 // extension survives so the served content type is right.
 func TestFileNameStable(t *testing.T) {

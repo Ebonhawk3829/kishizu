@@ -38,7 +38,7 @@ func testServer(t *testing.T) *Server {
 func TestWatchedByPath(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
-	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	// The PC's path is a Windows path; only the base name matters.
@@ -61,7 +61,7 @@ func TestWatchedByPath(t *testing.T) {
 // user may still want.
 func TestWatchedRefusesUncertain(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	// Offsets disagree, so an unseen group is a coin flip.
 	_ = srv.st.SetGroupOffset(sh.ID, "A", 0, "training")
 	_ = srv.st.SetGroupOffset(sh.ID, "B", 40, "training")
@@ -81,7 +81,7 @@ func TestWatchedRefusesUncertain(t *testing.T) {
 // entirely, since the user said so.
 func TestWatchedManualOverridesMatching(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Show", nil, 12)
+	sh, _ := srv.st.CreateShow("Show", nil)
 
 	body := `{"show_id":1,"episode":7}`
 	rec := post(t, srv, "/api/watched", body)
@@ -97,7 +97,7 @@ func TestWatchedManualOverridesMatching(t *testing.T) {
 // TestWatchedIsIdempotent: a duplicate watch signal must not fail or rewind.
 func TestWatchedIsIdempotent(t *testing.T) {
 	srv := testServer(t)
-	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	_ = srv.st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
 
 	body := `{"path":"[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL.mkv"}`

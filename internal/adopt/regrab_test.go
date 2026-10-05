@@ -21,7 +21,7 @@ func TestRegrabSkipsPreviousRelease(t *testing.T) {
 	}
 	defer st.Close()
 
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	// Grab release A, then it lands on disk.
 	if err := st.MarkSeen("HASH_A", sh.ID, 5, store.SeenGrab); err != nil {

@@ -103,7 +103,7 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 
 	// Source seadex: the airing pipeline skips it and the UI does not ask
 	// whether it has aired or needs training.
-	sh, err := st.CreateShow(title, nil, maxOf(eps))
+	sh, err := st.CreateShow(title, nil)
 	if err != nil {
 		return fmt.Errorf("create show: %w", err)
 	}
@@ -134,16 +134,6 @@ func adoptSeason(ctx context.Context, st *store.Store, rawURL, episodeList, stag
 	fmt.Printf("Adopted %q: %d episodes downloading.\n", title, len(eps))
 	fmt.Printf("Reconcile will file them into %s as they complete.\n", libraryDir)
 	return nil
-}
-
-func maxOf(ns []int) int {
-	best := 0
-	for _, n := range ns {
-		if n > best {
-			best = n
-		}
-	}
-	return best
 }
 
 // selectionFor builds the confirmed rows: either the classifier's proposal,

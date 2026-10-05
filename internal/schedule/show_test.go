@@ -271,34 +271,6 @@ func TestParseShowNoTitleIsError(t *testing.T) {
 	}
 }
 
-// TestSeasonLengthKeepsMovieCount: a film reports "Episodes: 1" and that is the
-// right answer — a film is one download. The season-complete check is
-// `next > max`, so max=1 still permits episode 1 and stops once it is watched.
-//
-// This guards against reintroducing a "movies are not seasons" special case.
-// Suppressing the count leaves max=0, which loses the plausibility bound and
-// lets a mis-numbered release be accepted as episode 5 of a film.
-func TestSeasonLengthKeepsMovieCount(t *testing.T) {
-	cases := []struct {
-		typ      string
-		episodes int
-		want     int
-	}{
-		{"TV", 12, 12},
-		{"TV Short", 24, 24},
-		{"Movie", 1, 1},
-		{"OVA", 1, 1},
-		{"ONA", 4, 4},
-		{"TV", 0, 0}, // unknown
-	}
-	for _, c := range cases {
-		sh := &Show{Type: c.typ, Episodes: c.episodes}
-		if got := sh.SeasonLength(); got != c.want {
-			t.Errorf("SeasonLength(%s, %d) = %d, want %d", c.typ, c.episodes, got, c.want)
-		}
-	}
-}
-
 func TestSlugFromURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4",

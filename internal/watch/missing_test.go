@@ -13,7 +13,7 @@ import (
 func TestCheckMissingFlagsVanishedFile(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	// A file that existed and is now gone.
 	p := filepath.Join(lib, "Show - E05.mkv")
@@ -48,7 +48,7 @@ func TestCheckMissingFlagsVanishedFile(t *testing.T) {
 func TestCheckMissingIgnoresNoPath(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	// Marked downloaded via the UI, no path — the file is on the user's PC.
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Downloaded, "", "")
@@ -71,7 +71,7 @@ func TestCheckMissingIgnoresNoPath(t *testing.T) {
 func TestCheckMissingIgnoresPresentFile(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	p := filepath.Join(lib, "Show - E05.mkv")
 	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
@@ -95,7 +95,7 @@ func TestCheckMissingIgnoresPresentFile(t *testing.T) {
 func TestCheckMissingSkipsWatched(t *testing.T) {
 	st := testStore(t)
 	lib := t.TempDir()
-	sh, _ := st.CreateShow("Show", nil, 12)
+	sh, _ := st.CreateShow("Show", nil)
 
 	p := filepath.Join(lib, "Show - E05.mkv")
 	_ = st.UpsertEpisode(sh.ID, 5, episode.Watched, "H", "rel")

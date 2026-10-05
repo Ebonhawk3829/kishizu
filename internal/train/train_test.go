@@ -18,9 +18,9 @@ func testStore(t *testing.T) *store.Store {
 	return s
 }
 
-func newShow(t *testing.T, st *store.Store, name string, aliases []string, max int) *store.Show {
+func newShow(t *testing.T, st *store.Store, name string, aliases []string) *store.Show {
 	t.Helper()
-	sh, err := st.CreateShow(name, aliases, max)
+	sh, err := st.CreateShow(name, aliases)
 	if err != nil {
 		t.Fatalf("CreateShow: %v", err)
 	}
@@ -34,7 +34,7 @@ func item(title string) nyaa.Item {
 // TestSeedDerivesOffset: one example is enough to establish a group's offset.
 func TestSeedDerivesOffset(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"})
 
 	s, err := NewSession(st, sh, 9)
 	if err != nil {
@@ -55,7 +55,7 @@ func TestSeedDerivesNonZeroOffset(t *testing.T) {
 	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War - The Calamity", []string{
 		"Bleach: Sennen Kessen Hen - Kashin Tan",
 		"BLEACH Thousand Year Blood War",
-	}, 30)
+	})
 
 	s, err := NewSession(st, sh, 7)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestSeedDerivesNonZeroOffset(t *testing.T) {
 
 func TestSeedRejectsUnreadableTitle(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Show", nil, 12)
+	sh := newShow(t, st, "Show", nil)
 	s, _ := NewSession(st, sh, 1)
 	if err := s.Seed("Show - Some Movie Release"); err == nil {
 		t.Error("expected an error when no episode number can be read")
@@ -86,7 +86,7 @@ func TestProposeRanksUncertaintyFirst(t *testing.T) {
 	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War - The Calamity", []string{
 		"Bleach: Sennen Kessen Hen - Kashin Tan",
 		"BLEACH Thousand Year Blood War",
-	}, 30)
+	})
 
 	s, _ := NewSession(st, sh, 7)
 	if err := s.Seed("[Erai-raws] Bleach: Sennen Kessen Hen - Kashin Tan - 07 [1080p]"); err != nil {
@@ -124,7 +124,7 @@ func TestProposeRanksUncertaintyFirst(t *testing.T) {
 // TestProposeSkipsConfident), so it would not exercise the asked-set here.
 func TestProposeSkipsAsked(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"})
 	s, _ := NewSession(st, sh, 9)
 	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
 
@@ -149,7 +149,7 @@ func TestProposeSkipsAsked(t *testing.T) {
 // wrong one is a bad download that may never be noticed.
 func TestProposeKeepsConfident(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"})
 	s, _ := NewSession(st, sh, 9)
 	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
 
@@ -171,7 +171,7 @@ func TestProposeKeepsConfident(t *testing.T) {
 // uncertainty — so ordering by it means every grade teaches something new.
 func TestProposeOrdersByNovelty(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"})
 	s, _ := NewSession(st, sh, 9)
 	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
 
@@ -198,7 +198,7 @@ func TestProposeOrdersByNovelty(t *testing.T) {
 // decides whether the right episode is downloaded at all.
 func TestNoveltyWeightsGroupAboveQuality(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"}, 12)
+	sh := newShow(t, st, "Tomb Raider King", []string{"Dogul Wang"})
 	s, _ := NewSession(st, sh, 9)
 	_ = s.Seed("[ToonsHub] Tomb Raider King S01E09 1080p CR WEB-DL")
 
@@ -222,7 +222,7 @@ func TestTeachRecordsManualExample(t *testing.T) {
 	st := testStore(t)
 	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War - The Calamity", []string{
 		"BLEACH Thousand Year Blood War",
-	}, 30)
+	})
 	s, _ := NewSession(st, sh, 7)
 
 	// Absolute numbering: raw 47 is episode 7, so the offset is 40.
@@ -238,7 +238,7 @@ func TestTeachRecordsManualExample(t *testing.T) {
 // nothing, and must say so rather than silently recording a bogus offset.
 func TestTeachRejectsUnreadableTitle(t *testing.T) {
 	st := testStore(t)
-	sh := newShow(t, st, "Tomb Raider King", nil, 12)
+	sh := newShow(t, st, "Tomb Raider King", nil)
 	s, _ := NewSession(st, sh, 9)
 
 	if err := s.Teach("[ToonsHub] Tomb Raider King 1080p CR WEB-DL", 9); err == nil {
@@ -255,7 +255,7 @@ func TestAcceptLearnsUnseenGroupOffset(t *testing.T) {
 	st := testStore(t)
 	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War - The Calamity", []string{
 		"BLEACH Thousand Year Blood War",
-	}, 30)
+	})
 	s, _ := NewSession(st, sh, 7)
 	_ = s.Seed("[Erai-raws] Bleach: Sennen Kessen Hen - Kashin Tan - 07 [1080p]")
 
@@ -273,7 +273,7 @@ func TestCommitPersists(t *testing.T) {
 	st := testStore(t)
 	sh := newShow(t, st, "BLEACH: Thousand-Year Blood War - The Calamity", []string{
 		"BLEACH Thousand Year Blood War",
-	}, 30)
+	})
 	s, _ := NewSession(st, sh, 7)
 	_ = s.Seed("[SubsPlease] Bleach - Sennen Kessen Hen - 47 (1080p)")
 	_ = s.Accept(Candidate{Item: item("[ToonsHub] BLEACH Thousand-Year Blood War S01E47 1080p")})

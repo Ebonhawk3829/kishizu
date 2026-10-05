@@ -13,7 +13,7 @@ import (
 func webhookServer(t *testing.T) (*Server, *store.Show) {
 	t.Helper()
 	srv := testServer(t)
-	sh, err := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"}, 12)
+	sh, err := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
 	if err != nil {
 		t.Fatalf("create show: %v", err)
 	}
