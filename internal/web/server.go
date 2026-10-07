@@ -1043,10 +1043,15 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // The show's NAME comes from the fetched page — the URL itself is never
 // stored as a name. The canonical name is stored as an alias of itself, so
 // matching needs no special case.
+//
+// Aliases are accepted in the request body but ignored: the schedule page
+// is the alias source, and it fills in every alternative name on add. The
+// field is kept so an old cached page or script that still sends it gets
+// the same response instead of a decode error.
 func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name    string   `json:"name"`
-		Aliases []string `json:"aliases"`
+		Aliases []string `json:"aliases"` // parse-and-ignore; see doc comment
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -1067,7 +1072,7 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 			"add shows by pasting an animeschedule.net URL, or from the browse list — a plain name has no schedule identity, so there is no anchor to hunt from"))
 		return
 	}
-	sh, err := s.createShowFromSlug(slug, req.Aliases)
+	sh, err := s.createShowFromSlug(slug)
 	if err != nil {
 		// A 404 from the schedule is the user's typo, not a server failure:
 		// the site is up and says this slug is not a show. That is a bad
@@ -1099,7 +1104,7 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 // show's own page. So the cache-hit path also fetches the page in the
 // background: a show added from browse gets a real anchor immediately
 // instead of waiting up to a day for the daily refresh.
-func (s *Server) createShowFromSlug(slug string, aliases []string) (*store.Show, error) {
+func (s *Server) createShowFromSlug(slug string) (*store.Show, error) {
 	// The cache is the fast path: the browse list already holds the title, the
 	// English name and the art, so adding from browse costs no network I/O and
 	// works when animeschedule is unreachable.
@@ -1108,7 +1113,7 @@ func (s *Server) createShowFromSlug(slug string, aliases []string) (*store.Show,
 		if name == "" {
 			name = slug
 		}
-		sh, err := s.st.CreateShow(name, aliases)
+		sh, err := s.st.CreateShow(name, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1142,7 +1147,7 @@ func (s *Server) createShowFromSlug(slug string, aliases []string) (*store.Show,
 	if name == "" {
 		name = slug
 	}
-	sh, err := s.st.CreateShow(name, aliases)
+	sh, err := s.st.CreateShow(name, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -494,7 +494,6 @@
     <p class="hint">Two ways to add a show, both anchored to the schedule: paste the show's animeschedule.net URL, or pick it from the season list. The page is fetched on add, so the cover art and every alternative name are filled in for you.</p>
     <div class="fields">
       <div><label for="add-name">animeschedule.net URL</label><input id="add-name" type="url" placeholder="https://animeschedule.net/anime/..."></div>
-      <div><label for="add-aliases">Aliases</label><input id="add-aliases" type="text" placeholder="comma, separated"></div>
       <div><button class="btn" id="btn-add">Add</button></div>
     </div>
     <div class="field-error" id="add-error"></div>
@@ -810,10 +809,9 @@ async function addShow() {
     return;
   }
   fieldError('add-error', '');
-  const aliases = el('add-aliases').value.split(',').map(s => s.trim()).filter(Boolean);
   try {
-    const r = await api('/api/shows', { name, aliases });
-    el('add-name').value = ''; el('add-aliases').value = '';
+    const r = await api('/api/shows', { name });
+    el('add-name').value = '';
     toast(`Added ${r.name}.`);
     loadShows();
   } catch (e) { fieldError('add-error', e.message); }

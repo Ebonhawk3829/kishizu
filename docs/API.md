@@ -71,9 +71,13 @@ a bare slug). A URL is better: the slug is an exact identity, and the page
 carries the cover art and every alternative name.
 
 ```json
-{"name":"https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4",
- "aliases":["ReZero 4"]}
+{"name":"https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4"}
 ```
+
+An `aliases` array is accepted for compatibility with older clients but
+ignored: the schedule page is the alias source, and it fills in every
+alternative name on add. To force an alias the schedule does not know, list
+the show under `shows:` in the config file and run `-seed`.
 
 ### `DELETE /api/shows`
 
