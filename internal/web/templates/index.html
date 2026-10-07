@@ -1310,11 +1310,16 @@ function card(s) {
   // the schedule knows it. Tense matters — "airs" for a future point,
   // "aired" for one already past. A finished show has no next episode, so
   // the card carries no air line at all: the section says complete.
+  // An announced-but-unscheduled show has a state but no anchor: the site
+  // lists it without a premiere date. "TBC" says the season is coming and
+  // the date is not; an empty line would look like a rendering failure.
   let air;
   if (s.next_schedule) {
     const sc = s.next_schedule;
     const past = new Date(sc.airs_at) < Date.now();
     air = `Ep ${sc.episode} ${past ? 'aired' : 'airs'} <b>${when(sc.airs_at)}</b> (${rel(sc.airs_at)})`;
+  } else if (st === 'upcoming') {
+    air = 'TBC';
   }
 
   // A downloading episode may need manual intervention — a dead swarm, a
