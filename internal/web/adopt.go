@@ -82,13 +82,12 @@ func (s *Server) handleAdoptPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The title comes from AniList, not from the filenames. The entry page
-	// displays it right next to the torrent list, so it is the name the user
-	// is looking at when they paste the link, and it is authoritative in a
-	// way filename parsing can never be — a remux group's naming scheme is
-	// nobody's contract. The filename-derived title stays as the fallback
-	// for when AniList is unreachable or has no English title: a guessable
-	// name beats an empty field on the review screen.
+	// The title comes from AniList rather than the filenames: the entry page
+	// displays it beside the torrent list, so it is the name the user is
+	// looking at when they paste the link, and it is authoritative. The
+	// filename-derived title stays as the fallback for when AniList is
+	// unreachable or has no English title: a guessable name beats an empty
+	// field on the review screen.
 	title := plan.Title
 	if m, err := anilist.New().FetchMedia(id); err != nil {
 		log.Printf("adopt: anilist title lookup: %v", err)
@@ -184,14 +183,14 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("create show: %w", err))
 		return
 	}
-	// Source seadex: the airing pipeline skips it, and the UI does not ask
-	// whether it has aired or needs training.
+	// Source seadex: the airing pipeline skips it, and the UI skips the
+	// has-it-aired and needs-training questions.
 	if err := s.st.SetSource(sh.ID, store.SourceSeaDex); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Cover art. An adopted show never touches animeschedule.net, so it has
-	// none from the usual path, and SeaDex's API exposes no image. But the
+	// Cover art. An adopted show has none from the usual path: it never
+	// touches animeschedule.net, and SeaDex's API exposes no image. The
 	// entry URL carries the AniList id, and AniList serves the same poster
 	// the SeaDex page shows. Best effort: a failure costs a missing poster,
 	// not the adoption.

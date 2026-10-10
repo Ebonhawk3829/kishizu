@@ -2,7 +2,7 @@
 // called.
 //
 // The layout is configurable because people arrive with a library already
-// shaped by another tool. kishizu's own form is one option, not the only one.
+// shaped by another tool; kishizu's own form is one option among several.
 //
 // Two things must agree or the pipeline breaks: the writer (which names a
 // file on completion) and the reader (which recognises that name when the
@@ -120,8 +120,7 @@ var placeholders = []string{"{show}", "{season}", "{season:2}", "{episode}", "{e
 //
 // {show} and an episode placeholder are both required: without the show the
 // name is not identifiable, and without the episode the watch signal cannot
-// read a number back out of it — which is the failure that leaves files on
-// disk forever.
+// read a number back out of it, which leaves files on disk forever.
 func ValidatePattern(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return fmt.Errorf("pattern is empty")
@@ -238,8 +237,8 @@ func (s *Scheme) Matcher() (*regexp.Regexp, error) {
 			b.WriteString(`\d{1,4}`)
 		case "episode":
 			// The width is a MINIMUM, not a maximum: {episode:2} pads 9 to "09"
-			// but must still match 100, which is three digits. Anime seasons
-			// pass 100 routinely on long-running shows.
+			// but must still match 100, which is three digits — long-running
+			// anime seasons pass 100 routinely.
 			//
 			// Reading is more lenient still: a file written by an older build,
 			// or by hand, may carry "E1" where the scheme would write "E01".

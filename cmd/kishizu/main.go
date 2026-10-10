@@ -186,14 +186,13 @@ func runServe(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client)
 	}
 	srv.SetDownloaderURL(dl.URL())
 
-	// The naming scheme must match the reconciler's, or the watch signal
-	// cannot recognise kishizu's own filenames.
+	// The naming scheme is the reconciler's: it names files on completion and
+	// runLoop's sweep reads them back.
 	scheme, err := buildScheme(cfg.Server.Naming)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	srv.SetNaming(scheme)
 
 	// The timetable cache lives next to the database so it survives a
 	// restart and browsing works when the schedule site is unreachable.
@@ -353,8 +352,8 @@ func reportShow(ctx context.Context, st *store.Store, sh *store.Show, indexer *n
 		}
 	}
 
-	// The refusals are the interesting part: "why was this not grabbed" is
-	// what a dry run exists to answer.
+	// The refusals answer the question a dry run exists for: why was this
+	// not grabbed.
 	skipped := 0
 	for _, d := range decisions {
 		if !d.Grab {

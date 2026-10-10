@@ -76,7 +76,8 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	w := watch.New(st, s.Library, keep, s.Delete, deleteAfter)
 	rec := grab.NewWithScheme(st, s.Staging, s.Library, scheme)
 	rec.PruneUnselected = s.PruneUnselected
-	// A stalled download pings once, not on every poll.
+	// A stalled download pings once per episode; the map suppresses repeats
+	// on later polls while the condition persists.
 	stalled := map[string]bool{}
 	rec.OnStall = func(show, title string, ep int) {
 		key := fmt.Sprintf("%s:%d", show, ep)
@@ -89,9 +90,9 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			notify.PriorityHigh)
 	}
 
-	// A show that premiered but cannot hunt pings once, not on every tick:
-	// the condition persists until the user trains it, and at a 3-minute
-	// poll that would be ~480 pings a day for the same fact.
+	// A show that premiered but cannot hunt pings once; the condition
+	// persists until the user trains it, and at a 3-minute poll a repeat
+	// ping would be ~480 a day for the same fact.
 	untrainedPinged := map[string]bool{}
 	l.OnUntrained = func(show string) {
 		if untrainedPinged[show] {

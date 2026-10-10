@@ -57,7 +57,7 @@ type Reconciler struct {
 	// the default of 48h.
 	//
 	// Without this a dead swarm is invisible forever: the episode is not
-	// hunting (so it is never re-grabbed), it never goes "no release found"
+	// hunting (so it is never re-grabbed), never goes "no release found"
 	// (that is only for "wanted"), and nothing alerts. The staging directory
 	// is the only witness to a download, so its silence is the signal.
 	StallAfter time.Duration
@@ -148,9 +148,9 @@ func (r *Reconciler) Reconcile() error {
 		// The raw-number fallback is for adopted seasons only: the release was
 		// chosen by hand, so the user confirmed which file is which episode.
 		// It is keyed on the show's SOURCE, not on offsets being empty — an
-		// airing show whose offsets were cleared (Reset in the UI) must not
-		// have raw numbers trusted for it, or a file numbered 47 files against
-		// a nonexistent row while the episode it should resolve to stays
+		// airing show whose offsets were cleared (Reset in the UI) must not have
+		// raw numbers trusted for it, or a file numbered 47 files against a
+		// nonexistent row while the episode it should resolve to stays
 		// downloading.
 		trustRaw := sh.Source == store.SourceSeaDex
 		var unresolved []string

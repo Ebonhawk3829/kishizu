@@ -84,10 +84,10 @@ type Policy struct {
 // Default is the policy kishizu ships with.
 //
 // These are the preferences that hold for every show, so they never need
-// grading per release. Nobody wants a batch. Nobody prefers a dub. Nobody
-// wants a re-encoded x265 over the original x264. Asking those questions once
-// per release was wasted effort, and worse, it let a per-release answer
-// contradict a preference that was never really in doubt.
+// grading per release: batches are unwanted, dubs are unwanted, a re-encoded
+// x265 loses to the original x264. Asking those questions once per release
+// would let a per-release answer contradict a preference that was never in
+// doubt.
 func Default() *Policy {
 	return &Policy{
 		ResolutionFloor: "1080p",
@@ -126,7 +126,7 @@ const RankUnlisted = 1000
 // floor invites a typo ("1080P") that silently never matches, since the
 // lookup is by exact lowercase name. "4k" is absent — the parser emits it,
 // but "2160p" is the same thing spelled the way the penalty table prefers,
-// and two spellings for one floor is a trap.
+// and two spellings for one floor invites mismatch.
 var Resolutions = []string{"2160p", "1440p", "1080p", "720p", "480p"}
 
 // GroupRank returns where a release's group sits in the group order.
@@ -154,9 +154,9 @@ func (p *Policy) CodecRankOf(codec string) (int, bool) {
 
 // ResolutionRejected reports whether a resolution is below the floor.
 //
-// A resolution the parser could not read is ALSO rejected: after the learned
-// vocabulary has had its chance to fill the gap, an empty resolution is a
-// title that does not carry its quality in a readable form, and a release
+// A resolution the parser could not read is also rejected: after the learned
+// vocabulary has had its chance to fill the gap, an empty resolution means
+// the title does not carry its quality in a readable form, and a release
 // that cannot be quality-checked does not get the benefit of the doubt.
 // Callers that merely DISPLAY a parse (the training panel) should use the
 // parse directly instead, so the user can teach the missing token.

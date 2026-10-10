@@ -158,8 +158,8 @@ func (h *Handler) Sweep() (deleted []string, kept []string, err error) {
 //
 // Scoped to episodes with a file_path. An episode marked "downloaded" by
 // hand — the user has it on their PC, the server never had a copy — has no
-// path and is not missing. Warning about files kishizu never created would
-// be noise, and would need a "trust me" button to dismiss.
+// path and is not missing; warning about files kishizu never created would
+// be noise.
 //
 // Returns the episodes newly marked, so the caller can notify.
 func (h *Handler) CheckMissing() ([]*store.Episode, error) {
@@ -210,10 +210,10 @@ func fileExists(path string) bool {
 //
 // The containment is os.Root rather than a string prefix check on the
 // absolute path. A prefix check does not resolve symlinks, so a link inside
-// the library pointing at a file outside it passed the check and the delete
-// went through — the exact failure the check existed to prevent. os.Root
-// resolves each path component against the root and refuses to follow a link
-// that escapes, which is the stdlib answer to this problem.
+// the library pointing at a file outside it would pass the check and the
+// delete would go through — the exact failure the check exists to prevent.
+// os.Root resolves each path component against the root and refuses to follow
+// a link that escapes.
 func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 	path := ep.FilePath
 	if path == "" {

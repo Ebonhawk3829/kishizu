@@ -48,9 +48,9 @@ func ParseState(s string) State {
 
 // Terminal reports whether the episode has been consumed: watched or deleted.
 //
-// This is the guard against resurrection. Once an episode is watched and
-// deleted, a late or re-release must not bring it back — the user finished
-// with it, and re-downloading would put the file back on their disk.
+// Once an episode is watched and deleted, a late or re-release must not bring
+// it back — the user finished with it, and re-downloading would put the file
+// back on their disk.
 func (s State) Terminal() bool {
 	return s == Watched || s == Deleted
 }
@@ -61,7 +61,7 @@ func (s State) Terminal() bool {
 //   - Blocked: never, regardless of quality.
 //   - Watched/Deleted: never. Terminal — see Terminal().
 //   - Wanted: yes.
-//   - Downloading: NO. A magnet has already been handed off; the episode is
+//   - Downloading: no. A magnet has already been handed off; the episode is
 //     in flight. Grabbing again would download the same episode repeatedly,
 //     because every release group publishes a distinct infohash and so no
 //     "already seen" check fires. Quality is guaranteed up front instead: the

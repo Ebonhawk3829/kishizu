@@ -65,11 +65,10 @@ func DefaultIndexer() Indexer {
 //
 // The indexer and the rate limiter are fields, not package state: package
 // state makes every call site depend on an ordering nothing enforces, and
-// tests mutating shared state cannot run in parallel.
-//
-// As fields, a Client is constructed with its configuration and cannot be
-// half-configured. Two clients with different indexers can coexist, which is
-// what a test wants and what a future multi-indexer deployment needs.
+// tests mutating shared state cannot run in parallel. As fields, a Client is
+// constructed with its configuration and cannot be half-configured, and two
+// clients with different indexers can coexist — which is what a test wants
+// and what a future multi-indexer deployment needs.
 type Client struct {
 	ix Indexer
 	// hc is the HTTP client. Nil means a default one is built per call, which
@@ -77,20 +76,18 @@ type Client struct {
 	// its own so connections are pooled.
 	hc *http.Client
 	// lim is the rate limiter, held by pointer so a Client can be copied
-	// without copying a mutex — and so copies share one budget. Sharing is
-	// the point: a copy that got its own limiter would be a way to bypass
-	// the politeness the original was configured with.
+	// without copying a mutex — and so copies share one budget. A copy with
+	// its own limiter would be a way to bypass the politeness the original
+	// was configured with.
 	lim *limiter
 }
 
-// limiter spaces requests out. A public indexer is a shared resource: polling
-// every show every tick with no floor between requests is the kind of traffic
-// that gets a caller blocked, and being blocked looks exactly like "no
-// releases found".
-//
-// Per client, not per package: two clients are two independent callers as far
-// as an indexer is concerned only if they are actually separate, and a shared
-// limiter would make one client's politeness depend on another's traffic.
+// limiter spaces requests out. A public indexer is a shared resource:
+// polling every show every tick with no floor between requests is the kind
+// of traffic that gets a caller blocked, and being blocked looks exactly
+// like "no releases found".
+// The limiter is per client: a package-level one would make one client's
+// politeness depend on another's traffic.
 type limiter struct {
 	mu          sync.Mutex
 	lastRequest time.Time
@@ -133,11 +130,11 @@ func (c *Client) FeedURL(alias string) string {
 
 // FeedURLsFor returns candidate feed URLs for a show, broadest first.
 //
-// A single query is not enough: searching the full canonical name
-// ("BLEACH: Thousand-Year Blood War - The Calamity") returned 28 items and
-// missed VARYG entirely, while "BLEACH Sennen Kessen" returned 75 including 14
-// VARYG releases. Nyaa's search is a plain substring match, so a long specific
-// name excludes groups that write the title differently.
+// A single query is not enough: Nyaa's search is a plain substring match, so
+// a long specific name excludes groups that write the title differently —
+// searching the full canonical name of a Bleach season returned 28 items and
+// missed VARYG entirely, while a shorter alias returned 75 including 14
+// VARYG releases.
 //
 // Callers should merge the results, deduplicating on infohash.
 func (c *Client) FeedURLsFor(canonical string, aliases []string) []string {
@@ -165,10 +162,9 @@ func (c *Client) FeedURLsFor(canonical string, aliases []string) []string {
 //
 // A failing feed is skipped rather than aborting the rest — one bad alias
 // should not stop a show being hunted — but the failures are counted and
-// returned. Returning only the items made a total indexer outage
-// indistinguishable from a quiet week, which is the one case where the
-// difference matters most: the caller cannot tell "nothing aired" from
-// "nothing was asked".
+// returned. Returning only the items would make a total indexer outage
+// indistinguishable from a quiet week: the caller could not tell "nothing
+// aired" from "nothing was asked".
 //
 // The error is non-nil only when every feed failed. Partial failures are
 // reported through failed, so a caller that wants to be strict can be.

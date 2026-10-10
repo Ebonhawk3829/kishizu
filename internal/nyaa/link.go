@@ -20,8 +20,8 @@ var (
 
 // ResolveLink fetches a Nyaa view page and returns the release title.
 //
-// Lets the user paste a link instead of transcribing a title by hand, which is
-// the difference between grading a release being worth it and not.
+// Lets the user paste a link instead of transcribing a title by hand, which
+// makes grading a release worth doing.
 func ResolveLink(ctx context.Context, client *http.Client, rawURL string) (string, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}

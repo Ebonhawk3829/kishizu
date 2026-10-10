@@ -39,16 +39,16 @@ type Result struct {
 }
 
 // Confident reports whether the model is sure enough to act without asking.
-// Callers must not ask the user about confident results: the model already has
-// the answer, so asking wastes the only scarce resource here — their attention.
+// Asking the user about a confident result wastes their attention, the only
+// scarce resource here.
 func (r Result) Confident() bool { return r.Confidence >= ConfidentThreshold }
 
 // Threshold is the minimum title score for a release to be eligible at all.
 // Measured gap on real data: accepted releases 1.00, best non-match 0.33 — so
 // this sits in empty space.
 //
-// It is a GATE, not a score. A release either clears it or it does not; how
-// far it clears it by is discarded. See AliasGate for why.
+// It is a gate, not a score: a release either clears it or it does not, and
+// how far it clears it by is discarded. See AliasGate for why.
 const Threshold = 0.6
 
 // ConfidentThreshold is the confidence at which the model stops asking.
@@ -61,10 +61,10 @@ const ConfidentThreshold = 0.75
 // There is no alias weight. The alias is an eligibility gate, not a
 // contributor: once a release is eligible, ranking it is the job of the
 // release's own properties (group, resolution, codec, source), which the
-// preference ranker already does. Folding alias quality into confidence made
-// a short alias like "ReZero 4" score a perfect 1.0 against anything
-// containing those tokens, inflating confidence for releases that merely
-// looked similar.
+// preference ranker already does. Folding alias quality into confidence
+// inflated confidence for releases that merely looked similar: a short alias
+// like "ReZero 4" scored a perfect 1.0 against anything containing those
+// tokens.
 const (
 	wGroupKnown = 0.6 // do we have this exact group's offset
 	wAgreement  = 0.4 // do the known offsets agree with each other
@@ -142,10 +142,9 @@ func offsetAgreement(s Show) float64 {
 
 // confidence combines the available evidence into a 0..1 estimate.
 //
-// The alias is not an input. It has already done its job by the time this is
-// called: a release that reaches here cleared the gate. What remains is how
-// much the model trusts the EPISODE NUMBER it read, which is a question about
-// groups and offsets, not about titles.
+// The alias is not an input: a release that reaches here has already cleared
+// the gate. What remains is how much the model trusts the EPISODE NUMBER it
+// read, which is a question about groups and offsets, not about titles.
 func confidence(groupKnown bool, agreement float64) float64 {
 	c := 0.0
 	if groupKnown {
@@ -160,11 +159,11 @@ func confidence(groupKnown bool, agreement float64) float64 {
 
 // AliasGate reports whether a release title is eligible for a show at all.
 //
-// It is a gate, not a score, and that is the point. The alias set is now wide
-// — the schedule page contributes romaji, English, Japanese and synonyms — and
-// those names differ wildly in how much identity they carry. Scoring them made
-// the short ones dangerous: "ReZero 4" is a perfect recall match against any
-// release containing those two tokens, so it contributed a full alias score to
+// It is a gate, not a score. The alias set is wide — the schedule page
+// contributes romaji, English, Japanese and synonyms — and those names differ
+// widely in how much identity they carry. Scoring them made the short ones
+// dangerous: "ReZero 4" is a perfect recall match against any release
+// containing those two tokens, so it contributed a full alias score to
 // releases that merely looked similar.
 //
 // Treating the alias as eligibility fixes that. ANY alias that clears the
@@ -195,7 +194,7 @@ func Match(s Show, title string) Result {
 	r := release.Parse(title)
 	raw := r.RawEpisode()
 	if raw == 0 {
-		// Eligible but the episode number is unreadable. This is the maximally
+		// Eligible but the episode number is unreadable. This is the most
 		// informative case for training: it needs a human.
 		return Result{
 			Matched:    true,

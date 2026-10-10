@@ -74,7 +74,7 @@ var reEntryPath = regexp.MustCompile(`^/(\d+)/?$`)
 
 // AniListIDFromURL extracts the AniList id from a SeaDex entry URL.
 //
-// The entry page's path IS the AniList id, so no lookup is needed to get
+// The entry page's path is the AniList id, so no lookup is needed to get
 // from a pasted link to an API query. Accepts the forms a user is likely to
 // paste:
 //

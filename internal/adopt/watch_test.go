@@ -9,8 +9,8 @@ import (
 )
 
 // Stage 4: after adoption, does the player watch signal resolve?
-// matchFile tries FindByFileName (exact, on the stored path) first, then
-// falls back to parsing. The library form is exempt from the confidence gate.
+// matchFile resolves by exact name against the stored path, which adoption
+// records when it files each episode.
 func TestSimWatchSignal(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "sim.db"))
 	if err != nil {

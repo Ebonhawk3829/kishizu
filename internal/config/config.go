@@ -178,7 +178,7 @@ type NamingConfig struct {
 // environment variables.
 //
 // A missing file is not an error: it yields defaults, so kishizu starts with
-// no configuration at all. A file that exists but cannot be parsed IS an
+// no configuration at all. A file that exists but cannot be parsed is an
 // error: running with settings the user never asked for is worse than not
 // starting.
 func Load(path string) (*File, error) {
@@ -210,9 +210,9 @@ const (
 // secret in the file should not have it silently overridden by a stray
 // variable in the environment.
 //
-// This exists because the configuration file is plain text on disk, and is
-// the one file a user is most likely to back up, copy around, or commit by
-// mistake. An environment variable keeps the credential out of it entirely.
+// The configuration file is plain text on disk and is the one file a user is
+// most likely to back up, copy around, or commit by mistake. An environment
+// variable keeps the credential out of it entirely.
 func applySecretEnv(s *Server) {
 	if v := strings.TrimSpace(os.Getenv(EnvQBittorrentPass)); v != "" {
 		s.Downloader.QBittorrentPass = v
@@ -383,8 +383,7 @@ func (s *Server) IsDryRun() bool {
 // "720h" is unreadable.
 //
 // An empty setting is 0. A malformed value is an error, not a silent default:
-// a typo in a deletion delay is exactly the kind of thing that must fail
-// loudly at startup.
+// a typo in a deletion delay must fail loudly at startup.
 func (s *Server) DeleteAfterDuration() (time.Duration, error) {
 	v := strings.TrimSpace(s.DeleteAfter)
 	if v == "" {

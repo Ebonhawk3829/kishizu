@@ -88,14 +88,14 @@ func (s *Store) UpsertEpisode(showID int64, number int, next episode.State, info
 		// should not fail the caller.
 		return nil
 	}
-	// Already downloading under a different torrent: keep the first one.
+	// Keep the first torrent while an episode is downloading.
 	//
 	// Advance() allows Downloading -> Downloading, which would overwrite the
 	// infohash with a second release for the same episode. The episode then
 	// points at the newer torrent while the older one is still going, and
 	// neither reconciles cleanly — the first is orphaned and the episode
-	// never leaves "downloading". The first grab wins; a better release is
-	// only an upgrade once the episode is live, not mid-download.
+	// never leaves "downloading". A better release is only an upgrade once
+	// the episode is live, not mid-download.
 	if existing.State == episode.Downloading && next == episode.Downloading &&
 		existing.InfoHash != "" && infohash != "" && existing.InfoHash != infohash {
 		return nil
@@ -148,8 +148,7 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int, force bool) (int, error) {
 	// Latch by STATE, not by row existence. A row in "wanted" is not progress:
 	// only episodes that are downloading or further along are already handled,
 	// and re-latching those is what this must skip.
-	rows, err := s.db.Query(
-		`SELECT number, state FROM episode WHERE show_id = ? AND number <= ?`, showID, n)
+	rows, err := s.db.Query(`SELECT number, state FROM episode WHERE show_id = ? AND number <= ?`, showID, n)
 	if err != nil {
 		return 0, err
 	}
@@ -171,9 +170,7 @@ func (s *Store) MarkWatchedUpTo(showID int64, n int, force bool) (int, error) {
 	marked := 0
 	for i := 1; i <= n; i++ {
 		// Skip only what is in flight or already consumed. An episode on disk
-		// ("downloaded") is exactly what "watched up to" is meant to clear —
-		// leaving it alone meant a ready-to-watch episode stayed ready to
-		// watch after the user said they had watched it.
+		// ("downloaded") is exactly what "watched up to" is meant to clear.
 		if cur, ok := state[i]; ok && (cur.Terminal() || (cur == episode.Downloading && !force)) {
 			continue
 		}

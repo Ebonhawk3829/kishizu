@@ -22,10 +22,7 @@ import (
 // back, and the one user preference that is not deployment configuration.
 //
 // Split out of server.go because this group is self-contained: it touches
-// configPath and the store, and nothing else on Server. The rest of
-// server.go's handlers share the store with several other dependencies, so
-// there is no comparable seam to cut — moving them would just relocate the
-// same coupling to a file with a different name.
+// configPath and the store, and nothing else on Server.
 
 // SetConfigPath sets where the configuration file lives. Empty means
 // configuration cannot be read or written from the UI.
@@ -93,9 +90,7 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	// by design (indexer internals, quality tuning). The form does not render
 	// those fields, so the browser sends them empty — and an empty value here
 	// means "not in this request", not "clear it". Restoring from the current
-	// file keeps a hand-edited yaml value alive across UI saves; without this,
-	// the first Save after the UI stopped rendering a field would silently
-	// blank it.
+	// file keeps a hand-edited yaml value alive across UI saves.
 	if req.Indexer == (config.IndexerConfig{}) {
 		req.Indexer = cur.Server.Indexer
 	}
@@ -110,8 +105,9 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		req.Quality = cur.Server.Quality
 	}
 
-	// Validate before writing: a config that cannot be loaded is worse than
-	// one that was never changed, because kishizu would refuse to start.
+	// Validate before writing: kishizu refuses to start on an unloadable
+	// config, so a bad save must be caught here where the user can fix it in
+	// the form.
 	if err := validateServer(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -131,13 +127,12 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 // handleBrowseTitle saves just the browse display preference.
 //
 // A separate endpoint because the toggle is a click-anywhere control:
-// persisting it should be one small write, not a round-trip of every
-// setting with the secrets masked and unmasked.
+// persisting it should be one small write rather than a round-trip of every
+// setting with secrets masked and unmasked.
 //
-// It writes to the database, not the config file. A display preference is
-// not deployment configuration: it is per-user, the UI owns it, and the
-// database is already there. The config file is the operator's to edit by
-// hand, and the UI would have to read-modify-write it with no locking.
+// It writes to the database rather than the config file: a display preference
+// is per-user UI state, while the config file is the operator's to edit by
+// hand and would need an unlocked read-modify-write.
 func (s *Server) handleBrowseTitle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title string `json:"title"`
@@ -194,9 +189,9 @@ func isMasked(s string) bool {
 // secretFromEnv reports whether a credential came from the environment rather
 // than the configuration file.
 //
-// Such a value must never be written back: the whole point of supplying it by
-// environment variable is to keep it out of the file. It is also never sent
-// to the browser, for the same reason any other secret is masked.
+// Such a value is never written back: supplying it by environment variable
+// exists to keep it out of the file. It is also never sent to the browser,
+// like any other secret.
 func secretFromEnv(s *config.Server) (qbitPass, gotifyToken bool) {
 	if s == nil {
 		return false, false

@@ -335,8 +335,10 @@ send it.
 {"path": "/anywhere/Show - E09.mkv"}
 ```
 
-Only the **base name** is used for matching, so the client's directory layout
-does not matter. You can also be explicit:
+The path is a file kishizu downloaded: it is resolved by exact name against
+the paths kishizu recorded when filing the download. Only the **base name**
+is compared, so the client's directory layout does not matter. To mark an
+episode without a file path, be explicit:
 
 ```json
 {"show_id": 1, "episode": 9}

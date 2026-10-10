@@ -2,12 +2,11 @@ package web
 
 // Webhook intake for media servers.
 //
-// Jellyfin, Plex and Emby can all report "the user finished an episode", but
-// each speaks its own payload dialect and none of them speak kishizu's. This
-// handler translates: it accepts the payload shapes those servers actually
-// send, resolves the episode the same way /api/watched does, and records the
-// watch through the same core. A media server therefore needs no kishizu
-// plugin — pointing its webhook at this endpoint is the whole integration.
+// Jellyfin, Plex and Emby all report "the user finished an episode", each in
+// its own payload dialect. This handler translates: it accepts the payload
+// shapes those servers send, resolves the episode the same way /api/watched
+// does, and records the watch through the same core. A media server needs no
+// kishizu plugin — pointing its webhook at this endpoint is the integration.
 
 import (
 	"encoding/json"
@@ -81,12 +80,12 @@ func (p *webhookPayload) isWatchEvent() bool {
 // Identity is resolved in the order the payloads supply it: a file path goes
 // through the same server-side matcher as /api/watched; otherwise a show name
 // plus episode number is matched against canonical names and aliases. Plex
-// webhooks carry no file path at all, so the name path is not an optional
-// extra — it is the only path Plex can take.
+// Plex webhooks carry no file path, so the name path is the only path Plex
+// can take.
 //
 // An event that is not a watch event is answered 200 with marked:false rather
 // than an error: a server that reports playback.start every few minutes must
-// not fill kishizu's log with failures for behaving normally.
+// keep its own behaviour out of kishizu's failure log.
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := readWebhookBody(r)
 	if err != nil {

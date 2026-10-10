@@ -20,8 +20,7 @@ import (
 // trainSession is the in-flight training state. One at a time is a feature:
 // training is a human-driven, single-user activity, and the UI has a single
 // modal. The mutex makes that single-flight guarantee real under concurrent
-// requests (a double-click on Train, two tabs) rather than trusting the
-// client to be polite.
+// requests (a double-click on Train, two tabs).
 type trainSession struct {
 	mu     sync.Mutex
 	active bool
@@ -47,9 +46,9 @@ type startRequest struct {
 // some wrong, some unreadable. Confirming across that gives both signals.
 //
 // There is also no paste-a-link path. If a release does not appear in the
-// alias-derived results, the alias set does not match it — and if it does not
-// match during training it will not match during hunting either. The fix is to
-// correct the alias, not to route around it.
+// alias-derived results, the alias set does not match it — and if it does
+// not match during training it will not match during hunting either. The
+// fix is to correct the alias, not to route around it.
 //
 // Candidates are filtered to releases published after this season's first
 // episode aired (minus a week's slack). A group that numbers this season with
@@ -76,8 +75,8 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 
 	// Query on every alias, not just the canonical name. Nyaa's search is a
 	// plain substring match, so a long specific name misses groups that write
-	// the title differently — and training is exactly where you need to see
-	// those groups, since learning their offsets is the point.
+	// the title differently — and learning those groups' offsets is the point
+	// of training.
 	urls := s.indexer.FeedURLsFor(sh.CanonicalName, sh.Aliases)
 	items, failed, err := s.indexer.FetchAll(r.Context(), urls)
 	if err != nil {
@@ -92,8 +91,8 @@ func (s *Server) handleTrainStart(w http.ResponseWriter, r *http.Request) {
 	}
 	items = filterToSeason(s.st, items, sh)
 	if len(items) == 0 {
-		// Not an error to paper over: it means the alias set matches nothing,
-		// which is a real defect worth saying out loud.
+		// This is a real defect worth surfacing: an alias set that matches
+		// nothing means the show could never be downloaded either.
 		writeErr(w, http.StatusNotFound, fmt.Errorf(
 			"no releases found for %q — its aliases match nothing on Nyaa, so it could never be downloaded either",
 			sh.CanonicalName))
@@ -172,13 +171,12 @@ type candidateJSON struct {
 	// Novelty is how much of this title the model has not seen, 0..1. Drives
 	// ordering: the most informative candidate is offered first.
 	Novelty float64 `json:"novelty"`
-	// Unseen names what is new about it, so the user can see why it is at the
-	// top rather than taking the ordering on faith.
+	// Unseen names what is new about it, so the ordering is verifiable at a
+	// glance.
 	Unseen []string `json:"unseen"`
 	// Attrs is the full parse — every attribute the parser reads, present or
 	// not. Quick accept confirms all of these, so all of them must be shown:
-	// asking the user to confirm a source and service they were never shown is
-	// not confirmation.
+	// confirmation of an unseen value is not confirmation.
 	Attrs []train.AttrValue `json:"attrs"`
 }
 
@@ -189,9 +187,9 @@ func (s *Server) trainStateLocked() trainStateJSON {
 		Accepted: s.session.sess.Accepted,
 		Rejected: s.session.sess.Rejected,
 		Offsets:  s.session.sess.Offsets(),
-		// Initialised so the JSON is [] and never null: a nil slice marshals
-		// as null, and the UI maps over both fields. The session list going
-		// quiet (everything graded or asked) is a normal state, not an error.
+		// Initialised so the JSON is [] rather than null: a nil slice marshals
+		// as null, and the UI maps over both fields. An empty session list is
+		// a normal state, not an error.
 		Candidates: []candidateJSON{},
 		Resolved:   []candidateJSON{},
 	}
@@ -260,8 +258,8 @@ func (s *Server) handleTrainCommit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"committed": true,
 		// Accepted is how many releases the user confirmed. Rejected is always
-		// zero in the current flow — training confirms parses, it does not
-		// grade — so it is kept for the API contract but not surfaced.
+		// zero in the current flow (training confirms parses, it does not
+		// grade), but is kept for the API contract.
 		"accepted": s.session.sess.Accepted,
 		"rejected": s.session.sess.Rejected,
 		"verified": verified,
@@ -334,8 +332,7 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fill any field the parser missed using the learned vocabulary, so the
-	// panel shows what kishizu will actually see once taught — not what the
-	// dumb parser sees in isolation.
+	// panel shows what kishizu will actually see once taught.
 	parsed := release.Parse(title)
 	s.vocab.Apply(&parsed)
 

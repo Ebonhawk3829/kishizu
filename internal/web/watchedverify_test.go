@@ -1,6 +1,7 @@
 package web
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,7 +15,10 @@ func TestWatchedVerifyReportsState(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
 	sh, _ := st.CreateShow("Clevatess Season 2", []string{"Clevatess"})
-	_ = st.UpsertEpisode(sh.ID, 9, episode.Downloaded, "H", "rel")
+	path := filepath.Join("/media/anime", "Clevatess Season 2", "Clevatess Season 2 - E09.mkv")
+	if err := st.FinaliseEpisode(sh.ID, 9, path); err != nil {
+		t.Fatalf("finalise: %v", err)
+	}
 
 	body := `{"path":"D:\\Anime\\Clevatess Season 2\\Clevatess Season 2 - E09.mkv"}`
 
@@ -45,14 +49,16 @@ func TestWatchedVerifyReportsState(t *testing.T) {
 	}
 }
 
-// TestWatchedVerifyRejectsUnmatched: a file that matches no tracked show must
+// TestWatchedVerifyRejectsUnmatched: a filename no stored episode owns must
 // be refused, exactly as /api/watched refuses it. A client that cannot resolve
 // a path cannot verify it either.
 func TestWatchedVerifyRejectsUnmatched(t *testing.T) {
 	srv := testServer(t)
 	sh, _ := srv.st.CreateShow("Show", []string{"Show"})
-	_ = srv.st.SetGroupOffset(sh.ID, "A", 0, "training")
-	_ = srv.st.SetGroupOffset(sh.ID, "B", 40, "training")
+	path := filepath.Join("/media/anime", "Show", "Show - E09.mkv")
+	if err := srv.st.FinaliseEpisode(sh.ID, 9, path); err != nil {
+		t.Fatalf("finalise: %v", err)
+	}
 
 	body := `{"path":"/downloads/[BrandNewGroup] Show S01E09 1080p.mkv"}`
 	rec := post(t, srv, "/api/watched/verify", body)

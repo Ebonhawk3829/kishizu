@@ -1,10 +1,9 @@
 // Package download defines what kishizu needs from a BitTorrent client, and
 // provides the clients it knows how to talk to.
 //
-// kishizu is a coordinator, not a BitTorrent client: it decides WHAT to grab
-// and leaves the grabbing to something else. That split is why this is an
-// interface rather than a concrete type — the choice of client is a
-// deployment decision, not a design one.
+// kishizu decides what to grab and leaves the grabbing to a client. The
+// choice of client is a deployment decision, which is why this is an
+// interface rather than a concrete type.
 package download
 
 import (
@@ -30,8 +29,8 @@ type Downloader interface {
 	// show can be read from its location rather than guessed from its name.
 	//
 	// An implementation MUST honour dir. One that ignores it and downloads
-	// to its own default will leave files where kishizu never looks, and
-	// every episode will sit in "downloading" forever.
+	// to its own default leaves files where kishizu never looks, and every
+	// episode sits in "downloading" forever.
 	//
 	// ctx bounds the request. It is a parameter rather than a field on the
 	// client because the deadline belongs to the caller's operation — a
@@ -75,15 +74,15 @@ func ParseKind(s string) (Kind, error) {
 
 // Magnet builds a magnet link from an infohash and a display name.
 //
-// The name is kept so the torrent has something readable in the client's list;
-// without it a client shows a bare hash, which makes a stuck download
-// impossible to identify.
-//
 // The name is query-escaped because release titles are full of spaces and
 // brackets, and occasionally an ampersand or a hash. Unescaped, an ampersand
 // terminates dn and injects a bogus parameter, and a space makes the magnet
 // malformed — clients tolerate it today, but the display name is silently
 // truncated at the first separator.
+//
+// The name is kept so the torrent has something readable in the client's
+// list; without it a client shows a bare hash, which makes a stuck download
+// impossible to identify.
 func Magnet(infohash, title string) string {
 	return "magnet:?xt=urn:btih:" + url.QueryEscape(infohash) + "&dn=" + url.QueryEscape(title)
 }

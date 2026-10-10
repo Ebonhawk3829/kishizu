@@ -128,13 +128,10 @@ func episodeValue(resolved, raw int) string {
 	return ""
 }
 
-// episodeHint states what the title literally says AND the offset that follows,
-// so the two numbers are never confused and the derivation is visible.
-//
-// Showing the arithmetic is the "which means the offset is?" step: the model
-// states its conclusion rather than computing it silently, so a wrong episode
-// is caught at the moment it is entered instead of three episodes later when
-// something downloads wrong.
+// episodeHint states what the title literally says and the offset that
+// follows, so the two numbers are never confused and the derivation is
+// visible: a wrong episode is caught at the moment it is entered rather than
+// three episodes later when something downloads wrong.
 func episodeHint(resolved, raw int) string {
 	if raw == 0 {
 		return "no number in title"

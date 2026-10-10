@@ -1,9 +1,9 @@
 // Package transmission hands magnet links to the Transmission RPC.
 //
-// kishizu is a coordinator, not a BitTorrent client: it decides WHAT to grab,
-// Transmission does the grabbing. On completion the existing
-// configs/transmission/done-remove.sh removes the torrent, leaving the file on
-// disk — download without seeding, already proven in this stack.
+// kishizu decides what to grab; Transmission does the grabbing. On completion
+// the existing configs/transmission/done-remove.sh removes the torrent,
+// leaving the file on disk — download without seeding, which is how this
+// stack runs.
 package transmission
 
 import (

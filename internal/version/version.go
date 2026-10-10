@@ -1,10 +1,10 @@
 // Package version reports what build of kishizu is running.
 //
-// The value is injected at build time with -ldflags. It exists because a
-// container image tag is not enough to answer "what is actually running":
-// a pinned tag can be re-pushed, and a locally built binary has no tag at
-// all. The API and the startup log both report this, so a bug report can
-// say which build it came from.
+// The value is injected at build time with -ldflags. A container image tag
+// is not enough to answer "what is actually running": a pinned tag can be
+// re-pushed, and a locally built binary has no tag at all. The API and the
+// startup log both report this, so a bug report can say which build it came
+// from.
 package version
 
 import (
@@ -25,7 +25,7 @@ var Version string
 //
 // The fallback matters: a binary built from a git checkout with no ldflags
 // still knows its commit via the build info embedded since Go 1.18, so a
-// locally built binary is identifiable rather than anonymous.
+// locally built binary is identifiable.
 func String() string {
 	if v := strings.TrimSpace(Version); v != "" {
 		return v

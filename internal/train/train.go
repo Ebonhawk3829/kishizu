@@ -10,8 +10,9 @@
 // grade therefore teaches something new, and an empty list means there is
 // genuinely nothing left to learn.
 //
-// Nothing is filtered out for looking confidently resolved. A confidently wrong
-// model is the worst failure mode, and hiding those is how it goes unnoticed.
+// Nothing is filtered out for looking confidently resolved. A confidently
+// wrong model is the worst failure mode, and hiding those is how it goes
+// unnoticed.
 package train
 
 import (
@@ -121,9 +122,9 @@ func (s *Session) Teach(title string, ep int) error {
 //
 // Weighted by consequence, not by count. An unseen release group matters most
 // because the group drives the episode offset — the thing that decides whether
-// the right episode gets downloaded at all. An unseen codec string is trivia by
-// comparison. Without this weighting a title with three novel quality tags
-// would outrank one with a brand-new group, which is backwards.
+// the right episode gets downloaded at all. An unseen codec string is trivia
+// by comparison: without this weighting a title with three novel quality tags
+// would outrank one with a brand-new group.
 const (
 	wUnseenGroup     = 1.0
 	wUnseenEpisode   = 0.6
@@ -134,12 +135,11 @@ const (
 // novelty scores how much of a title the model has not seen before, 0..1, and
 // lists what is new about it.
 //
-// This replaces ordering by the model's own uncertainty. Uncertainty asks the
-// model to rate itself, which is a judgement we would have to trust blindly.
-// Novelty is a measurable property of the data: either this group is in the
-// known set or it is not. Every grade then teaches something, and when the
-// list goes quiet there is genuinely nothing left to learn — which is a
-// stopping signal the user can see rather than infer.
+// This replaces ordering by the model's own uncertainty, which would ask the
+// model to rate itself. Novelty is a measurable property of the data: either
+// this group is in the known set or it is not. Every grade then teaches
+// something, and when the list goes quiet there is genuinely nothing left to
+// learn — a stopping signal the user can see.
 func (s *Session) novelty(title string) (float64, []string) {
 	r := release.Parse(title)
 	score := 0.0

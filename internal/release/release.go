@@ -40,22 +40,20 @@ var (
 	reGroup = regexp.MustCompile(`^\s*\[([^\]]+)\]`)
 	reSxE   = regexp.MustCompile(`(?i)\bs(\d{1,2})[ ._-]?e(\d{1,4})\b`)
 	// The optional vN suffix matters: BD packs name files "01v2", and without
-	// it the number is not read at all, so a batch resolves to no episode and
-	// sits in staging untouched.
+	// it the number is not read at all, so a batch resolves to no episode.
 	reBare = regexp.MustCompile(`[-–]\s*(\d{1,4})(?:v\d+)?(?:\s|$|[\[(.])`)
 	// The form kishizu itself writes on completion: "<Show> - E09.mkv".
-	// Without this the tool cannot read the episode number from its own
-	// renamed files, which is exactly what the watch signal sends back.
+	// Without it the tool cannot read the episode number from its own renamed
+	// files, which is exactly what the watch signal sends back.
 	reLibrary = regexp.MustCompile(`(?i)\s-\sE(\d{1,4})(?:\s|\.|$)`)
 	// Bilibili's Chinese episode marker, e.g. "第43话". Bilibili-sourced
 	// releases (Doomdos and similar) number episodes this way, and without
-	// it the whole release reads as having no episode at all — it can never
-	// be grabbed, and the reason in the log is "episode unreadable".
+	// it the release reads as having no episode and can never be grabbed.
 	//
 	// A pattern, not a vocabulary entry: the vocabulary maps one token to one
-	// value, and 第N话 is a different token for every episode — teaching
-	// 第3话 teaches episode 3 and nothing else. A pattern generalises across
-	// every episode, which is what a numbering convention needs.
+	// value, and 第N话 is a different token for every episode. A pattern
+	// generalises across every episode, which is what a numbering convention
+	// needs.
 	reChineseEpisode = regexp.MustCompile(`第\s*(\d{1,4})\s*话`)
 	reSeasonWord     = regexp.MustCompile(`(?i)\b(\d{1,2})(?:st|nd|rd|th)\s+season\b|\bseason\s+(\d{1,2})\b`)
 	reResolution     = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k)\b`)

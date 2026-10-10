@@ -119,8 +119,7 @@ func (s *Store) migrateSteps() error {
 			// "preference" stays: the schema creates it for
 			// UI-owned settings, and this step runs after
 			// the schema, so dropping it here would delete the table on
-			// every fresh database. A step that undoes the schema is a
-			// step that can never be correct.
+			// every fresh database.
 			for _, t := range []string{"filter", "rejected"} {
 				if _, err := s.db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
 					return fmt.Errorf("drop %s: %w", t, err)
@@ -131,11 +130,10 @@ func (s *Store) migrateSteps() error {
 		{2, "drop per-episode air dates and cadence columns", func(s *Store) error {
 			// The schedule's countdown is the only air-date fact anyone
 			// needs: the next unaired episode is next_ep and it airs at
-			// next_airs_at. Per-episode projections simulated what the site
+			// next_airs_at. Per-episode projections simulate what the site
 			// publishes, and every deviation from weekly cadence (hiatus,
-			// delay, special) corrupted them into phantom dashboard entries.
+			// delay, special) corrupts them into phantom dashboard entries.
 			// The cadence columns were never written by any code path.
-			//
 			// SQLite cannot DROP COLUMN before 3.35, so the tables are
 			// rebuilt. Every column except the dropped ones is copied
 			// verbatim, so episode history and show identity survive intact.
@@ -149,7 +147,7 @@ func (s *Store) migrateSteps() error {
 			// OFF here cannot leak into other callers. FK enforcement is
 			// restored before the step returns, and the final foreign_key_check
 			// proves the rebuilt tables are consistent — the OFF window is
-			// for DDL mechanics only, never for writing through a constraint.
+			// for DDL mechanics only.
 			if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 				return fmt.Errorf("disable foreign keys: %w", err)
 			}
@@ -157,7 +155,7 @@ func (s *Store) migrateSteps() error {
 				if _, err := s.db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
 					// Enforcement must come back on: leaving it off would
 					// let orphan rows accumulate silently for the process
-					// lifetime. Nothing below can run if this fails.
+					// lifetime.
 					panic(fmt.Sprintf("restore foreign keys: %v", err))
 				}
 			}()
@@ -197,8 +195,7 @@ func (s *Store) migrateSteps() error {
 				`ALTER TABLE episode_new RENAME TO episode`,
 				`CREATE INDEX IF NOT EXISTS idx_episode_state ON episode(state)`,
 				// The rebuild is only safe to hand back with proof that no
-				// child row lost its parent along the way. A violation here
-				// means the copy itself was wrong, not the pragma window.
+				// child row lost its parent along the way.
 				`PRAGMA foreign_key_check`,
 			} {
 				if _, err := s.db.Exec(stmt); err != nil {
@@ -210,10 +207,10 @@ func (s *Store) migrateSteps() error {
 		{3, "backfill seen.origin for rows written before the column existed", func(s *Store) error {
 			// Every pre-column row was written by the listener's grab path or
 			// the adopt path — training only started writing here when the
-			// origin column arrived. Defaulting to 'grab' preserves exactly
-			// the behaviour those rows had before the split: the listener
-			// skips them, training skips them (they were grabbed, so there
-			// is nothing new to learn).
+			// origin column arrived. Defaulting to 'grab' preserves the
+			// behaviour those rows had before the split: the listener skips
+			// them (already grabbed), training skips them (nothing new to
+			// learn).
 			if _, err := s.db.Exec(`UPDATE seen SET origin = 'grab' WHERE origin IS NULL OR origin = ''`); err != nil {
 				return fmt.Errorf("backfill origin: %w", err)
 			}
@@ -445,9 +442,8 @@ func (s *Store) LearnVocabulary(kind, token, canonical string) error {
 // Preferences are UI-owned settings, as distinct from deployment
 // configuration. They live in the database rather than the config file
 // because the UI writes them, they are per-user rather than per-deployment,
-// and writing them to the file meant a read-modify-write of a file the
-// operator also edits by hand — with no locking, so a toggle could silently
-// lose a concurrent edit.
+// and writing them to the file would mean an unlocked read-modify-write of a
+// file the operator also edits by hand.
 func (s *Store) SetPreference(key, value string) error {
 	_, err := s.db.Exec(
 		`INSERT INTO preference (key, value, updated_at) VALUES (?, ?, datetime('now'))
@@ -552,20 +548,20 @@ func (sh *Show) Finished() bool {
 }
 
 // SetNextEpisode records the schedule's authoritative next-episode point:
-// episode n airs at t. This is the ONLY stored air-date fact, and the daily
+// episode n airs at t. This is the only stored air-date fact, and the daily
 // refresh is its only writer. Every consumer that needs to know when the next
 // unaired episode airs reads it through NextEpisode; nothing else about the
 // airing schedule is stored, because the site publishes exactly this and
-// simulating more (projecting N+1/N+2, advancing on grab) is how phantom
-// dashboard entries happen.
+// simulating more (projecting N+1/N+2, advancing on grab) produces phantom
+// dashboard entries.
 //
 // n is clamped to at least 1. The page renders "Ep 0" for a show that has
 // been announced but has not premiered, and storing that verbatim breaks
 // everything downstream: episode numbers are 1-based, plausible() rejects
-// anything below 1, and the season-complete check (next > max) can never fire
-// for a next of 0. Treating it as episode 1 is the honest reading — the next
-// episode is the first one — and the daily refresh corrects the time once the
-// show actually appears on the timetable.
+// anything below 1, and the season-complete check can never fire for a next
+// of 0. Treating it as episode 1 is the honest reading — the next episode is
+// the first one — and the daily refresh corrects the time once the show
+// appears on the timetable.
 func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 	if n < 1 {
 		n = 1
@@ -585,13 +581,12 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 
 // ClearNextEpisode removes the stored anchor entirely.
 //
-// A page with no countdown and no episode number is not "keep whatever we
-// had" — it is the site saying it has no air information. Leaving a stale
-// anchor in place freezes it: the refresh only writes when the page publishes
-// a countdown, so a bogus row (an "Ep 0" premiere countdown captured mid-site-
-// update) would otherwise never be corrected and the UI would go on reporting
-// a premiere that the site itself no longer mentions. NULL is the honest
-// value: the show reads as unscheduled until the page publishes a real one.
+// A page with no countdown and no episode number is the site saying it has
+// no air information, so the stored value must be invalidated rather than
+// kept. The refresh only writes when the page publishes a countdown, so a
+// stale anchor (e.g. an "Ep 0" premiere countdown captured mid-site-update)
+// would otherwise never be corrected. NULL is the honest value: the show
+// reads as unscheduled until the page publishes a real one.
 func (s *Store) ClearNextEpisode(showID int64) error {
 	_, err := s.db.Exec(`UPDATE show SET next_ep = NULL, next_airs_at = NULL,
 		schedule_fetched_at = datetime('now') WHERE id = ?`, showID)
@@ -620,10 +615,10 @@ func (s *Store) SetImageURL(showID int64, url string) error {
 // refresh writes, and the UI's air line renders it verbatim — it is true
 // regardless of where kishizu's own work is up to.
 //
-// The listener and the cycle logic must NOT consume this directly: they read
-// the effective anchor through NextEpisode, which caps it at the user's
-// watching progress. Consuming the site's cursor directly is what made a show
-// forget its unaired-but-released episodes the moment the countdown moved on.
+// The listener and the cycle logic consume this only through NextEpisode,
+// which caps it at the user's watching progress. A show's unaired-but-
+// released episodes would otherwise be forgotten the moment the countdown
+// moved on.
 func (s *Store) SiteNextEpisode(showID int64) (int, *time.Time, error) {
 	var n sql.NullInt64
 	var at sql.NullString
@@ -651,8 +646,7 @@ func (s *Store) SiteNextEpisode(showID int64) (int, *time.Time, error) {
 // The anchor is the earlier of two facts: the site's next episode (what the
 // season is publishing) and the user's progress (the first episode without a
 // watched or deleted signal). Whichever is behind wins, because an episode the
-// user has not consumed is not done with — the site advertising ep5 while ep2
-// sits unwatched does not make ep2 somebody else's problem.
+// user has not consumed is still owed.
 //
 // The air time follows the effective episode: the site's slot when the two
 // coincide, otherwise the slot recorded in the air cache when the site
@@ -666,9 +660,8 @@ func (s *Store) SiteNextEpisode(showID int64) (int, *time.Time, error) {
 // past before the listener ever looked. The exposure stamp fixes that: the
 // consume paths stamp the newly exposed episode at the moment the gate
 // advanced to it, and the effective time is the LATER of air time and
-// exposure. The window then measures real opportunity to grab — 72 hours of
-// actual hunting from exposure — instead of a deadline that expired before
-// the episode was huntable.
+// exposure. The window then measures 72 hours of actual hunting from
+// exposure.
 //
 // Progress is max-based (see NextUnwatched): a gap in watched history is a
 // failed watch signal, not out-of-order viewing, so the gate never skips ahead
@@ -882,10 +875,9 @@ func (s *Store) MarkSeen(infohash string, showID int64, episode int, origin Seen
 // given consumer's perspective.
 //
 // The origin split is the point. A training confirm and a listener grab both
-// write here, but they mean different things: training must not re-offer a
-// confirmed release, while the listener must happily grab one. Reading all
-// origins made a training confirm permanently block the grab — the bug that
-// left Black Clover hunting forever.
+// write here, but they mean different things: training must skip a confirmed
+// release when re-offering, while the listener must happily grab one. Reading
+// all origins would let a training confirm permanently block the grab.
 func (s *Store) HasSeen(infohash string, origin SeenOrigin) (bool, error) {
 	if infohash == "" {
 		return false, nil

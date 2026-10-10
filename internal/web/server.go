@@ -23,8 +23,6 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/debug"
 	"github.com/Ebonhawk3829/kishizu/internal/download"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
-	"github.com/Ebonhawk3829/kishizu/internal/match"
-	"github.com/Ebonhawk3829/kishizu/internal/naming"
 	"github.com/Ebonhawk3829/kishizu/internal/notify"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
 	"github.com/Ebonhawk3829/kishizu/internal/schedule"
@@ -69,10 +67,6 @@ type Server struct {
 	// to reach the downloader. Set by SetAdopt; adoption is disabled until
 	// then.
 	adopt adoptConfig
-	// naming is the library layout. It must be the same scheme the
-	// reconciler writes with, or the watch signal cannot recognise kishizu's
-	// own filenames. Nil means the default layout.
-	naming *naming.Scheme
 	// timetable caches the seasonal schedule for the browse list. Nil means
 	// browsing is unavailable.
 	timetable *schedule.Cache
@@ -126,11 +120,6 @@ func New(st *store.Store) (*Server, error) {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 	srv := &Server{st: st, tmpl: tmpl, vocab: adapt.NewVocab(st)}
-	// The naming scheme is installed here so the watch signal can always
-	// recognise kishizu's own filenames — deletion depends on it.
-	if sc, err := naming.Resolve(naming.PresetKishizu, "", nil); err == nil {
-		srv.naming = sc
-	}
 	return srv, nil
 }
 
@@ -466,13 +455,13 @@ func (s *Server) handleWatchedUpTo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleSummary answers the two questions worth putting on a dashboard:
-// is there anything to watch, and when is the next episode due?
+// handleSummary answers the two questions a dashboard needs: is there
+// anything to watch, and when is the next episode due?
 //
-// The per-state counts are still available at /api/stats, but they are not
-// useful at a glance — "64 watched" says nothing about whether there is
-// anything to do. This reduces the show list to a status and a next air
-// time, which is what a widget has room for.
+// The per-state counts remain available at /api/stats; at a glance "64
+// watched" says little about whether there is anything to do. This reduces
+// the show list to a status and a next air time, which is what a widget has
+// room for.
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	shows, err := s.st.ListShows()
 	if err != nil {
@@ -564,18 +553,16 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 // window, across all tracked shows, sorted by air time.
 //
 // The window comes from ?from= and ?to= as RFC3339 timestamps, defaulting
-// to now → now+7d. A default window rather than a required parameter keeps
-// the endpoint honest from a bare curl: a schedule with no arguments should
-// mean "the coming week", not an error or an unbounded dump.
+// to now → now+7d. A default window means a bare curl gets "the coming
+// week" rather than an error or an unbounded dump.
 //
 // Each show contributes at most one entry: its anchor, the next unaired
-// episode. That is the only air-date fact that exists — the site publishes
-// the countdown and nothing else — so a schedule built from anything more is
-// simulation, and simulation is what produced phantom entries. A show whose
-// anchor is missing or outside the window contributes nothing.
+// episode. The site publishes the countdown as its only air-date fact, so
+// anything more would simulate a schedule and produce phantom entries. A
+// show whose anchor is missing or outside the window contributes nothing.
 //
 // This reads the database and nothing else — no schedule fetch, no network
-// I/O. A dashboard widget must render even when animeschedule is
+// I/O — so a dashboard widget renders even when animeschedule is
 // unreachable.
 //
 // The state is the same cycle.StateOf the summary uses, so a widget colors
@@ -620,10 +607,10 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	eps := []entry{}
 	for _, sh := range shows {
-		// The timetable answers "what airs this week" — the site's countdown,
-		// not the watch-gated anchor. The gate anchors kishizu at the user's
-		// progress, which can sit episodes behind the season with no date;
-		// those are the listener's business, not the calendar's.
+		// The timetable answers "what airs this week" from the site's
+		// countdown. The watch-gated anchor sits at the user's progress and
+		// can be behind the season, which is the listener's business rather
+		// than the calendar's.
 		n, at, err := s.st.SiteNextEpisode(sh.ID)
 		if err != nil || at == nil || n <= 0 {
 			continue
@@ -633,13 +620,12 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		// The anchor episode's state comes from its own row when one exists
 		// (it may already be downloading), and from the anchor alone when it
-		// does not — an unaired episode has no row until something happens
-		// to it, and that is normal, not an error.
+		// does not: an unaired episode has no row until something happens to
+		// it.
 		//
 		// A terminal state (watched/deleted) means the episode is done even
-		// though the daily refresh has not moved the anchor past it yet: the
-		// anchor's air time can be stale for up to 24h, the watch state is
-		// not. A finished episode is not "coming".
+		// though the daily refresh can leave the anchor stale for up to 24h;
+		// the watch state is current. A finished episode is not "coming".
 		ep, err := s.st.GetEpisode(sh.ID, n)
 		if err != nil {
 			continue
@@ -802,7 +788,7 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 // handleWatched records a watch signal from a player script or the UI.
 //
 // The filename is matched server-side: the PC sends the raw path, and the
-// server — which has the aliases, the per-group offsets and the confidence
+// server — which holds the aliases, the per-group offsets and the confidence
 // model — decides which show and episode it was. A client-side parse would
 // duplicate all of that and drift.
 //
@@ -928,68 +914,24 @@ func baseName(path string) string {
 	return path
 }
 
-// matchFile resolves a filename to a show and episode.
+// matchFile resolves a filename to the episode kishizu downloaded.
 //
-// The primary path is exact: kishizu named this file itself when the download
-// completed and stored the path, so if the name matches a stored episode, that
-// is the answer. No scoring, no inference — the question is already answered.
-//
-// Only if that fails do we fall back to parsing the name, for files that came
-// from outside kishizu. That path stays gated on confidence, because a wrong
-// guess here deletes a file the user may still want.
+// The lookup is exact: kishizu named the file when the download completed
+// and stored the path, so a name matching a stored episode is the answer.
+// There is nothing to infer — a filename kishizu does not recognise is not
+// an episode kishizu owns. Guessing one from the name mis-attributes watches:
+// a franchise sibling's aliases score above threshold, and a library-shaped
+// name reads as provenance it does not carry.
 func (s *Server) matchFile(base string) (int64, int, error) {
-	if ep, err := s.st.FindByFileName(base); err == nil && ep != nil {
-		return ep.ShowID, ep.Number, nil
-	}
-
-	shows, err := s.st.ListShows()
+	ep, err := s.st.FindByFileName(base)
 	if err != nil {
 		return 0, 0, err
 	}
-	for _, sh := range shows {
-		m, err := s.vocab.Show(s.st, sh)
-		if err != nil {
-			continue
-		}
-		res := match.Match(m, base)
-		if !res.Matched || res.Episode <= 0 {
-			continue
-		}
-		// A filename in the configured library form is inherently certain: it
-		// was written by this tool on completion, so it needs no confidence
-		// gate. Requiring one here blocked every watch signal, since a library
-		// name has no group and therefore scores only 0.5 — below the
-		// threshold.
-		//
-		// Recognised by the naming scheme rather than a fixed regex, so a
-		// custom layout is trusted just as much as the default.
-		if s.isLibraryForm(base) {
-			return sh.ID, res.Episode, nil
-		}
-		// Otherwise only act on confident matches. A wrong guess here deletes
-		// a file the user may still want, so uncertainty means do nothing.
-		if !res.Confident() {
-			continue
-		}
-		return sh.ID, res.Episode, nil
+	if ep == nil {
+		return 0, 0, fmt.Errorf("no downloaded episode named %q", base)
 	}
-	return 0, 0, fmt.Errorf("no confident match for %q", base)
+	return ep.ShowID, ep.Number, nil
 }
-
-// isLibraryForm reports whether a filename was written by kishizu.
-//
-// Delegates to the naming scheme, the same one that wrote the file, so the
-// watch signal's exact-match path stays in sync with what kishizu produces.
-func (s *Server) isLibraryForm(name string) bool {
-	if s.naming == nil {
-		return false
-	}
-	return s.naming.EpisodeFrom(name) > 0
-}
-
-// SetNaming attaches the naming scheme, so the watch signal recognises the
-// layout the reconciler writes.
-func (s *Server) SetNaming(sc *naming.Scheme) { s.naming = sc }
 
 // SetTimetable attaches the seasonal timetable cache, which backs the browse
 // list. Without it the browse endpoints report that browsing is unavailable
@@ -1063,7 +1005,7 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The URL is the identity-bearing input. Resolve it FIRST so the show is
+	// The URL is the identity-bearing input. Resolve it first so the show is
 	// created under its real title, and so enrichment fills in the art and
 	// aliases for the user.
 	slug := schedule.SlugFromURL(req.Name)
@@ -1074,11 +1016,11 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	}
 	sh, err := s.createShowFromSlug(slug)
 	if err != nil {
-		// A 404 from the schedule is the user's typo, not a server failure:
-		// the site is up and says this slug is not a show. That is a bad
-		// request, and the message should say what to do next — check the
-		// spelling, or find the show in the browse list. A transport failure
-		// is different: nothing was established, so it stays a 502.
+		// A 404 from the schedule is the user's typo: the site is up and says
+		// this slug is a show. That is a bad request, and the message should
+		// say what to do next — check the spelling, or find the show in the
+		// browse list. A transport failure is different: nothing was
+		// established, so it stays a 502.
 		if errors.Is(err, schedule.ErrNotFound) {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf(
 				"no show at %q — check the spelling, or find it in Browse this season", req.Name))
@@ -1136,8 +1078,8 @@ func (s *Server) createShowFromSlug(slug string) (*store.Show, error) {
 	// season — so fall back to the page.
 	info, err := schedule.FetchShow(nil, slug)
 	if err != nil {
-		// A 404 is evidence the slug is not a show; anything else is the
-		// absence of evidence. Only the first is worth reporting as a finding.
+		// A 404 proves the slug is a show; anything else is the absence of
+		// evidence. Only the first is worth reporting as a finding.
 		if errors.Is(err, schedule.ErrNotFound) {
 			return nil, fmt.Errorf("no show at that URL: %w", err)
 		}
@@ -1348,10 +1290,10 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			Finished: sh.Finished(),
 			ImageURL: s.imageFor(sh),
 		}
-		// The air line renders the site's countdown verbatim: it is a true
-		// fact about the season regardless of where kishizu's work is. The
-		// card's state comes from the watch-gated anchor, which can sit
-		// episodes behind — two honest numbers instead of one fudged one.
+		// The air line renders the site's countdown verbatim: it is a fact
+		// about the season regardless of where kishizu's work is. The card's
+		// state comes from the watch-gated anchor, which can sit episodes
+		// behind — two independent numbers rather than one reconciled one.
 		siteEp, siteAt, err := s.st.SiteNextEpisode(sh.ID)
 		if err != nil {
 			siteEp, siteAt = 0, nil
@@ -1373,21 +1315,21 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 					j.Deleted++
 				}
 			}
-			// Aired means episode 1 has happened. Three proofs, any one of
-			// which settles it: an episode row past wanted (direct evidence),
-			// the site's countdown pointing past ep1 (the site only advances
-			// the cursor because the premiere aired), or the effective anchor
-			// being ep1 with its air time passed. An unknown site cursor
-			// proves nothing either way: the site lists announced-but-
-			// unscheduled shows, and an announced show has not premiered.
+			// Aired means episode 1 has happened. Any one of three proofs
+			// settles it: an episode row past wanted (direct evidence), the
+			// site's countdown pointing past ep1 (the site advances the cursor
+			// only because the premiere aired), or the effective anchor being
+			// ep1 with its air time passed. An unknown site cursor settles
+			// nothing: the site lists announced-but-unscheduled shows, and an
+			// announced show has not premiered.
 			aired := j.Downloaded > 0 || j.Watched > 0 || j.Deleted > 0 ||
 				siteEp > 1 ||
 				(anchorEp == 1 && anchorAt != nil && !anchorAt.After(time.Now()))
 			j.State, j.NeedsAttention = showState(states, j.Trained, aired, sh.Source == store.SourceSeaDex, sh.Finished())
 		}
-		// A 0 site cursor is corruption, not a schedule (see the aired
+		// A 0 site cursor is corruption rather than a schedule (see the aired
 		// calculation above): serving it would render an "Ep 0" line for a
-		// premiere the site does not list. Nothing is the honest value.
+		// premiere the site lists without a date.
 		if siteAt != nil && siteEp >= 1 {
 			status := "upcoming"
 			if siteAt.Before(time.Now()) {
@@ -1420,9 +1362,9 @@ func (s *Server) imageFor(sh *store.Show) string {
 
 // NeedsTraining is the state of a show that has never been trained.
 //
-// It is not a cycle state — the cycle is about episodes, and this is about
-// the show. It is surfaced in the same field because the card has one status
-// line, and an untrained show is inert: nothing will ever be downloaded for
+// It is a show-level state rather than a cycle state: the cycle is about
+// episodes. It is surfaced in the same field because the card has one status
+// line, and an untrained show is inert — nothing will ever be downloaded for
 // it until it is trained.
 const NeedsTraining = "needs training"
 
@@ -1440,7 +1382,8 @@ const Upcoming = "upcoming"
 //
 // It gets its own section: an adopted season has no air dates and no
 // training, so the airing questions (has it aired, is it trained) do not
-// apply, and the card must not present kishizu as watching it week by week.
+// apply, and the card would otherwise present kishizu as watching it week by
+// week.
 const Complete = "complete"
 
 // The most demanding episode wins: hunting beats ready-to-watch beats
@@ -1517,7 +1460,7 @@ func showState(states []cycle.State, trained, aired, adopted, finished bool) (st
 		return Complete, false
 	}
 	// An untrained show cannot match a release, so nothing else on the card
-	// means anything yet. Say so plainly.
+	// means anything yet.
 	if !trained {
 		return NeedsTraining, true
 	}

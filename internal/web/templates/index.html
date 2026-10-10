@@ -20,7 +20,7 @@
 
     /* Text ramp. t3 is the quietest tier and the one that has to clear AA:
        0.60 measures 4.92:1 on the page and 4.70:1 on a hovered row, so it
-       stays legible everywhere it is used. Lower values failed. */
+       stays legible everywhere it is used. Lower values fall below AA. */
     --t1: oklch(0.94 0.005 285);
     --t2: oklch(0.68 0.010 285);
     --t3: oklch(0.60 0.012 285);
@@ -143,7 +143,7 @@
      an untrained show is inert — nothing will ever be downloaded for it. */
   .st-train .dot { background: var(--accent); }      .st-train { color: var(--accent); }
   /* Upcoming: waiting for a first episode that does not exist yet. Quieter
-     than needs-training — there is genuinely nothing to do. */
+     than needs-training: there is nothing to do. */
   .st-soon .dot { background: oklch(0.52 0.06 250); } .st-soon { color: var(--t2); }
   .st .att { color: var(--warn); font-size: 12px; }
 
@@ -160,12 +160,9 @@
   }
   .acts button:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
 
-  /* Browse results have their own grid, not the show-row one. The show-row
-     grid carries four columns (~612px of fixed width before the name), built
-     for the full page width — inside the disclosure body (max-width 64ch)
-     the flexible name column collapsed to nothing and every title wrapped one
-     word per line. Three columns fit the narrow container and the title gets
-     the space the fixed columns leave. */
+  /* Browse results use their own three-column grid: the show-row grid's four
+     fixed columns are sized for the full page width and leave the title too
+     little room inside the 64ch disclosure body. */
   .browse { margin-top: 12px; }
   .browse .row {
     grid-template-columns: 34px minmax(0, 1fr) auto;
@@ -186,9 +183,8 @@
   .seg-btn + .seg-btn { border-left: 1px solid var(--line); }
   .seg-btn:hover { background: oklch(0.24 0.010 285); color: var(--t1); }
   .seg-btn.on { background: oklch(0.26 0.012 285); color: var(--t1); }
-  /* Long titles wrap instead of truncating. The browser list is for picking
-     a show by name, and a title cut at 30 characters with the rest behind a
-     hover tooltip is not a picker. */
+  /* Long titles wrap instead of truncating: the browse list is for picking a
+     show by name, so the full title must be readable. */
   .browse .row .name { white-space: normal; overflow: visible; text-overflow: clip; }
   .browse-divider { height: 1px; background: oklch(0.28 0.010 285); margin: 18px 0; }
 
@@ -262,8 +258,6 @@
   /* ── chips (group offsets) ──────────────────────────────────────────── */
   .chips { display: none; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .chips.open { display: flex; }
-  /* An untrained show will never match a release, so it is worth saying.
-     Secondary colour, not warning: it is setup state, not an incident. */
   .untrained { color: var(--t2); }
   .chip {
     font-size: 11.5px; padding: 3px 9px; border-radius: 7px;
@@ -271,15 +265,11 @@
     font-variant-numeric: tabular-nums;
   }
   .chip b { color: var(--t1); font-weight: 500; }
-  /* An absent attribute is part of the parse too — confirming says "the
-     title does not contain this" — so it is shown, but quieter. */
   .chip.absent { color: var(--t3); }
   .chip.absent b { color: var(--t3); font-weight: 400; font-style: italic; }
 
   /* ── disclosure panels ──────────────────────────────────────────────── */
   .disc { margin-top: 48px; border-top: 1px solid var(--line-soft); padding-top: 4px; }
-  /* The first disclosure follows the summary strip, which already has its own
-     bottom margin — a second 48px would open a hole in the page. */
   .disc:first-of-type { margin-top: 8px; }
   .disc summary {
     list-style: none; cursor: pointer; padding: 18px 0; font-size: 14.5px; color: var(--t2);
@@ -294,8 +284,8 @@
 
   /* ── training modal ─────────────────────────────────────────────────── */
   /* Opens over the page rather than inline: grading means comparing against
-     the show list, and an inline panel pushed that list down and out of view.
-     The page dims behind so the panel is unambiguously the focus. */
+     the show list, which an inline panel would push out of view. The page
+     dims behind so the panel is unambiguously the focus. */
   .modal-backdrop {
     position: fixed; inset: 0; z-index: 40;
     background: oklch(0.12 0.01 285 / .72);
@@ -375,8 +365,8 @@
   .attr-name { width: 96px; font-size: 12.5px; color: var(--t3); flex: none; }
   /* Adopt rows reuse the .attr container but with different children: a
      checkbox, a narrow episode dropdown and the filename. The global
-     input/select rule sets width:100%, which would blow the row out into the
-     one-character-per-line mess this override exists to prevent. */
+     input/select rule sets width:100%, which would wrap the filename one
+     character per line; these overrides prevent that. */
   .adopt-row {
     display: flex; align-items: center; gap: 12px;
     padding: 8px 0; border-bottom: 1px solid var(--line-soft);
@@ -486,8 +476,8 @@
 
 <div class="summary" id="summary"></div>
 
-<!-- The disclosures sit ABOVE the list, not below it. Below a 20-row list they
-     were always off-screen when opened from a row, so "Train" looked inert. -->
+<!-- The disclosures sit above the list so their controls stay visible while
+     scrolling the rows they act on. -->
 <details class="disc" id="disc-add">
   <summary><span class="chev">&rsaquo;</span> Add a show</summary>
   <div class="body">
@@ -498,11 +488,10 @@
     </div>
     <div class="field-error" id="add-error"></div>
 
-    <!-- The browse list opens as a modal rather than living inline. Inline it
-         inherited the disclosure body's 64ch width, which is narrower than the
-         show-row grid's fixed columns, so every title wrapped one word per
-         line. The trigger stays here because browsing is how you pick a show
-         to add; the list itself needs the full page width. -->
+    <!-- The browse list renders as a modal: the show-row grid's fixed columns
+         need the full page width, which the 64ch disclosure body cannot give.
+         The trigger stays here because browsing is how a show is picked to
+         add. -->
     <div class="fields" style="margin-top:14px">
       <div><button class="btn ghost" id="btn-browse-open">Browse this season</button></div>
     </div>
@@ -520,11 +509,8 @@
   </div>
 </details>
 
-<!-- Browsing the season. Opened from the Add-a-show disclosure, because
-     picking from the list is how you choose a show to add — but rendered as a
-     modal because the list needs the full page width. Inside the disclosure
-     body (max-width 64ch) the show-row grid's fixed columns left the title
-     column no room, and every title wrapped one word per line. -->
+<!-- Browsing the season. Rendered as a modal because the list needs the full
+     page width. -->
 <div class="modal-backdrop hidden" id="browse-modal">
   <div class="modal">
     <div class="modal-head">
@@ -551,13 +537,9 @@
   </div>
 </div>
 
-<!-- Training is scoped to a show and opened from that show's row. There is no
-     separate "grade a release" path: grading one release and training the show
-     are the same activity, so they share one panel.
-
-     It renders as a modal overlay rather than an inline disclosure. An inline
-     panel pushed the show list down and out of view, and the list is exactly
-     what you are comparing against while grading. -->
+<!-- Training is scoped to a show and opened from that show's row. 
+     It renders as a modal overlay: grading means comparing against the show
+     list, which an inline panel would push out of view. -->
 <div class="modal-backdrop hidden" id="train-modal">
   <div class="modal">
     <div class="modal-head">
@@ -640,7 +622,7 @@
 </div>
 
 <!-- Group order editor. A drag-drop list beats a comma-separated text box:
-     the order IS the meaning, and order is what dragging expresses. The
+     the order carries the meaning, and dragging expresses order directly. The
      acceptable line splits preferred groups from merely-eligible ones;
      everything not in the list at all ranks as unlisted. -->
 <div class="modal-backdrop hidden" id="groups-modal">
@@ -741,14 +723,12 @@ async function loadShows() {
   };
   // Adopted seasons have no air dates to sort by, so they go alphabetically.
   const byName = (a, b) => a.name.localeCompare(b.name);
-  // Complete is a CATEGORY, not a state: a season that has finished releasing
+  // Complete is a category, not a state: a season that has finished releasing
   // belongs here whether or not it has been watched. Within the section the
   // card still shows its real state — downloading, ready to watch, or up to
-  // date — because those are the things worth acting on.
-  //
-  // Filtering on state === 'complete' instead would leave an adopted season
-  // sitting under Airing until every episode was watched, which claims
-  // kishizu is hunting it week by week when it is not.
+  // date — because those are the things worth acting on. Filtering on
+  // state === 'complete' instead would leave an adopted season under Airing
+  // until every episode was watched.
   //
   // finished is the schedule's own Status saying the season has ended; the
   // listener has stopped polling it, so it belongs with the other seasons
@@ -778,10 +758,8 @@ async function loadShows() {
     return;
   }
   el('shows').innerHTML =
-    // Complete first: a finished season is not being hunted, so it is the
-    // least urgent thing on the page, but it is also where a show goes once
-    // adopted and never leaves. Putting it last buried it below the sections
-    // that change every week.
+    // Complete first: a finished season is the least urgent thing on the
+    // page, and adopted seasons live here permanently.
     sect('Complete', complete) + sect('Airing', airing) + sect('Upcoming', upcoming);
   loadSummary();
 }
@@ -791,8 +769,7 @@ async function loadShows() {
 //
 // The URL is validated here as well as server-side: a non-URL is rejected
 // before the request, so the error appears next to the field rather than
-// after a round-trip. The server still checks — the client is a convenience,
-// not the gate.
+// after a round-trip. The server-side check remains the authority.
 function isScheduleURL(s) {
   try {
     const u = new URL(s);
@@ -819,8 +796,7 @@ async function addShow() {
 
 // ── browsing the season ───────────────────────────────────────────────────
 // The whole cached list is fetched once and shown; the filter narrows it
-// client-side. Requiring a search before anything appears made the panel look
-// empty and broken.
+// client-side, so the panel is populated the moment it opens.
 
 let browseAll = [];
 let browseLoaded = false;
@@ -858,10 +834,9 @@ async function browse(refresh) {
 // Switch which name is displayed.
 //
 // Re-renders from data already in hand rather than refetching: the server
-// sends both names on every entry, so a display choice needs no round-trip.
-// Refetching here was the bug that made the toggle look dead — the server
-// reads the preference from the config file, which still held the old value,
-// so it re-asserted it and reset the control.
+// sends both names on every entry, so a display choice needs no round-trip,
+// and a refetch would re-assert the config file's stored preference over the
+// user's click.
 //
 // The choice is persisted to the config file in the background, so it
 // survives a reload. A failed save is not fatal: the toggle still works for
@@ -1068,8 +1043,7 @@ function renderSettings() {
 
 // syncSettingsVisibility shows only the fields relevant to the current
 // choices: qBittorrent fields under qBittorrent, Gotify under Gotify, the
-// naming pattern under the custom preset. A form that renders every option
-// for every mode reads as a config dump; relevance is the point.
+// naming pattern under the custom preset.
 function syncSettingsVisibility() {
   if (!settingsView) return;
   const toggle = (sel, on) => { document.querySelectorAll(sel).forEach(n => n.classList.toggle('hidden', !on)); };
@@ -1086,11 +1060,11 @@ function syncSettingsVisibility() {
 // ── group order editor ──────────────────────────────────────────────────────
 // The list has three zones separated by two draggable lines: preferred
 // (ranked, best first), acceptable (eligible, unprioritized), and rejected
-// (never grabbed). The lines are real elements with their own positions —
-// derived state (e.g. "after the last recommended group") made the line
-// vanish whenever the order changed, so the positions are stored, not
-// computed. groupsWorking is the editable copy; on save it is split into
-// group_order (above the reject line) and reject_groups (below it).
+// (never grabbed). The line positions are stored rather than derived: a
+// derived position (e.g. "after the last recommended group") can become
+// undefined when the order changes, leaving the line nowhere to render.
+// groupsWorking is the editable copy; on save it is split into group_order
+// (above the reject line) and reject_groups (below it).
 
 let groupsWorking = [];   // [{name, recommended}]
 let groupsPreferred = 0;  // preferred line sits AFTER this many entries
@@ -1256,7 +1230,7 @@ async function saveSettings() {
       gotify_url: el('set-gotify').value.trim(),
       gotify_token: el('set-gotify-token').value,
     },
-    // Indexer is deliberately absent: it is yaml-only now, and the server
+    // Indexer is deliberately absent: it is yaml-only, and the server
     // preserves the file's values when the request omits them. The group
     // order comes from the editor's working list, not a text box.
     quality: {
@@ -1288,10 +1262,10 @@ async function saveSettings() {
   } catch (e) { fieldError('settings-error', e.message); }
 }
 
-// One show row. Status is the hero; everything else is quieter than it.
-// Actions carry data attributes, not inline JS: a show name with an
-// apostrophe would break out of a quoted onclick string, and a crafted name
-// could inject script. Handlers are bound by delegation in wireActions().
+// One show row. Actions carry data attributes, not inline JS: a show name
+// with an apostrophe would break out of a quoted onclick string, and a
+// crafted name could inject script. Handlers are bound by delegation in
+// wireActions().
 function card(s) {
   const st = s.state || 'unknown';
   const cls = {
@@ -1414,8 +1388,8 @@ function openTrain(showId) {
   startTrain(showId);
 }
 
-// Close on backdrop click; the panel itself stops propagation so clicking
-// inside it does not dismiss.
+// Close on backdrop click: only a click on the backdrop itself dismisses, so
+// clicks inside the panel are ignored.
 (function () {
   const backdrop = el('train-modal');
   backdrop.addEventListener('click', e => { if (e.target === backdrop) cancelTrain(); });
@@ -1442,8 +1416,8 @@ async function startTrain(showId) {
   } catch (e) { fieldError('train-error', 'Could not start: ' + e.message); }
 }
 
-// Novelty is shown so the ordering is legible rather than something to take on
-// faith: this is at the top because the model has not seen its group before.
+// Novelty is shown so the ordering is legible: a candidate at the top is
+// there because the model has not seen its group before.
 function noveltyNote(c) {
   if (!c.unseen || !c.unseen.length) return '';
   return `<div class="w">new: ${escapeHtml(c.unseen.join(', '))}</div>`;
@@ -1522,7 +1496,7 @@ async function gradeDetail(index) {
   } catch (e) { fieldError('train-error', e.message); }
 }
 
-// The correction pass. Training now teaches exactly two things: the offset for
+// The correction pass. Training teaches exactly two things: the offset for
 // a group, and the vocabulary a group writes in. Everything else — resolution,
 // codec, batch, dub, uncensored — is a global rule that holds for every show,
 // so it is never graded per release.
@@ -1659,9 +1633,8 @@ async function submitCorrections() {
 async function commit() {
   try {
     const r = await api('/api/train/commit', {});
-    // Verified is what would now be grabbed for the target episode — the
-    // proof training worked. That is the number worth reporting, not a
-    // "rejected" count from a flow that no longer grades.
+    // Verified is what would now be grabbed for the target episode: the
+    // number that shows training worked.
     const n = (r.verified || []).length;
     toast(`Saved. ${r.accepted} confirmed, ${n} release${n === 1 ? '' : 's'} now resolving to ep ${state.episode}.`);
     state = { active: false };
@@ -1858,8 +1831,8 @@ function wireActions() {
   el('btn-settings-open').onclick = openSettings;
   el('btn-settings-close').onclick = closeSettings;
   el('btn-settings-save').onclick = saveSettings;
-  // The form shows only fields relevant to the current mode; these three
-  // selects are what relevance depends on.
+  // The form shows only fields relevant to the current mode; these selects
+  // are what relevance depends on.
   el('settings-form').addEventListener('change', e => {
     if (['set-dl', 'set-nt', 'set-preset', 'set-delete'].includes(e.target.id)) syncSettingsVisibility();
   });
@@ -1997,10 +1970,8 @@ async function adoptConfirm() {
 
 wireActions();
 // Summary before the first render: it carries downloader_url, which the
-// downloading cards need at paint time. Rendering shows first left every
-// card linkless — the summary arrived after the HTML was already written,
-// and nothing re-rendered. Later loadShows() calls are fine either way:
-// downloaderURL is already set by then.
+// downloading cards need at paint time. Later loadShows() calls find
+// downloaderURL already set.
 loadSummary().then(loadShows);
 
 function escapeHtml(s) {

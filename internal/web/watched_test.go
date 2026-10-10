@@ -10,6 +10,16 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
 
+// watchedFile records a downloaded file for a show, as the reconciler would
+// after filing a completed download.
+func watchedFile(t *testing.T, st *store.Store, showID int64, number int, name string) {
+	t.Helper()
+	path := filepath.Join("/media/anime", name, name)
+	if err := st.FinaliseEpisode(showID, number, path); err != nil {
+		t.Fatalf("finalise: %v", err)
+	}
+}
+
 // post issues a POST against the server's mux and returns the recorder.
 func post(t *testing.T, srv *Server, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -33,16 +43,17 @@ func testServer(t *testing.T) *Server {
 	return srv
 }
 
-// TestWatchedByPath: a player signal carries only the file path; the server does
-// the matching, since it has the aliases and offsets.
+// TestWatchedByPath: a player signal carries only the file path; the server
+// resolves it by exact name against the paths it recorded when filing the
+// download.
 func TestWatchedByPath(t *testing.T) {
 	srv := testServer(t)
 	st := srv.st
 	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
-	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+	watchedFile(t, st, sh.ID, 9, "Tomb Raider King - E09.mkv")
 
 	// The PC's path is a Windows path; only the base name matters.
-	body := `{"path":"D:\\Anime\\[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL.mkv"}`
+	body := `{"path":"D:\\Anime\\Tomb Raider King\\Tomb Raider King - E09.mkv"}`
 	rec := post(t, srv, "/api/watched", body)
 	if rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -56,15 +67,13 @@ func TestWatchedByPath(t *testing.T) {
 	}
 }
 
-// TestWatchedRefusesUncertainMatch: a filename the model cannot confidently
-// match must be refused, not guessed. A wrong guess here deletes a file the
-// user may still want.
+// TestWatchedRefusesUncertainMatch: a filename no stored episode owns must be
+// refused, not guessed. A wrong guess here deletes a file the user may still
+// want.
 func TestWatchedRefusesUncertain(t *testing.T) {
 	srv := testServer(t)
 	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
-	// Offsets disagree, so an unseen group is a coin flip.
-	_ = srv.st.SetGroupOffset(sh.ID, "A", 0, "training")
-	_ = srv.st.SetGroupOffset(sh.ID, "B", 40, "training")
+	watchedFile(t, srv.st, sh.ID, 9, "Tomb Raider King - E09.mkv")
 
 	body := `{"path":"/downloads/[BrandNewGroup] Tomb Raider King S01E09 1080p.mkv"}`
 	rec := post(t, srv, "/api/watched", body)
@@ -72,8 +81,8 @@ func TestWatchedRefusesUncertain(t *testing.T) {
 		t.Errorf("status %d, want 422: %s", rec.Code, rec.Body.String())
 	}
 	ep, _ := srv.st.GetEpisode(sh.ID, 9)
-	if ep != nil {
-		t.Errorf("uncertain match marked an episode: %+v", ep)
+	if ep == nil || ep.State != episode.Downloaded {
+		t.Errorf("state = %v, want downloaded: an unknown filename must not mark anything", ep)
 	}
 }
 
@@ -98,9 +107,9 @@ func TestWatchedManualOverridesMatching(t *testing.T) {
 func TestWatchedIsIdempotent(t *testing.T) {
 	srv := testServer(t)
 	sh, _ := srv.st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
-	_ = srv.st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+	watchedFile(t, srv.st, sh.ID, 9, "Tomb Raider King - E09.mkv")
 
-	body := `{"path":"[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL.mkv"}`
+	body := `{"path":"D:\\Anime\\Tomb Raider King\\Tomb Raider King - E09.mkv"}`
 	if rec := post(t, srv, "/api/watched", body); rec.Code != 200 {
 		t.Fatalf("first: %d %s", rec.Code, rec.Body.String())
 	}

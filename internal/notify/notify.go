@@ -2,9 +2,8 @@
 // provides the services it knows how to post to.
 //
 // Notifications are best-effort throughout: a missed ping must never stop a
-// download. But a failure has to be visible — discarding the error is how a
-// wrong topic URL went unnoticed, with every ping failing silently and the
-// only symptom being that nothing arrived.
+// download. A failure still has to be visible — a silently discarded error
+// hides a wrong topic URL, and the only symptom is that nothing arrives.
 package notify
 
 import (
@@ -14,10 +13,10 @@ import (
 
 // Priority is how urgent a notification is.
 //
-// Not ntfy's integer levels: those are one service's vocabulary, and a caller
-// that has to know them cannot be pointed at a different service. Each
-// backend maps these to whatever it supports; one that has no notion of
-// priority ignores the field.
+// These are kishizu's own levels, so a caller never has to know one
+// service's vocabulary and can be pointed at any backend. Each backend maps
+// them to whatever it supports; one that has no notion of priority ignores
+// the field.
 type Priority int
 
 const (

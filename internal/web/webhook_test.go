@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -134,7 +135,11 @@ func TestWebhookRefusesNoIdentity(t *testing.T) {
 // filename means.
 func TestWebhookPathMatchesLikeWatched(t *testing.T) {
 	srv, sh := webhookServer(t)
-	body := `{"path":"D:\\Anime\\[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL.mkv"}`
+	path := filepath.Join("/media/anime", "Tomb Raider King", "Tomb Raider King - E09.mkv")
+	if err := srv.st.FinaliseEpisode(sh.ID, 9, path); err != nil {
+		t.Fatalf("finalise: %v", err)
+	}
+	body := `{"path":"D:\\Anime\\Tomb Raider King\\Tomb Raider King - E09.mkv"}`
 	rec := post(t, srv, "/api/webhook", body)
 	if rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())

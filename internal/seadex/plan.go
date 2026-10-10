@@ -33,8 +33,8 @@ var reEpisode = regexp.MustCompile(`^(.*?)\s+-\s+(\d{1,3})(v\d+)?\b`)
 // dots replace spaces and the episode is tagged SxxEyy: "Title.S01E01.Ep.Name.
 // 1080p.BluRay.mkv". SeaDex entries carry both naming conventions — fanout
 // groups keep the " - " separator, Western remux groups (CRUCiBLE and friends)
-// use the scene style — and a pack in the second style read as zero episodes
-// and no title before this pattern existed.
+// use the scene style — and a pack in the second style reads as zero episodes
+// and no title without this pattern.
 var reSeasonEpisode = regexp.MustCompile(`(?i)S\d{1,2}E(\d{1,3})(v\d+)?\b`)
 
 // FileClass is what the classifier thinks one file is.
@@ -59,9 +59,9 @@ type FileClass struct {
 // scans and booklets, and listing those would make the review screen
 // unusable.
 //
-// The proposals are defaults for a human to confirm, not decisions. The
-// classifier is right often enough to save the tedium and wrong often
-// enough that it must never be trusted silently.
+// The proposals are defaults for a human to confirm, not decisions: the
+// classifier is right often enough to save the tedium and wrong often enough
+// that it must never be trusted silently.
 func ClassifyFiles(files []File) []FileClass {
 	var out []FileClass
 	for _, f := range files {

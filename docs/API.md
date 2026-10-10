@@ -105,9 +105,10 @@ Two ways to identify the episode:
 {"show_id":1,"episode":9}
 ```
 
-The first matches the **base name** against tracked episodes, so the client's
-directory layout does not matter — only the filename. The second is explicit
-and takes precedence.
+The first resolves the **base name** by exact match against the paths kishizu
+recorded when filing the download, so the client's directory layout does not
+matter — only the filename. A filename kishizu does not recognise is refused
+(422): there is nothing to infer. The second is explicit and takes precedence.
 
 Marking watched also sweeps: files for watched episodes are deleted per the
 delete policy (`immediate` by default; `after` respects the delay; `off`

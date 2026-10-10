@@ -24,8 +24,8 @@ import (
 
 // Decision is what the listener decided about one release, and why.
 //
-// Every decision carries its reason. When something goes wrong the log is the
-// only witness, so "skipped" without a why is not debuggable.
+// Every decision carries its reason: the log is the only witness when
+// something goes wrong, so "skipped" without a why is not debuggable.
 type Decision struct {
 	Item       nyaa.Item
 	ShowID     int64
@@ -50,7 +50,7 @@ type Listener struct {
 	// a test can point one at a local server.
 	indexer *nyaa.Client
 	// vocab is the learned title vocabulary, cached across shows and polls.
-	// It is global, so loading it per show per poll was a full table scan
+	// It is global: loading it per show per poll would be a full table scan
 	// every tick for data that changes only when the user teaches it.
 	vocab *adapt.Vocab
 	// Policy is the quality policy applied to every release. It is global:
@@ -118,10 +118,8 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 			continue
 		}
 		// A finished season adopted from SeaDex is never polled. It has no air
-		// dates and no offsets, so every guard below would either skip it by
-		// accident or, worse, poll it aggressively with nothing to anchor the
-		// air-date check. Say so explicitly instead of relying on the absence
-		// of offsets.
+		// dates and no offsets, so every guard below would skip it by accident
+		// or poll it aggressively with nothing to anchor the air-date check.
 		if sh.Source == store.SourceSeaDex {
 			debug.Log("%s: adopted from SeaDex, not polled", sh.CanonicalName)
 			continue
@@ -150,7 +148,7 @@ func (l *Listener) DueShows(legacy time.Duration) map[*store.Show]time.Duration 
 
 		if d, ok := cycle.PollInterval(states); ok {
 			// Only now does training matter: a dormant show costs nothing
-			// either way, so there is no point looking up its offsets.
+			// either way.
 			if !l.isTrained(sh) {
 				debug.Log("%s: untrained, not polling", sh.CanonicalName)
 				// Episode 1 has aired (a state past up-to-date exists, or the
@@ -189,11 +187,11 @@ func (l *Listener) isTrained(sh *store.Show) bool {
 	return len(offsets) > 0
 }
 
-// hasAired reports whether episode 1 of this show has aired. Three proofs,
-// any one of which settles it: an episode row past wanted (a release was
-// seen), the site's countdown pointing past ep1 (the site only advances the
-// cursor because the premiere aired), or the effective anchor's air time in
-// the past. An announced-but-unscheduled show has none of these, and there is
+// hasAired reports whether episode 1 of this show has aired. Any one of
+// three proofs settles it: an episode row past wanted (a release was seen),
+// the site's countdown pointing past ep1 (the site advances the cursor only
+// because the premiere aired), or the effective anchor's air time in the
+// past. An announced-but-unscheduled show has none of these, and there is
 // nothing to train on yet.
 func (l *Listener) hasAired(eps []*store.Episode, anchor *time.Time, now time.Time) bool {
 	for _, ep := range eps {
@@ -225,8 +223,8 @@ func (l *Listener) PollShow(ctx context.Context, sh *store.Show) ([]Decision, er
 		return nil, err
 	}
 	// A partial outage is not an error — the surviving feeds are still worth
-	// evaluating — but it is not silence either. Without this, a show whose
-	// only working alias failed looks identical to a show with no releases.
+	// evaluating — but it is not silence either: a show whose only working
+	// alias failed would otherwise look identical to a show with no releases.
 	if failed > 0 {
 		debug.Log("%s: %d of %d feeds failed", sh.CanonicalName, failed, len(urls))
 	}
@@ -264,9 +262,7 @@ func (l *Listener) evaluate(sh *store.Show, m *adapt.Show, it nyaa.Item) Decisio
 
 	// 1. Dedupe on infohash — but only on rows the listener itself wrote.
 	// Training also records confirms here, and a confirmed release is
-	// exactly the one that should be grabbed: skipping it left a trained
-	// show hunting forever while every correct release was rejected as
-	// "already seen".
+	// exactly the one that should be grabbed.
 	if seen, err := l.st.HasSeen(it.InfoHash, store.SeenGrab); err != nil {
 		d.Reason = fmt.Sprintf("seen check: %v", err)
 		return d
@@ -436,8 +432,8 @@ func (l *Listener) groupRankOf(d Decision) int {
 // ruleRank scores a release against the global rules: codec, resolution, dub
 // and uncensored. Lower is better.
 //
-// These are constants, not per-release grades. Nobody wants a batch or a dub,
-// and x264 beats a re-encoded x265, so asking per release was wasted effort.
+// These are constants, not per-release grades: batches and dubs are unwanted
+// and x264 beats a re-encoded x265 for every show, so the policy is global.
 func (l *Listener) ruleRank(d Decision) int {
 	r := d.parsedRelease()
 	return l.Policy.Rank(&r)

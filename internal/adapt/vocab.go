@@ -9,11 +9,9 @@ import (
 
 // Vocab is a cached view of the learned vocabulary.
 //
-// The vocabulary is global — it is not per show — but it was loaded from
-// SQLite once per show per poll, because the adapter that needed it was built
-// per show. At a 3-minute poll with a handful of shows that is a full table
-// scan every tick, for data that changes only when the user teaches it
-// something.
+// The vocabulary is global — it is shared across shows — but loading it from
+// SQLite per show per poll is a full table scan every tick for data that
+// changes only when the user teaches it something.
 //
 // Caching it here means one load until something is learned. Refresh is
 // explicit, not time-based: the writer knows when it wrote, so a TTL would

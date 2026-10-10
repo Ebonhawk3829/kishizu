@@ -70,9 +70,8 @@ type Show struct {
 // Only Romaji, English and Synonyms. Two kinds are excluded:
 //
 //   - Japanese. Nyaa release titles are romanised; Japanese names never appear
-//     in them, so they are dead weight in the alias set. Worse, they are what
-//     produced a false match against an unrelated show: a short Japanese
-//     abbreviation scored above the threshold on token overlap alone.
+//     in them, and a short Japanese abbreviation can clear the alias threshold
+//     against an unrelated show on token overlap alone.
 //
 //   - Abbreviation. Too short to carry identity — "ReZero 4" matches any
 //     release containing those tokens.
@@ -105,9 +104,9 @@ func (s *Show) namesOf(kinds ...string) []string {
 // hasJapanese reports whether a string contains kana or kanji.
 //
 // Nyaa release titles are romanised, so a name in Japanese script can never
-// appear in one. Including it only adds noise — and a short Japanese name is
-// actively dangerous, since it can clear the alias threshold against an
-// unrelated show on token overlap alone.
+// appear in one. A short Japanese name is actively dangerous in the alias
+// set: it can clear the alias threshold against an unrelated show on token
+// overlap alone.
 func hasJapanese(s string) bool {
 	for _, r := range s {
 		switch {
@@ -147,11 +146,6 @@ func PinShowURL(u string) func() {
 // Callers use this to decide whether a failed lookup is a finding or a retry.
 var ErrNotFound = errors.New("no such show page")
 
-// FetchShow retrieves one show's page by slug.
-//
-// Returns ErrNotFound (wrapped) when the page is genuinely absent, so callers
-// can tell "this show is not there" from "we could not check". Conflating them
-// is how a transient outage gets reported as a show having finished airing.
 func FetchShow(client *http.Client, slug string) (*Show, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -268,8 +262,8 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 	if m := reMAL.FindStringSubmatch(s); m != nil {
 		sh.MyAnimeListID, _ = strconv.Atoi(m[1])
 	}
-	// Fallback only: og:image is authoritative, but if it is ever absent the
-	// poster is still findable by its path. Last resort, not the main path.
+	// Fallback only: og:image is authoritative; the poster path is the last
+	// resort when it is ever absent.
 	if sh.ImageURL == "" {
 		if m := reShowImg.FindString(s); m != "" {
 			sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m), "&amp;", "&")
@@ -315,20 +309,18 @@ func ParseShow(r io.Reader, slug string) (*Show, error) {
 //	animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 //	/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
 //
-// A bare slug is rejected: a bare word cannot be
-// distinguished from an ordinary title, so accepting one would make adding a
-// single-word show by plain name impossible — "Bleach" would go down the
-// slug path, the page fetch would 404, and the user would see "no show at
-// that URL". The only unambiguous inputs are ones carrying the /anime/
-// marker. Adding from the browse list passes the slug directly and does not
-// go through here.
+// A bare slug is rejected: a bare word cannot be distinguished from an
+// ordinary title, and treating "Bleach" as a slug would send a plain-name
+// add down the slug path to a confusing 404. The only unambiguous inputs are
+// ones carrying the /anime/ marker. Adding from the browse list passes the
+// slug directly and does not go through here.
 //
 // Query strings and fragments are dropped. Returns "" when there is no slug
 // to be found, which the caller treats as "not a schedule URL" and rejects.
 //
 // Any URL carrying /anime/ is accepted, whatever its host. The slug is then
 // verified by fetching the page, which is the real check — a URL on the
-// wrong host fails there with "no show at that URL" rather than here.
+// wrong host fails there with "no show at that URL".
 func SlugFromURL(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -340,7 +332,7 @@ func SlugFromURL(raw string) string {
 	}
 	// The /anime/ marker is what makes the input unambiguous. Without it a
 	// bare word is indistinguishable from a show title, and treating it as a
-	// slug made plain-name adds fail with a confusing 404.
+	// slug sends plain-name adds to a confusing 404.
 	i := strings.Index(s, "/anime/")
 	if i < 0 {
 		return ""

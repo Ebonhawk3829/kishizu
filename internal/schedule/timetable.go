@@ -105,8 +105,8 @@ func ParseBrowseTitle(s string) (BrowseTitle, error) {
 // DisplayTitle is the name to show for an entry under a preference.
 //
 // Falls back to the romaji title when the English one is missing or identical:
-// most shows have no separate English name, and showing an empty row to make a
-// point about data completeness is worse than showing the name that exists.
+// most shows have no separate English name, and the name that exists is worth
+// more than an empty row.
 func (e Entry) DisplayTitle(pref BrowseTitle) string {
 	if pref == BrowseEnglish && e.EnglishTitle != "" {
 		return e.EnglishTitle
@@ -123,10 +123,9 @@ const EnrichTTL = 7 * 24 * time.Hour
 
 // NeedsEnrich reports whether English titles are missing or stale.
 //
-// "Missing" counts, not just the timestamp: a list that was refreshed recently
-// but has entries with no English title is not in a usable state for someone
-// reading it in English, and the timestamp alone only says when the last
-// attempt was, not whether it covered everything.
+// "Missing" counts, not just the timestamp: a list refreshed recently but
+// with entries lacking English titles is unusable for someone reading in
+// English, and the timestamp alone only says when the last attempt was.
 func (t *Timetable) NeedsEnrich() bool {
 	if time.Since(t.Enriched) >= EnrichTTL {
 		return true
@@ -237,9 +236,8 @@ func (t *Timetable) Enrich(client *http.Client) {
 
 // TimetableURL is the current season's show list.
 //
-// The site has no "/seasonal" page — that was a guess and 404s. The season
-// pages are /seasons/<season>-<year>, and each lists every show for that cour
-// as an anime-tile.
+// The season pages are /seasons/<season>-<year>, and each lists every show
+// for that cour as an anime-tile.
 //
 // A variable rather than a constant so tests can point it at a stub. It is
 // refreshed from the date on each fetch, so the browse list does not go stale
@@ -408,8 +406,8 @@ func parseTimetableString(page string) (*Timetable, error) {
 //
 // The timetable is fetched once and reused, for two reasons. It is one request
 // for every show on the season instead of one request per show, and it keeps
-// the browse list working when the site is unreachable — which is the same
-// resilience the rest of kishizu has.
+// the browse list working when the site is unreachable — the same resilience
+// the rest of kishizu has.
 type Cache struct {
 	mu   sync.Mutex
 	path string
@@ -430,8 +428,8 @@ func NewCache(dir string, ttl time.Duration) (*Cache, error) {
 
 // DefaultTimetableTTL is how long a snapshot is reused.
 //
-// A day: the timetable changes when shows are announced or delayed, which is
-// not more than daily, and a stale list is still a usable browse list.
+// A day: the timetable changes when shows are announced or delayed, and a
+// stale list is still a usable browse list.
 const DefaultTimetableTTL = 24 * time.Hour
 
 // Get returns the cached timetable. It never fetches.
@@ -452,16 +450,15 @@ func (c *Cache) Get() (*Timetable, error) {
 // schedules, and the request path must stay free of network I/O.
 //
 // A refresh always leaves the list enriched, not merely fetched: a list
-// without English titles is not usable, and deferring enrichment leaves it
-// that way for up to a week.
+// without English titles is unusable, and deferring enrichment leaves it that
+// way for up to a week.
 //
 // The cost is kept down by carrying titles forward by slug rather than
 // re-fetching them — see CarryTitles. Mid-season a refresh usually adds no new
 // shows, so it costs one request for the tiles and nothing more.
 //
-// A failed fetch leaves the existing snapshot untouched rather than clearing
-// it — a stale list is more useful than an empty one, and the site being down
-// must not cost the user their browse list.
+// A failed fetch leaves the existing snapshot untouched: a stale list is
+// more useful than an empty one.
 func (c *Cache) Update(client *http.Client) (*Timetable, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -530,10 +527,10 @@ func (c *Cache) Refresh(client *http.Client) (*Timetable, error) {
 
 // load reads the snapshot from disk.
 //
-// A missing file is not an error: it means the background job has not run yet,
-// which is a normal state for a container that has only just started. A file
-// that exists but cannot be parsed is corruption, and must surface as an error
-// rather than as an empty list.
+// A missing file means the background job has not run yet, which is normal
+// for a container that has only just started. A file that exists but cannot
+// be parsed is corruption, and surfaces as an error rather than as an empty
+// list.
 func (c *Cache) load() (*Timetable, error) {
 	b, err := os.ReadFile(c.path)
 	if err != nil {
