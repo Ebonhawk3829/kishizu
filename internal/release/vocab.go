@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Vocabulary maps the words release groups actually use onto the canonical
@@ -112,56 +113,95 @@ func (v *Vocabulary) ApplyVocabulary(r *Release) {
 	if r == nil || v == nil {
 		return
 	}
-	tokens := tokenise(r.Title)
-	for _, tok := range tokens {
-		key := vocabKey(tok)
-		if key == "" {
-			continue
-		}
-		if r.Resolution == "" {
-			if c := v.Lookup(VocabResolution, key); c != "" {
-				r.Resolution = c
+	for _, tok := range tokenise(r.Title) {
+		for _, cand := range candidates(tok) {
+			key := vocabKey(cand)
+			if key == "" {
 				continue
 			}
-		}
-		if r.Codec == "" {
-			if c := v.Lookup(VocabCodec, key); c != "" {
-				r.Codec = c
-				continue
+			if r.Resolution == "" {
+				if c := v.Lookup(VocabResolution, key); c != "" {
+					r.Resolution = c
+					continue
+				}
 			}
-		}
-		if r.Source == "" {
-			if c := v.Lookup(VocabSource, key); c != "" {
-				r.Source = c
-				continue
+			if r.Codec == "" {
+				if c := v.Lookup(VocabCodec, key); c != "" {
+					r.Codec = c
+					continue
+				}
 			}
-		}
-		if r.Service == "" {
-			if c := v.Lookup(VocabService, key); c != "" {
-				r.Service = c
-				continue
+			if r.Source == "" {
+				if c := v.Lookup(VocabSource, key); c != "" {
+					r.Source = c
+					continue
+				}
 			}
-		}
-		if r.Audio == "" {
-			if c := v.Lookup(VocabAudio, key); c != "" {
-				r.Audio = c
-				continue
+			if r.Service == "" {
+				if c := v.Lookup(VocabService, key); c != "" {
+					r.Service = c
+					continue
+				}
+			}
+			if r.Audio == "" {
+				if c := v.Lookup(VocabAudio, key); c != "" {
+					r.Audio = c
+					continue
+				}
 			}
 		}
 	}
 }
 
+// candidates lists the lookup keys one token may resolve through, most
+// specific first.
+//
+// The whole field comes first: hyphen is part of some tags (WEB-DL, B-Global),
+// and a whole-field hit is always the more specific reading. The hyphen
+// segments follow, for tags that use hyphen as a separator (AVC-8BIT). A
+// segment is consulted only when the whole field missed, so a learned
+// "B-Global" can never be stolen by its own halves.
+//
+// A segment qualifies only when it is alphabetic and at least three
+// characters: "AVC" in "AVC-8BIT" is a tag, but "B" in "B-Global" is a
+// fragment no one could meaningfully teach, and "8BIT" in "AVC-8BIT" is a
+// depth tag the parser already reads.
+func candidates(field string) []string {
+	out := []string{field}
+	for _, seg := range strings.Split(field, "-") {
+		if len(seg) < 3 || !isAlpha(seg) {
+			continue
+		}
+		out = append(out, seg)
+	}
+	return out
+}
+
+// isAlpha reports whether every rune in s is a letter.
+func isAlpha(s string) bool {
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // tokenise splits a title into candidate vocabulary tokens.
 //
-// Split on whitespace first, then keep the internal separators that matter
-// (H.264 stays one token). Splitting only on a letter/digit run would merge
-// "1080p CR WEB-DL AVC AAC" into a single token, burying the very word we are
-// trying to match.
+// Splits on whitespace AND bracket boundaries: fanset titles glue their tag
+// groups together ("[1080p][AVC]"), and a whitespace-only split leaves
+// "1080p][AVC" as one field, burying the very word we are trying to match.
+// Brackets are packaging, not content — every tag inside them is its own
+// candidate. Internal separators that matter are kept (H.264 stays one token).
 func tokenise(title string) []string {
+	fields := strings.FieldsFunc(title, func(r rune) bool {
+		return r == ' ' || r == '\t' || strings.ContainsRune("[](){}<>|", r)
+	})
 	var out []string
-	for _, field := range strings.Fields(title) {
-		// Trim bracket and punctuation edges: "[1080p" -> "1080p", "AAC]" -> "AAC".
-		field = strings.Trim(field, "[](){}<>|/\\.,;:_-")
+	for _, field := range fields {
+		// Trim punctuation edges: "1080p," -> "1080p", "AAC:" -> "AAC".
+		field = strings.Trim(field, ".,;:_-")
 		if field != "" {
 			out = append(out, field)
 		}
