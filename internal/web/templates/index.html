@@ -1556,10 +1556,13 @@ function attrRow(a) {
         correct
       </label>
       <div class="fix hidden" id="fix-${a.key}">
-        <select id="sb-${a.key}" data-act="record-correction" data-key="${escapeHtml(a.key)}">
-          <option value="">should be…</option>
-          ${opts.map(o => `<option value="${escapeHtml(o)}"${o === val ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}
-        </select>
+        ${opts.length
+          ? `<select id="sb-${a.key}" data-act="record-correction" data-key="${escapeHtml(a.key)}">
+              <option value="">should be…</option>
+              ${opts.map(o => `<option value="${escapeHtml(o)}"${o === val ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+            </select>`
+          : `<input id="sb-${a.key}" placeholder="should be…"
+                    data-act="record-correction" data-key="${escapeHtml(a.key)}">`}
         <input id="ts-${a.key}" placeholder="title says…"
                data-act="record-correction" data-key="${escapeHtml(a.key)}">
       </div>

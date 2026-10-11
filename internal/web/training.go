@@ -407,6 +407,13 @@ func (s *Server) handleTrainGrade(w http.ResponseWriter, r *http.Request) {
 	g := train.InspectWithConfidence(req.Title, resolved, res.Confidence)
 	if req.Release != nil {
 		g = *req.Release
+		// The client sends only title and attrs, so RawEpisode decodes as 0 —
+		// and ApplyGrades refuses to learn an offset from a zero raw number.
+		// The title is authoritative: re-derive what the parser reads rather
+		// than trusting the payload to carry it.
+		if g.RawEpisode == 0 {
+			g.RawEpisode = release.Parse(req.Title).RawEpisode()
+		}
 	}
 
 	grades := make(map[train.Attribute]train.Grade, len(req.Grades))
