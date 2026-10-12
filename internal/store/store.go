@@ -576,7 +576,12 @@ func (s *Store) SetNextEpisode(showID int64, n int, t time.Time) error {
 	_, err := s.db.Exec(`UPDATE show SET next_ep = ?, next_airs_at = ?,
 		schedule_fetched_at = datetime('now') WHERE id = ?`,
 		n, t.UTC().Format("2006-01-02 15:04:05"), showID)
-	return err
+	if err != nil {
+		return err
+	}
+	// The anchor moved: make sure the episode it now points at has a row, so
+	// the state derivation can see it. See MaterialiseAnchorEpisode.
+	return s.MaterialiseAnchorEpisode(showID)
 }
 
 // ClearNextEpisode removes the stored anchor entirely.
@@ -767,6 +772,49 @@ func (s *Store) StampExposure(showID int64, episode int) error {
 		VALUES (?, ?, 'wanted', datetime('now'))
 		ON CONFLICT(show_id, number) DO UPDATE SET exposed_at = datetime('now')`,
 		showID, episode)
+	return err
+}
+
+// MaterialiseAnchorEpisode gives the effective anchor's episode a row if it
+// has none.
+//
+// The show card's state is derived from episode rows: the wanted row for the
+// anchor is what reads as hunting, downloading or ready-to-watch, and its
+// absence reads as up-to-date because there is nothing else the anchor could
+// be. So an anchor episode with no row is an aired, unwatched episode that
+// renders as "up-to-date" and is never hunted.
+//
+// The consume paths stamp exposure on the anchor as they advance it, so a row
+// normally already exists. What they do not cover is a consume that predates
+// the stamp, or any later path that moves the anchor without one: the episode
+// is owed and invisible. This write is the backstop — it runs wherever the
+// anchor is written, so the anchor episode is always reachable.
+//
+// The anchor is the effective one (see NextEpisode), not the site cursor.
+// They differ whenever the user is behind the season, and it is the episode
+// the user is owed that must be hunted and rendered. Materialising the cursor
+// instead would leave that episode rowless and the show inert.
+//
+// The countdown is the whole of the fact: the anchor names the episode the
+// season is on, so a row for it is the honest reading. Nothing is invented
+// about state or timing — the row is wanted, and its slot is in the air
+// cache. Every later write still goes through the usual paths: the listener
+// grabs it, a watch signal consumes it, the refresh advances the anchor past
+// it.
+//
+// Only a missing row is created. An existing row is left untouched, whatever
+// its state: a terminal one means the episode is consumed and the anchor is
+// merely stale, and a wanted or later one needs no help.
+func (s *Store) MaterialiseAnchorEpisode(showID int64) error {
+	n, _, err := s.NextEpisode(showID)
+	if err != nil {
+		return err
+	}
+	if n < 1 {
+		return nil
+	}
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO episode (show_id, number, state)
+		VALUES (?, ?, 'wanted')`, showID, n)
 	return err
 }
 
