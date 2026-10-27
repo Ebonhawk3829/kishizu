@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -63,7 +64,21 @@ type Show struct {
 	ImageURL string
 	// MyAnimeListID is the cross-reference the page links to. 0 when absent.
 	MyAnimeListID int
+	// Source records where this record came from: the show page or the JSON
+	// API. It matters for the anchor — an API record carries no countdown, so
+	// "no episode here" must not be read as "nothing is scheduled".
+	Source string
+	// CountdownPresent reports whether the page published a countdown block.
+	// A block that is present but not fully readable is a parse failure, not
+	// an absence, so callers keep the last known anchor rather than clearing.
+	CountdownPresent bool
 }
+
+// Sources for Show.Source.
+const (
+	SourcePage = "page"
+	SourceAPI  = "api"
+)
 
 // Aliases returns the names worth matching a release against.
 //
@@ -164,140 +179,239 @@ func FetchShow(client *http.Client, slug string) (*Show, error) {
 	return ParseShow(resp.Body, slug)
 }
 
+// The page is server-rendered and carries structured markup: stable class
+// names, schema.org itemprop attributes, and machine-readable data-*
+// attributes. It is read through the DOM rather than by regex. A regex that
+// pins attribute order or whitespace breaks on a cosmetic redesign, which is
+// exactly how the countdown parse broke when the site renamed its episode blob.
 var (
-	reShowTitle = regexp.MustCompile(`(?s)<title>(.*?)</title>`)
-	reEpisodes  = regexp.MustCompile(
-		`(?s)<h3>Episodes</h3>\s*<div[^>]*>(\d+)</div>`)
-	reStatus = regexp.MustCompile(
-		`(?s)<h3>Status</h3>\s*<div[^>]*>([^<]+)</div>`)
-	reType = regexp.MustCompile(
-		`(?s)<h3>Type</h3>\s*<a[^>]*>([^<]+)</a>`)
-	// Release Time carries the full slot with an offset. The rendered text is
-	// localised to the viewer ("07:00 PM" plus a "converted to your timezone"
-	// note), so only the datetime attribute is trustworthy.
-	//
-	// The offset is HTML-escaped: "2027-01-10T19:00&#43;11:00".
-	reRelease = regexp.MustCompile(
-		`(?s)<time id="release-time-raw"[^>]*datetime="([^"]+)"`)
-	// The canonical poster. Preferred over scraping an /anime/jpg/ URL because
-	// the page contains many of those (related shows, similar-anime thumbs)
-	// and picking one by document order is a guess.
-	reOGImage = regexp.MustCompile(
-		`<meta[^>]+property="og:image"[^>]+content="([^"]+)"`)
-	reSeason = regexp.MustCompile(
-		`(?s)<h3>Season</h3>\s*<a[^>]*>([^<]+)</a>`)
-	// Alternative names are a flat sequence of headings and values in document
-	// order: a heading applies to every value that follows it until the next
-	// heading. Synonyms legitimately carry several values.
-	//
-	// Matching "block" shapes does not work here: the value's own closing
-	// </div> is indistinguishable from the wrapper's, so a non-greedy block
-	// regex eats the terminator it needs to match on. Scanning both tags in
-	// order and attributing each value to the last heading seen avoids the
-	// nesting problem entirely.
-	reAltTag = regexp.MustCompile(
-		`(?s)<span class="alternative-name-heading">([^<]+)</span>` +
-			`|<div class="alternative-name"[^>]*>([^<]+)</div>`)
-	reMAL     = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
-	reShowImg = regexp.MustCompile(`https://img\.animeschedule\.net/[^"'\s]+/anime/jpg/[^"'\s]+`)
-
-	// The page's data blob carries the countdown's episode:
-	// latestEpisode="18" latestEpisodeBaseline="17" ...
-	reLatestEp = regexp.MustCompile(`latestEpisode="(\d+)"`)
-	// The RAW countdown target is the earliest native airing of that
-	// episode. The Subs/Dub variants sit in their own <time> elements with
-	// their own targets; the raw one is in the element carrying the
-	// countdown-time-raw class.
-	reRawCountdown = regexp.MustCompile(
-		`(?s)<time[^>]*class="countdown-time countdown-time-raw"[^>]*data-countdown-target="([^"]+)"`)
+	reMAL = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
+	reEp  = regexp.MustCompile(`(?i)^ep\s*(\d+)`)
 )
 
-// ParseShow extracts a Show from a show page.
-//
-// The page is server-rendered, so a plain fetch is enough. Everything here is
-// optional: a missing field yields its zero value rather than an error, because
-// the page layout varies by how complete the site's record is and a partial
-// record is still more than we had before.
+// walk visits n and every descendant in document order (pre-order).
+func walk(n *html.Node, fn func(*html.Node)) {
+	fn(n)
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		walk(c, fn)
+	}
+}
+
+// attr returns the named attribute's value, or "". Attribute names are
+// lowercased by the HTML parser, so the key is lowercased to match.
+func attr(n *html.Node, key string) string {
+	key = strings.ToLower(key)
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return a.Val
+		}
+	}
+	return ""
+}
+
+// hasClass reports whether the element carries the class.
+func hasClass(n *html.Node, want string) bool {
+	for _, c := range strings.Fields(attr(n, "class")) {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// text returns an element's text content, trimmed. Character references are
+// already resolved by the parser, so no unescaping is needed.
+func text(n *html.Node) string {
+	var b strings.Builder
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		switch c.Type {
+		case html.TextNode:
+			b.WriteString(c.Data)
+		case html.ElementNode:
+			b.WriteString(text(c))
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// findFirst returns the first element in document order that matches.
+func findFirst(n *html.Node, match func(*html.Node) bool) *html.Node {
+	var found *html.Node
+	walk(n, func(c *html.Node) {
+		if found == nil && c.Type == html.ElementNode && match(c) {
+			found = c
+		}
+	})
+	return found
+}
+
 func ParseShow(r io.Reader, slug string) (*Show, error) {
-	raw, err := io.ReadAll(r)
+	doc, err := html.Parse(r)
 	if err != nil {
 		return nil, err
 	}
-	s := string(raw)
 
 	sh := &Show{Slug: slug, Names: map[string][]string{}}
 
-	if m := reShowTitle.FindStringSubmatch(s); m != nil {
-		// "Re:Zero kara Hajimeru Isekai Seikatsu 4 | AnimeSchedule"
-		t := strings.TrimSpace(m[1])
-		if i := strings.LastIndex(t, "|"); i > 0 {
-			t = strings.TrimSpace(t[:i])
+	// Title: the <title> element, minus the " | AnimeSchedule" suffix.
+	if t := findFirst(doc, func(n *html.Node) bool { return n.Data == "title" }); t != nil {
+		title := text(t)
+		if i := strings.LastIndex(title, "|"); i > 0 {
+			title = strings.TrimSpace(title[:i])
 		}
-		sh.Title = html.UnescapeString(t)
+		sh.Title = title
 	}
-	if m := reEpisodes.FindStringSubmatch(s); m != nil {
-		sh.Episodes, _ = strconv.Atoi(m[1])
+
+	// The information block: each .information-content-wrapper pairs an <h3>
+	// label with the value element that follows it. The block is rendered
+	// twice (mobile and desktop), so each field is only set once.
+	walk(doc, func(n *html.Node) {
+		if n.Type != html.ElementNode || !hasClass(n, "information-content-wrapper") {
+			return
+		}
+		label, value := "", ""
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type != html.ElementNode {
+				continue
+			}
+			if c.Data == "h3" {
+				label = text(c)
+				continue
+			}
+			if value == "" {
+				value = text(c)
+			}
+		}
+		switch label {
+		case "Episodes":
+			if sh.Episodes == 0 {
+				sh.Episodes, _ = strconv.Atoi(value)
+			}
+		case "Status":
+			if sh.Status == "" {
+				sh.Status = value
+			}
+		case "Type":
+			if sh.Type == "" {
+				sh.Type = value
+			}
+		case "Season":
+			if sh.Season == "" {
+				sh.Season = value
+			}
+		}
+	})
+
+	// Episode 1's air slot. Only the datetime attribute is trustworthy — the
+	// rendered text is localised to the viewer.
+	if t := findFirst(doc, func(n *html.Node) bool {
+		return n.Data == "time" && attr(n, "id") == "release-time-raw"
+	}); t != nil {
+		sh.AirsAt = parseAirsAt(attr(t, "datetime"))
 	}
-	if m := reStatus.FindStringSubmatch(s); m != nil {
-		sh.Status = strings.TrimSpace(html.UnescapeString(m[1]))
+
+	// Countdown: the raw <time> carries the next episode's air time, and the
+	// raw countdown's own block carries the episode. Presence of either means
+	// the site is publishing a countdown, which is what lets a parse failure
+	// be told apart from "nothing scheduled" (see AnchorAction).
+	walk(doc, func(n *html.Node) {
+		if n.Type != html.ElementNode {
+			return
+		}
+		if n.Data == "time" && hasClass(n, "countdown-time-raw") {
+			sh.CountdownPresent = true
+			if sh.NextAirsAt.IsZero() {
+				sh.NextAirsAt = parseAirsAt(attr(n, "data-countdown-target"))
+			}
+		}
+		if hasClass(n, "header-countdown-text-raw") {
+			sh.CountdownPresent = true
+			if sh.LatestEpisode == 0 {
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if c.Type == html.ElementNode && c.Data == "span" {
+						if m := reEp.FindStringSubmatch(text(c)); m != nil {
+							sh.LatestEpisode, _ = strconv.Atoi(m[1])
+						}
+						break
+					}
+				}
+			}
+		}
+	})
+	// Fallbacks when the countdown block carries no per-episode span: the
+	// wrapper's leadingAiredEpisode is the last episode that aired (the next
+	// is that plus one), and older pages carried latestEpisode directly.
+	if sh.LatestEpisode == 0 {
+		if n := findFirst(doc, func(n *html.Node) bool { return attr(n, "leadingAiredEpisode") != "" }); n != nil {
+			if v, err := strconv.Atoi(attr(n, "leadingAiredEpisode")); err == nil && v >= 1 {
+				sh.LatestEpisode = v + 1
+			}
+		}
 	}
-	if m := reType.FindStringSubmatch(s); m != nil {
-		sh.Type = strings.TrimSpace(html.UnescapeString(m[1]))
-	}
-	if m := reRelease.FindStringSubmatch(s); m != nil {
-		sh.AirsAt = parseAirsAt(m[1])
-	}
-	if m := reLatestEp.FindStringSubmatch(s); m != nil {
-		sh.LatestEpisode, _ = strconv.Atoi(m[1])
-	}
-	if m := reRawCountdown.FindStringSubmatch(s); m != nil {
-		sh.NextAirsAt = parseAirsAt(m[1])
-	}
-	if m := reOGImage.FindStringSubmatch(s); m != nil {
-		sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m[1]), "&amp;", "&")
-	}
-	if m := reSeason.FindStringSubmatch(s); m != nil {
-		sh.Season = strings.TrimSpace(html.UnescapeString(m[1]))
-	}
-	if m := reMAL.FindStringSubmatch(s); m != nil {
-		sh.MyAnimeListID, _ = strconv.Atoi(m[1])
-	}
-	// Fallback only: og:image is authoritative; the poster path is the last
-	// resort when it is ever absent.
-	if sh.ImageURL == "" {
-		if m := reShowImg.FindString(s); m != "" {
-			sh.ImageURL = strings.ReplaceAll(html.UnescapeString(m), "&amp;", "&")
+	if sh.LatestEpisode == 0 {
+		if n := findFirst(doc, func(n *html.Node) bool { return attr(n, "latestEpisode") != "" }); n != nil {
+			sh.LatestEpisode, _ = strconv.Atoi(attr(n, "latestEpisode"))
 		}
 	}
 
-	// Walk headings and values in document order. Each value belongs to the
-	// most recent heading. The page renders the block twice (mobile and
-	// desktop variants), so duplicates are filtered as they are added.
-	kind := ""
-	for _, m := range reAltTag.FindAllStringSubmatch(s, -1) {
-		if m[1] != "" {
-			kind = strings.TrimSpace(html.UnescapeString(m[1]))
-			continue
-		}
-		name := strings.TrimSpace(html.UnescapeString(m[2]))
-		if name == "" || kind == "" {
-			continue
-		}
-		dup := false
-		for _, have := range sh.Names[kind] {
-			if have == name {
-				dup = true
-				break
-			}
-		}
-		if !dup {
-			sh.Names[kind] = append(sh.Names[kind], name)
+	// Poster: og:image is canonical. The /anime/jpg/ path is a last resort —
+	// the page is full of those (related shows, similar-anime thumbnails), so
+	// picking one is a guess, not a source.
+	if m := findFirst(doc, func(n *html.Node) bool {
+		return n.Data == "meta" && attr(n, "property") == "og:image"
+	}); m != nil {
+		sh.ImageURL = attr(m, "content")
+	}
+	if sh.ImageURL == "" {
+		if img := findFirst(doc, func(n *html.Node) bool {
+			src := attr(n, "src")
+			return n.Data == "img" &&
+				strings.Contains(src, "img.animeschedule.net") &&
+				strings.Contains(src, "/anime/jpg/")
+		}); img != nil {
+			sh.ImageURL = attr(img, "src")
 		}
 	}
+
+	// MyAnimeList cross-reference.
+	if a := findFirst(doc, func(n *html.Node) bool {
+		return n.Data == "a" && reMAL.MatchString(attr(n, "href"))
+	}); a != nil {
+		if m := reMAL.FindStringSubmatch(attr(a, "href")); m != nil {
+			sh.MyAnimeListID, _ = strconv.Atoi(m[1])
+		}
+	}
+
+	// Alternative names: a heading applies to every value after it until the
+	// next heading, and synonyms carry several. The mobile/desktop duplicate
+	// block is deduplicated as it is read.
+	kind := ""
+	walk(doc, func(n *html.Node) {
+		if n.Type != html.ElementNode {
+			return
+		}
+		if hasClass(n, "alternative-name-heading") {
+			kind = text(n)
+			return
+		}
+		if hasClass(n, "alternative-name") {
+			name := text(n)
+			if name == "" || kind == "" {
+				return
+			}
+			for _, have := range sh.Names[kind] {
+				if have == name {
+					return
+				}
+			}
+			sh.Names[kind] = append(sh.Names[kind], name)
+		}
+	})
 
 	if sh.Title == "" {
 		return nil, fmt.Errorf("no title parsed from %s (markup may have changed)", ShowURL(slug))
 	}
+	sh.Source = SourcePage
 	return sh, nil
 }
 
@@ -368,4 +482,166 @@ func parseAirsAt(s string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// Finished reports whether the record says the season has ended. Only an
+// explicit "Finished" counts; an absent countdown is not evidence, because a
+// show on hiatus or awaiting a slot has no countdown either.
+func (s *Show) Finished() bool {
+	return strings.EqualFold(strings.TrimSpace(s.Status), "Finished")
+}
+
+// AnchorAction is what a refresh should do with a show's stored anchor, given
+// what a fetch produced. The three outcomes exist because "the site did not
+// give me a next episode" and "the site says there is no next episode" look
+// identical in the parsed fields but require opposite handling.
+type AnchorAction int
+
+const (
+	// AnchorKeep leaves the stored anchor alone: the countdown was present but
+	// unreadable (a parse failure), the record came from the countdown-less
+	// API backup, or the season is finished and the last slot is still history.
+	AnchorKeep AnchorAction = iota
+	// AnchorSet publishes the fetched episode and air time.
+	AnchorSet
+	// AnchorClear removes the anchor: the primary page was read cleanly, it
+	// published no countdown at all, and the season is not finished, so the
+	// site is saying nothing is scheduled.
+	AnchorClear
+)
+
+// AnchorAction decides what to do with the stored anchor. It is the single
+// place that distinguishes a parse failure from a genuine absence:
+//
+//   - a readable countdown → AnchorSet;
+//   - a countdown block that is present but unreadable, or a record from the
+//     API backup (which has no countdown), → AnchorKeep, so a site change can
+//     never blank every show's anchor again;
+//   - a clean primary page with no countdown and a non-finished season →
+//     AnchorClear;
+//   - a finished season → AnchorKeep, since the last slot is still history.
+func (s *Show) AnchorAction() AnchorAction {
+	if s.LatestEpisode > 0 && !s.NextAirsAt.IsZero() {
+		return AnchorSet
+	}
+	if s.CountdownPresent || s.Source == SourceAPI {
+		return AnchorKeep
+	}
+	if s.Finished() {
+		return AnchorKeep
+	}
+	return AnchorClear
+}
+
+// apiShow is the part of the /api/v3/anime/<route> record mapped onto Show.
+//
+// The API is the backup source: stable JSON for the fields it carries, but it
+// has no countdown and its name list is often partial, so it never supplies
+// the anchor and is only consulted when the page cannot be fetched.
+type apiShow struct {
+	Title             string            `json:"title"`
+	PreferredTitle    string            `json:"preferredTitle"`
+	Route             string            `json:"route"`
+	Episodes          int               `json:"episodes"`
+	Status            string            `json:"status"`
+	ImageVersionRoute string            `json:"imageVersionRoute"`
+	Premier           string            `json:"premier"`
+	SubPremier        string            `json:"subPremier"`
+	Names             map[string]string `json:"names"`
+	MediaTypes        []struct {
+		Name string `json:"name"`
+	} `json:"mediaTypes"`
+	Season struct {
+		Title string `json:"title"`
+	} `json:"season"`
+}
+
+func (a *apiShow) toShow(slug string) *Show {
+	sh := &Show{
+		Slug:     slug,
+		Source:   SourceAPI,
+		Status:   strings.TrimSpace(a.Status),
+		Episodes: a.Episodes,
+		Names:    map[string][]string{},
+	}
+	sh.Title = strings.TrimSpace(a.PreferredTitle)
+	if sh.Title == "" {
+		sh.Title = strings.TrimSpace(a.Title)
+	}
+	if len(a.MediaTypes) > 0 {
+		sh.Type = strings.TrimSpace(a.MediaTypes[0].Name)
+	}
+	sh.Season = strings.TrimSpace(a.Season.Title)
+	if a.ImageVersionRoute != "" {
+		sh.ImageURL = "https://img.animeschedule.net/production/assets/public/img/" + a.ImageVersionRoute
+	}
+	sh.AirsAt = parseAirsAt(a.Premier)
+	if sh.AirsAt.IsZero() {
+		sh.AirsAt = parseAirsAt(a.SubPremier)
+	}
+	// Map the API's name keys onto the kinds the matcher uses. Keys not in
+	// the map are dropped; the API list is partial, which is why it is only a
+	// backup.
+	kinds := map[string]string{
+		"romaji": "Romaji", "english": "English",
+		"native": "Japanese", "synonyms": "Synonyms",
+	}
+	for k, v := range a.Names {
+		v = strings.TrimSpace(v)
+		if kind, ok := kinds[strings.ToLower(k)]; ok && v != "" {
+			sh.Names[kind] = append(sh.Names[kind], v)
+		}
+	}
+	return sh
+}
+
+// apiShowURL is the JSON backup endpoint for a show.
+func apiShowURL(slug string) string { return URL + "/api/v3/anime/" + slug }
+
+// FetchShowResilient retrieves a show, preferring the page and falling back to
+// the JSON API when the page cannot be fetched.
+//
+// A 404 from the page is authoritative — the site is up and says the slug is
+// not a show — so it is returned without consulting the API. Any other page
+// failure (timeout, 5xx, a parse that yields no title) is the absence of
+// evidence, and the API is tried. The returned Show carries Source so the
+// caller knows whether it may hold a countdown.
+func FetchShowResilient(client *http.Client, slug string) (*Show, error) {
+	info, err := FetchShow(client, slug)
+	if err == nil {
+		return info, nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	api, apiErr := fetchShowAPI(client, slug)
+	if apiErr != nil {
+		// Both sources failed. Return the page error: it is the one the
+		// operator expects to see, and the caller keeps its cached anchor.
+		return nil, err
+	}
+	return api, nil
+}
+
+// fetchShowAPI retrieves the show's JSON record (the backup source).
+func fetchShowAPI(client *http.Client, slug string) (*Show, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := client.Get(apiShowURL(slug))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w: %q", ErrNotFound, slug)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("animeschedule api returned %d for %q", resp.StatusCode, slug)
+	}
+	var raw apiShow
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	return raw.toShow(slug), nil
 }

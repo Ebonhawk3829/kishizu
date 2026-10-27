@@ -41,7 +41,7 @@ func seedFromConfig(st *store.Store, shows []config.Show) error {
 		// A seed entry without a slug gets no anchor: there is no page
 		// to read it from.
 		if sh.Slug != "" {
-			if info, err := schedule.FetchShow(nil, sh.Slug); err == nil &&
+			if info, err := schedule.FetchShowResilient(nil, sh.Slug); err == nil &&
 				info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
 					return err
@@ -70,7 +70,7 @@ func listShowsWithSchedule(st *store.Store) error {
 		next := st.NextUnwatched(sh.ID)
 		line := fmt.Sprintf("  %-52s next %d", truncate(sh.CanonicalName, 50), next)
 		if sh.Slug != "" {
-			if info, err := schedule.FetchShow(nil, sh.Slug); err == nil &&
+			if info, err := schedule.FetchShowResilient(nil, sh.Slug); err == nil &&
 				info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
 				line += fmt.Sprintf("  | ep %d airs %s", info.LatestEpisode, info.NextAirsAt.Format("Mon 2 Jan 15:04"))
 				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {

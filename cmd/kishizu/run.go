@@ -208,8 +208,31 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 	// refreshOne re-fetches one show's page and applies what it publishes:
 	// status, anchor, art. The same writes the daily refresh makes, scoped to
 	// one show so a watch signal can afford it.
+	// applyAnchor writes the anchor a fetch implies, through AnchorAction so a
+	// parse failure or an API-only record keeps the cached anchor instead of
+	// blanking it. Reports whether a new anchor was set.
+	applyAnchor := func(sh *store.Show, info *schedule.Show) bool {
+		switch info.AnchorAction() {
+		case schedule.AnchorSet:
+			if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
+				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+				return false
+			}
+			return true
+		case schedule.AnchorClear:
+			if n, _, err := st.NextEpisode(sh.ID); err == nil && n > 0 {
+				if err := st.ClearNextEpisode(sh.ID); err != nil {
+					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
+				} else {
+					log.Printf("schedule refresh: %s: cleared stale anchor (page has no countdown)", sh.CanonicalName)
+				}
+			}
+		}
+		return false
+	}
+
 	refreshOne := func(sh *store.Show) {
-		info, err := schedule.FetchShow(nil, sh.Slug)
+		info, err := schedule.FetchShowResilient(nil, sh.Slug)
 		if err != nil {
 			log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 			return
@@ -217,17 +240,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 		if err := st.SetAiringStatus(sh.ID, info.Status); err != nil {
 			log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 		}
-		if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
-			if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
-				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
-			}
-		} else if !sh.Finished() {
-			if n, _, err := st.NextEpisode(sh.ID); err == nil && n > 0 {
-				if err := st.ClearNextEpisode(sh.ID); err != nil {
-					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
-				}
-			}
-		}
+		applyAnchor(sh, info)
 		if info.ImageURL != "" && info.ImageURL != sh.ImageURL {
 			_ = st.SetImageURL(sh.ID, info.ImageURL)
 		}
@@ -263,7 +276,7 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			if sh.Slug == "" {
 				continue
 			}
-			info, err := schedule.FetchShow(nil, sh.Slug)
+			info, err := schedule.FetchShowResilient(nil, sh.Slug)
 			if err != nil {
 				// A 404 is evidence the page is gone; a timeout or a 5xx is
 				// the absence of evidence. Even a 404 needs three sightings
@@ -291,44 +304,16 @@ func runLoop(ctx context.Context, st *store.Store, artCache *art.Cache, dl downl
 			if err := st.SetAiringStatus(sh.ID, info.Status); err != nil {
 				log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
 			}
-			if info.LatestEpisode > 0 && !info.NextAirsAt.IsZero() {
-				if err := st.SetNextEpisode(sh.ID, info.LatestEpisode, info.NextAirsAt); err != nil {
-					log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
-					continue
-				}
+			// The decision lives in AnchorAction: a readable countdown sets
+			// the anchor, a countdown that is present but unreadable — or a
+			// record from the API backup, which has no countdown — keeps the
+			// cached one, and only a clean primary page with no countdown
+			// clears it. This is what stops a site markup change from
+			// blanking every show's anchor at once.
+			if applyAnchor(sh, info) {
 				updated++
 			} else {
-				// No countdown on the page. Two cases share this branch and
-				// they need opposite handling of a stored anchor:
-				//
-				// A finished season has no countdown because nothing is next —
-				// the page's Status says so directly, and the anchor is left
-				// alone: it still records the last episode's slot, and stripping
-				// art or history for a finished season would be wrong.
-				//
-				// An upcoming or hiatused show also has no countdown, but here
-				// a stored anchor is a liability: the refresh only writes when
-				// the page publishes one, so a stale row (an "Ep 0" premiere
-				// countdown captured mid-site-update) would be frozen forever
-				// while the site itself no longer mentions it. The page's own
-				// Status distinguishes the cases — only a non-finished show
-				// gets its anchor cleared, because only there is the anchor
-				// claiming something the page no longer says.
 				finished++
-				// The anchor check goes through NextEpisode rather than the
-				// Show struct: ListShows does not load the anchor columns,
-				// and widening GetShow for one caller would cost a query on
-				// every show load.
-				if !sh.Finished() {
-					if n, _, err := st.NextEpisode(sh.ID); err == nil && n > 0 {
-						if err := st.ClearNextEpisode(sh.ID); err != nil {
-							log.Printf("schedule refresh: %s: %v", sh.CanonicalName, err)
-						} else {
-							log.Printf("schedule refresh: %s: cleared stale anchor (page has no countdown)",
-								sh.CanonicalName)
-						}
-					}
-				}
 			}
 			if info.ImageURL != "" && info.ImageURL != sh.ImageURL {
 				_ = st.SetImageURL(sh.ID, info.ImageURL)

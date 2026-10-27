@@ -45,7 +45,7 @@ func backfillSlugs(st *store.Store, path string) error {
 			slugged++
 		}
 
-		info, err := schedule.FetchShow(nil, slug)
+		info, err := schedule.FetchShowResilient(nil, slug)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: fetch %s: %v\n", sh.CanonicalName, slug, err)
 			continue

@@ -1287,7 +1287,9 @@ function card(s) {
   // An announced-but-unscheduled show has a state but no anchor: the site
   // lists it without a premiere date. "TBC" says the season is coming and
   // the date is not; an empty line would look like a rendering failure.
-  let air;
+  // Default to the empty string: a card with no air facts must render blank,
+  // never the literal "undefined" that an unassigned `let air` would produce.
+  let air = '';
   if (s.next_schedule) {
     const sc = s.next_schedule;
     const past = new Date(sc.airs_at) < Date.now();

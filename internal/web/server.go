@@ -1076,7 +1076,7 @@ func (s *Server) createShowFromSlug(slug string) (*store.Show, error) {
 	// Not on this season's list. That is not an error on its own — the cache
 	// only covers the current cour, and a show can be added by URL from any
 	// season — so fall back to the page.
-	info, err := schedule.FetchShow(nil, slug)
+	info, err := schedule.FetchShowResilient(nil, slug)
 	if err != nil {
 		// A 404 proves the slug is a show; anything else is the absence of
 		// evidence. Only the first is worth reporting as a finding.
@@ -1144,7 +1144,7 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 	if sh.Slug == "" {
 		return
 	}
-	info, err := schedule.FetchShow(nil, sh.Slug)
+	info, err := schedule.FetchShowResilient(nil, sh.Slug)
 	if err != nil {
 		log.Printf("schedule: fetch %s: %v", sh.Slug, err)
 		return

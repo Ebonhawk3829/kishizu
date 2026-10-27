@@ -1,6 +1,10 @@
 package schedule
 
 import (
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -293,5 +297,187 @@ func TestSlugFromURL(t *testing.T) {
 		if got := SlugFromURL(c.in); got != c.want {
 			t.Errorf("SlugFromURL(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// countdownPage mirrors the current animeschedule.net countdown markup: the
+// episode is rendered inside the raw countdown's own block, and the wrapper
+// carries leadingAiredEpisode rather than the old latestEpisode blob attribute.
+const countdownPage = `<html><head>
+<title>OVERGEARED | AnimeSchedule</title>
+</head><body>
+<div id="anime-wrapper" itemid="https://animeschedule.net/anime/overgeared" showID="JXAJ" route="overgeared" leadingAiredEpisode="5" status="Ongoing">
+    <div class="countdown-container">
+        <div class="countdown-text-container header-countdown-text-raw" title="raw">
+            <span>Ep 6</span>
+            <span class="countdown-text"> Raw: </span>
+        </div>
+        <time class="countdown-time countdown-time-raw" datetime="5d 8h 39m" data-countdown-target="2026-11-01T14:30:00Z" data-episode-length-min="23">5d 8h 39m</time>
+    </div>
+</div>
+</body></html>`
+
+func TestParseShowCountdownEpisode(t *testing.T) {
+	sh, err := ParseShow(strings.NewReader(countdownPage), "overgeared")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if sh.LatestEpisode != 6 {
+		t.Errorf("LatestEpisode = %d, want 6", sh.LatestEpisode)
+	}
+	want, _ := time.Parse(time.RFC3339, "2026-11-01T14:30:00Z")
+	if !sh.NextAirsAt.Equal(want) {
+		t.Errorf("NextAirsAt = %v, want %v", sh.NextAirsAt, want)
+	}
+}
+
+// A show that has not premiered carries leadingAiredEpisode="0" and no
+// countdown: it must not invent an episode.
+func TestParseShowUnpremieredHasNoEpisode(t *testing.T) {
+	page := `<html><head><title>Chainsaw Man: Shikaku-hen | AnimeSchedule</title></head>
+<body><div id="anime-wrapper" leadingAiredEpisode="0" status="Upcoming"></div></body></html>`
+	sh, err := ParseShow(strings.NewReader(page), "chainsaw-man-shikaku-hen")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if sh.LatestEpisode != 0 {
+		t.Errorf("LatestEpisode = %d, want 0", sh.LatestEpisode)
+	}
+}
+
+// leadingAiredEpisode is the fallback when the raw countdown block carries no
+// per-episode span: the next episode is the last aired plus one.
+func TestParseShowLeadingAiredFallback(t *testing.T) {
+	page := `<html><head><title>Foo | AnimeSchedule</title></head>
+<body><div id="anime-wrapper" leadingAiredEpisode="11" status="Ongoing"></div></body></html>`
+	sh, err := ParseShow(strings.NewReader(page), "foo")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if sh.LatestEpisode != 12 {
+		t.Errorf("LatestEpisode = %d, want 12", sh.LatestEpisode)
+	}
+}
+
+// The legacy latestEpisode blob attribute still parses.
+func TestParseShowLegacyLatestEpisode(t *testing.T) {
+	page := `<html><head><title>Foo | AnimeSchedule</title></head>
+<body><div id="anime-wrapper" latestEpisode="18" latestEpisodeBaseline="17"></div></body></html>`
+	sh, err := ParseShow(strings.NewReader(page), "foo")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if sh.LatestEpisode != 18 {
+		t.Errorf("LatestEpisode = %d, want 18", sh.LatestEpisode)
+	}
+}
+
+func TestParseShowCountdownPresence(t *testing.T) {
+	sh, err := ParseShow(strings.NewReader(countdownPage), "overgeared")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if !sh.CountdownPresent {
+		t.Error("countdown block present but CountdownPresent=false")
+	}
+	if sh.Source != SourcePage {
+		t.Errorf("Source = %q, want %q", sh.Source, SourcePage)
+	}
+
+	// A page with no countdown at all is not "present": the distinction is
+	// what lets the refresh clear a genuinely unscheduled show while keeping
+	// the cache when a countdown exists but could not be read.
+	plain := `<html><head><title>Foo | AnimeSchedule</title></head><body></body></html>`
+	sh2, err := ParseShow(strings.NewReader(plain), "foo")
+	if err != nil {
+		t.Fatalf("ParseShow: %v", err)
+	}
+	if sh2.CountdownPresent {
+		t.Error("no countdown block but CountdownPresent=true")
+	}
+}
+
+// TestAnchorAction pins the decision that keeps a site change from blanking
+// every anchor at once.
+func TestAnchorAction(t *testing.T) {
+	at := time.Date(2026, 11, 1, 14, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		sh   Show
+		want AnchorAction
+	}{
+		{"readable countdown", Show{Source: SourcePage, LatestEpisode: 6, NextAirsAt: at, CountdownPresent: true}, AnchorSet},
+		{"present but unreadable", Show{Source: SourcePage, CountdownPresent: true, Status: "Ongoing"}, AnchorKeep},
+		{"api backup has no countdown", Show{Source: SourceAPI}, AnchorKeep},
+		{"finished with no countdown", Show{Source: SourcePage, Status: "Finished"}, AnchorKeep},
+		{"clean page, no countdown, ongoing", Show{Source: SourcePage, Status: "Ongoing"}, AnchorClear},
+	}
+	for _, c := range cases {
+		if got := c.sh.AnchorAction(); got != c.want {
+			t.Errorf("%s: AnchorAction = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestFetchShowResilientFallsBackToAPI: a page failure falls through to the
+// JSON API, and the result is marked as the API source so it can never clear
+// the anchor.
+func TestFetchShowResilientFallsBackToAPI(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/anime/overgeared":
+			http.Error(w, "boom", http.StatusInternalServerError)
+		case "/api/v3/anime/overgeared":
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{
+				"title":"OVERGEARED","preferredTitle":"OVERGEARED","route":"overgeared",
+				"episodes":12,"status":"Ongoing",
+				"imageVersionRoute":"anime/jpg/default/overgeared-abc.jpg",
+				"mediaTypes":[{"name":"TV"}],"season":{"title":"Fall 2026"},
+				"names":{"native":"テムパル"}
+			}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+	defer PinShowURL(ts.URL)()
+
+	sh, err := FetchShowResilient(nil, "overgeared")
+	if err != nil {
+		t.Fatalf("FetchShowResilient: %v", err)
+	}
+	if sh.Source != SourceAPI {
+		t.Errorf("Source = %q, want %q", sh.Source, SourceAPI)
+	}
+	if sh.Title != "OVERGEARED" || sh.Episodes != 12 || sh.Type != "TV" || sh.Season != "Fall 2026" {
+		t.Errorf("api mapping incomplete: %+v", sh)
+	}
+	if sh.AnchorAction() != AnchorKeep {
+		t.Error("an API record must keep the cached anchor, never clear it")
+	}
+}
+
+// TestFetchShowResilientNotFoundNotRetried: a 404 from the page is evidence,
+// so the API must not be consulted.
+func TestFetchShowResilientNotFoundNotRetried(t *testing.T) {
+	apiHit := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			apiHit = true
+			http.NotFound(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+	defer PinShowURL(ts.URL)()
+
+	_, err := FetchShowResilient(nil, "nope")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if apiHit {
+		t.Error("the API must not be consulted for a 404")
 	}
 }
