@@ -165,6 +165,9 @@ func (s *Server) Handler() http.Handler {
 	// Adding a show from the UI. Seeding from kishizu.yaml still works and
 	// updates aliases for existing shows, so the two paths coexist.
 	mux.HandleFunc("POST /api/shows", s.handleAddShow)
+	// Resolving a show's page without adding it, so the UI can offer the
+	// mid-season backfill choice before anything is created. Read-only.
+	mux.HandleFunc("POST /api/shows/preview", s.handlePreviewShow)
 	// Removing a show, for when a season ends or was added by mistake.
 	mux.HandleFunc("DELETE /api/shows", s.handleDeleteShow)
 	mux.HandleFunc("POST /api/train/start", s.handleTrainStart)
@@ -976,11 +979,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleAddShow creates a show from the UI.
 //
-// The only accepted input is an animeschedule.net URL (or a slug passed by
-// the browse modal, which is the same identity). The slug is what carries
-// the schedule identity: matching, the air-date anchor and the season
-// length all come from the show's page. The browse modal is the easy path;
-// pasting the URL is the manual one.
+// The only accepted input is an animeschedule.net URL. The browse modal builds
+// the show's page URL from its slug and sends the same shape, so both paths
+// are one machinery: the slug is what carries the schedule identity —
+// matching, the air-date anchor and the season length all come from the show's
+// page. Pasting the URL is the manual path; Browse is the easy one.
 //
 // The show's NAME comes from the fetched page — the URL itself is never
 // stored as a name. The canonical name is stored as an alias of itself, so
@@ -990,10 +993,17 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // is the alias source, and it fills in every alternative name on add. The
 // field is kept so an old cached page or script that still sends it gets
 // the same response instead of a decode error.
+//
+// Start carries the mid-season backfill choice. Empty (or "first") is the
+// default and backfills from episode 1; "next" starts at the episode that
+// next airs, ignoring the already-released backlog. The choice only bites for
+// a show with episodes already out — for anything else both values are the
+// same. See createShowFromSlug and store.SetStartEpisode.
 func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name    string   `json:"name"`
 		Aliases []string `json:"aliases"` // parse-and-ignore; see doc comment
+		Start   string   `json:"start"`   // "" | "first" | "next"; see doc comment
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -1002,6 +1012,11 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("name is required"))
+		return
+	}
+	startNext, err := parseStart(req.Start)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 
@@ -1014,7 +1029,7 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 			"add shows by pasting an animeschedule.net URL, or from the browse list — a plain name has no schedule identity, so there is no anchor to hunt from"))
 		return
 	}
-	sh, err := s.createShowFromSlug(slug)
+	sh, err := s.createShowFromSlug(slug, startNext)
 	if err != nil {
 		// A 404 from the schedule is the user's typo: the site is up and says
 		// this slug is a show. That is a bad request, and the message should
@@ -1029,10 +1044,71 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that show's page: %v", err))
 		return
 	}
-	log.Printf("add-show: %s (%d aliases, slug %q)",
-		sh.CanonicalName, len(sh.Aliases), sh.Slug)
+	log.Printf("add-show: %s (%d aliases, slug %q, start ep %d)",
+		sh.CanonicalName, len(sh.Aliases), sh.Slug, sh.StartEp)
 	writeJSON(w, map[string]any{
-		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug,
+		"id": sh.ID, "name": sh.CanonicalName, "slug": sh.Slug, "start_ep": sh.StartEp,
+	})
+}
+
+// parseStart reads the backfill choice. Only two values are meaningful; a
+// typo is a bad request rather than a silent default, so a client that meant
+// "skip the backlog" never gets the whole season downloaded instead.
+func parseStart(v string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "first":
+		return false, nil
+	case "next":
+		return true, nil
+	default:
+		return false, fmt.Errorf(`start must be "first" or "next"`)
+	}
+}
+
+// handlePreviewShow resolves a show's page and reports what it says, without
+// creating anything. The UI uses it to decide whether adding a mid-season show
+// warrants the backfill choice: a show with episodes already out
+// (next_episode > 1) is offered "start from 1" or "start from the next one".
+//
+// Read-only and best-effort-by-contract: the UI treats a failure here as "no
+// choice to offer" and falls back to the plain add, which surfaces the real
+// error in the same place.
+func (s *Server) handlePreviewShow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("name is required"))
+		return
+	}
+	slug := schedule.SlugFromURL(req.Name)
+	if slug == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf(
+			"add shows by pasting an animeschedule.net URL, or from the browse list — a plain name has no schedule identity, so there is no anchor to hunt from"))
+		return
+	}
+	info, err := schedule.FetchShowResilient(nil, slug)
+	if err != nil {
+		if errors.Is(err, schedule.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf(
+				"no show at %q — check the spelling, or find it in Browse this season", req.Name))
+			return
+		}
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("could not read that show's page: %v", err))
+		return
+	}
+	writeJSON(w, map[string]any{
+		"name":         info.Title,
+		"slug":         slug,
+		"image_url":    info.ImageURL,
+		"next_episode": info.LatestEpisode,
+		"episodes":     info.Episodes,
+		"status":       info.Status,
 	})
 }
 
@@ -1046,31 +1122,40 @@ func (s *Server) handleAddShow(w http.ResponseWriter, r *http.Request) {
 // show's own page. So the cache-hit path also fetches the page in the
 // background: a show added from browse gets a real anchor immediately
 // instead of waiting up to a day for the daily refresh.
-func (s *Server) createShowFromSlug(slug string) (*store.Show, error) {
+//
+// startNext is the mid-season backfill choice. When set, the show's floor is
+// pinned to the page's next episode (see store.SetStartEpisode), so the
+// already-aired backlog is never hunted. The floor needs the page's countdown,
+// which the cache does not carry, so a "next" add always takes the page path
+// even for a show on the current season's list.
+func (s *Server) createShowFromSlug(slug string, startNext bool) (*store.Show, error) {
 	// The cache is the fast path: the browse list already holds the title, the
 	// English name and the art, so adding from browse costs no network I/O and
-	// works when animeschedule is unreachable.
-	if e := s.lookupTimetable(slug); e != nil {
-		name := e.Title
-		if name == "" {
-			name = slug
+	// works when animeschedule is unreachable. It is skipped for a "next" add,
+	// which needs the countdown the cache does not carry.
+	if !startNext {
+		if e := s.lookupTimetable(slug); e != nil {
+			name := e.Title
+			if name == "" {
+				name = slug
+			}
+			sh, err := s.st.CreateShow(name, nil)
+			if err != nil {
+				return nil, err
+			}
+			if err := s.st.SetSlug(sh.ID, slug); err != nil {
+				log.Printf("add-show: set slug %s: %v", slug, err)
+			} else {
+				sh.Slug = slug
+			}
+			s.applyTimetableEntry(sh, e)
+			// The tile's air time is not the anchor, and the daily refresh is up
+			// to a day away. Fetch the page now so the show's hunt window starts
+			// from the real countdown. Best-effort: the show exists either way,
+			// and the refresh will fill it in tomorrow.
+			go s.enrichFromSchedule(sh)
+			return sh, nil
 		}
-		sh, err := s.st.CreateShow(name, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.st.SetSlug(sh.ID, slug); err != nil {
-			log.Printf("add-show: set slug %s: %v", slug, err)
-		} else {
-			sh.Slug = slug
-		}
-		s.applyTimetableEntry(sh, e)
-		// The tile's air time is not the anchor, and the daily refresh is up
-		// to a day away. Fetch the page now so the show's hunt window starts
-		// from the real countdown. Best-effort: the show exists either way,
-		// and the refresh will fill it in tomorrow.
-		go s.enrichFromSchedule(sh)
-		return sh, nil
 	}
 
 	// Not on this season's list. That is not an error on its own — the cache
@@ -1097,6 +1182,15 @@ func (s *Server) createShowFromSlug(slug string) (*store.Show, error) {
 		log.Printf("add-show: set slug %s: %v", slug, err)
 	} else {
 		sh.Slug = slug
+	}
+	// Pin the floor before enrichment writes the anchor, so the anchor
+	// materialises at the floor rather than at episode 1.
+	if startNext && info.LatestEpisode > 1 {
+		if err := s.st.SetStartEpisode(sh.ID, info.LatestEpisode); err != nil {
+			log.Printf("add-show: set start ep %s: %v", slug, err)
+		} else {
+			sh.StartEp = info.LatestEpisode
+		}
 	}
 	s.enrichFromSchedule(sh)
 	return sh, nil

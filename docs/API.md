@@ -66,9 +66,10 @@ otherwise `"upcoming"`. It is absent for shows with no schedule page.
 
 ### `POST /api/shows`
 
-Add a show. `name` accepts either a plain name or an animeschedule.net URL (or
-a bare slug). A URL is better: the slug is an exact identity, and the page
-carries the cover art and every alternative name.
+Add a show. `name` is an animeschedule.net URL. The browse modal builds the
+show's page URL from its slug and sends the same shape, so both paths are one.
+The URL carries the slug, an exact identity, and the page carries the cover art
+and every alternative name.
 
 ```json
 {"name":"https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4"}
@@ -78,6 +79,40 @@ An `aliases` array is accepted for compatibility with older clients but
 ignored: the schedule page is the alias source, and it fills in every
 alternative name on add. To force an alias the schedule does not know, list
 the show under `shows:` in the config file and run `-seed`.
+
+`start` is the mid-season backfill choice:
+
+| Value | Effect |
+|---|---|
+| `"first"` (default) | Backfill from episode 1 — the whole season is in play. |
+| `"next"` | Start at the episode that next airs, ignoring the already-released backlog. |
+
+```json
+{"name":"https://animeschedule.net/anime/overgeared","start":"next"}
+```
+
+The choice only bites for a show with episodes already out; for anything else
+both values are the same. `"next"` records a floor on the effective anchor, so
+the skipped episodes are never hunted and never rendered as consumed. The
+response echoes the floor as `start_ep` (`0` when unset).
+
+### `POST /api/shows/preview`
+
+Resolve a show's page without adding it, so a client can offer the backfill
+choice before anything is created. Same `name` input as add.
+
+```json
+{"name":"https://animeschedule.net/anime/overgeared"}
+```
+
+```json
+{"name":"Overgeared","slug":"overgeared","image_url":"...",
+ "next_episode":6,"episodes":12,"status":"Ongoing"}
+```
+
+`next_episode` is the episode that next airs; `next_episode > 1` means episodes
+have already been released. A failure here is not authoritative — it is the
+same lookup add performs.
 
 ### `DELETE /api/shows`
 

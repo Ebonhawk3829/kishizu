@@ -537,6 +537,24 @@
   </div>
 </div>
 
+<!-- The mid-season add choice, shown only when the show being added already
+     has episodes out. It sits above the browse modal because adding from the
+     browse list opens it from there. -->
+<div class="modal-backdrop hidden" id="start-modal" style="z-index:60">
+  <div class="modal">
+    <div class="modal-head">
+      <span>Start from where?</span>
+      <button class="btn ghost" id="btn-start-cancel">Cancel</button>
+    </div>
+    <p class="hint" id="start-hint"></p>
+    <div class="fields" style="grid-template-columns:1fr 1fr">
+      <div><button class="btn" id="btn-start-first"></button></div>
+      <div><button class="btn ghost" id="btn-start-next"></button></div>
+    </div>
+    <div class="field-error" id="start-error"></div>
+  </div>
+</div>
+
 <!-- Training is scoped to a show and opened from that show's row. 
      It renders as a modal overlay: grading means comparing against the show
      list, which an inline panel would push out of view. -->
@@ -786,12 +804,59 @@ async function addShow() {
     return;
   }
   fieldError('add-error', '');
+  await beginAdd(name, 'add-error');
+}
+
+// beginAdd resolves the show first, so a mid-season add can offer the backfill
+// choice before anything is created. A preview failure is not fatal: it falls
+// through to the plain add, which reports the real problem (site down, typo)
+// in the same field the user is looking at.
+//
+// pendingAdd holds the request across the choice dialog: the show's identity
+// and which error field to write back to, since the URL field and the browse
+// modal report in different places.
+let pendingAdd = null;
+
+async function beginAdd(name, errId) {
+  let p = null;
+  try { p = await api('/api/shows/preview', { name }); } catch (e) { p = null; }
+  if (p && p.next_episode > 1) { openStartChoice(name, p, errId); return; }
+  await createShow({ name }, errId);
+}
+
+function openStartChoice(name, p, errId) {
+  pendingAdd = { name, errId };
+  const aired = p.next_episode - 1;
+  const eps = aired === 1 ? 'episode' : 'episodes';
+  el('start-hint').textContent =
+    `${p.name} already has ${aired} ${eps} out, and episode ${p.next_episode} is next. ` +
+    `Download the ${aired} you missed, or start fresh at episode ${p.next_episode}?`;
+  el('btn-start-first').textContent = 'Download from episode 1';
+  el('btn-start-next').textContent = `Start at episode ${p.next_episode}`;
+  fieldError('start-error', '');
+  show('start-modal', true);
+}
+
+function closeStartChoice() {
+  show('start-modal', false);
+  pendingAdd = null;
+}
+
+async function chooseStart(start) {
+  const pa = pendingAdd;
+  show('start-modal', false);
+  pendingAdd = null;
+  if (pa) await createShow({ name: pa.name, start }, pa.errId);
+}
+
+async function createShow(body, errId) {
   try {
-    const r = await api('/api/shows', { name });
+    const r = await api('/api/shows', body);
     el('add-name').value = '';
     toast(`Added ${r.name}.`);
     loadShows();
-  } catch (e) { fieldError('add-error', e.message); }
+    if (errId === 'browse-error') browse(false); // re-mark the row as tracked
+  } catch (e) { fieldError(errId, e.message); }
 }
 
 // ── browsing the season ───────────────────────────────────────────────────
@@ -911,15 +976,13 @@ function renderBrowse(entries) {
     : '<p class="hint">No shows found.</p>';
 }
 
-// Add a show straight from the browse list, by slug. The slug is an exact
-// identity, so this is the same path as pasting the URL — no title matching.
+// Add a show straight from the browse list. The entry carries only a slug, so
+// the show's page URL is built from it and sent through the same machinery as
+// pasting the URL by hand — one input shape, one code path. The preview also
+// lets a mid-season pick offer the backfill choice.
 async function addFromBrowse(slug) {
-  try {
-    const r = await api('/api/shows', { name: slug });
-    toast(`Added ${r.name}.`);
-    loadShows();
-    browse(false); // re-mark the row as tracked
-  } catch (e) { fieldError('browse-error', e.message); }
+  fieldError('browse-error', '');
+  await beginAdd(`https://animeschedule.net/anime/${slug}`, 'browse-error');
 }
 
 // ── settings ──────────────────────────────────────────────────────────────
@@ -1833,6 +1896,9 @@ function wireActions() {
   });
 
   el('btn-add').onclick = addShow;
+  el('btn-start-first').onclick = () => chooseStart('first');
+  el('btn-start-next').onclick = () => chooseStart('next');
+  el('btn-start-cancel').onclick = closeStartChoice;
   el('btn-settings-open').onclick = openSettings;
   el('btn-settings-close').onclick = closeSettings;
   el('btn-settings-save').onclick = saveSettings;

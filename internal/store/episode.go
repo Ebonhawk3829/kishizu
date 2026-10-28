@@ -310,16 +310,26 @@ func (s *Store) Unlatch(showID int64, number int) error {
 // consumed. Max-based, not sequential: a gap in watched history is almost
 // always a failed watch signal, not genuinely out-of-order viewing, and
 // hunting the gap grabs an episode the user has already seen.
+//
+// The show's start-episode floor is applied here (see SetStartEpisode): a show
+// added mid-season with "start at the next episode" has consumed nothing, but
+// everything before its floor is treated as behind it, so the gate never
+// reaches back into the backlog the user chose to skip. Every consumer of
+// progress — the cycle, training's hint, the exposure stamp, the card's "next"
+// — then agrees without each re-deriving the floor.
 func (s *Store) NextUnwatched(showID int64) int {
 	eps, err := s.EpisodesForShow(showID)
 	if err != nil {
-		return 1
+		return s.startEpisode(showID)
 	}
 	next := 1
 	for _, ep := range eps {
 		if ep.Number >= next && (ep.State == episode.Watched || ep.State == episode.Deleted) {
 			next = ep.Number + 1
 		}
+	}
+	if floor := s.startEpisode(showID); floor > next {
+		next = floor
 	}
 	return next
 }

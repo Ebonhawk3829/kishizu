@@ -34,6 +34,14 @@ CREATE TABLE IF NOT EXISTS show (
     -- timetable window, or titled differently in romaji vs English.
     -- NULL when the show has no schedule page (films, unlisted shows).
     slug            TEXT,
+    -- The first episode kishizu will consider, for a show added mid-season.
+    -- The user is offered a choice: start from episode 1 and download the
+    -- backlog, or start from the episode that next airs and ignore what has
+    -- already been released. NULL (the default) reads as 1 — the whole season.
+    -- It is a floor on the effective anchor, not a watched signal: episodes
+    -- below it are never hunted and never shown, and it does not count as
+    -- progress the user has consumed.
+    start_ep        INTEGER,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 -- Two shows must never claim the same schedule page. Partial: films and

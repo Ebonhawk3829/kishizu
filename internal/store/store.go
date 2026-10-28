@@ -170,10 +170,11 @@ func (s *Store) migrateSteps() error {
 					image_url       TEXT,
 					slug            TEXT,
 					airing_status   TEXT,
+					start_ep        INTEGER,
 					created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 				)`,
 				`INSERT INTO show_new
-					SELECT id, canonical_name, source, next_ep, next_airs_at, schedule_fetched_at, image_url, slug, airing_status, created_at FROM show`,
+					SELECT id, canonical_name, source, next_ep, next_airs_at, schedule_fetched_at, image_url, slug, airing_status, start_ep, created_at FROM show`,
 				`DROP TABLE show`,
 				`ALTER TABLE show_new RENAME TO show`,
 				`CREATE UNIQUE INDEX IF NOT EXISTS idx_show_slug ON show(slug) WHERE slug IS NOT NULL`,
@@ -249,6 +250,7 @@ func (s *Store) addColumns() error {
 		{"show", "image_url", "TEXT"},
 		{"show", "slug", "TEXT"},
 		{"show", "airing_status", "TEXT"},
+		{"show", "start_ep", "INTEGER"},
 		{"alias", "source", "TEXT NOT NULL DEFAULT 'manual'"},
 		{"seen", "origin", "TEXT NOT NULL DEFAULT 'grab'"},
 		{"episode", "exposed_at", "TEXT"},
@@ -294,6 +296,10 @@ type Show struct {
 	AiringStatus string
 	CreatedAt    time.Time
 	Aliases      []string
+	// StartEp is the first episode kishizu will consider, set when a mid-season
+	// show is added with "start at the next episode" instead of backfilling.
+	// 0 means 1 — the whole season. See SetStartEpisode.
+	StartEp int
 }
 
 // CreateShow inserts a show with its aliases. The canonical name is always
@@ -335,12 +341,13 @@ func (s *Store) CreateShow(canonical string, aliases []string) (*Show, error) {
 // GetShow loads a show and its aliases.
 func (s *Store) GetShow(id int64) (*Show, error) {
 	row := s.db.QueryRow(`SELECT id, canonical_name, source,
-		image_url, slug, airing_status, created_at FROM show WHERE id = ?`, id)
+		image_url, slug, airing_status, created_at, start_ep FROM show WHERE id = ?`, id)
 
 	var sh Show
 	var source, created, image, slug, airing sql.NullString
+	var startEp sql.NullInt64
 	if err := row.Scan(&sh.ID, &sh.CanonicalName, &source,
-		&image, &slug, &airing, &created); err != nil {
+		&image, &slug, &airing, &created, &startEp); err != nil {
 		return nil, err
 	}
 	sh.Slug = slug.String
@@ -348,6 +355,9 @@ func (s *Store) GetShow(id int64) (*Show, error) {
 	sh.Source = source.String
 	sh.ImageURL = image.String
 	sh.CreatedAt = derefTime(parseTime(created))
+	if startEp.Valid {
+		sh.StartEp = int(startEp.Int64)
+	}
 
 	rows, err := s.db.Query(`SELECT name FROM alias WHERE show_id = ? ORDER BY id`, id)
 	if err != nil {
@@ -598,6 +608,38 @@ func (s *Store) ClearNextEpisode(showID int64) error {
 	return err
 }
 
+// SetStartEpisode records the first episode kishizu will consider for a show.
+//
+// This is the mid-season add choice: a show added after several episodes have
+// aired can be backfilled from episode 1 (the default) or started at the
+// episode that next airs, ignoring the backlog. "Ignoring" is a floor on the
+// effective anchor (see NextEpisode and NextUnwatched), not a watched signal —
+// the skipped episodes are never hunted and never rendered as consumed.
+//
+// n <= 1 clears the floor: the whole season is in play, which is the default
+// and the honest reading of a show added before anything aired.
+func (s *Store) SetStartEpisode(showID int64, n int) error {
+	var v any
+	if n > 1 {
+		v = n
+	}
+	_, err := s.db.Exec(`UPDATE show SET start_ep = ? WHERE id = ?`, v, showID)
+	return err
+}
+
+// startEpisode reads a show's start-episode floor. 1 when unset or on error, so
+// a missing floor never hides the season behind a phantom skip.
+func (s *Store) startEpisode(showID int64) int {
+	var n sql.NullInt64
+	if err := s.db.QueryRow(`SELECT start_ep FROM show WHERE id = ?`, showID).Scan(&n); err != nil {
+		return 1
+	}
+	if !n.Valid || n.Int64 < 1 {
+		return 1
+	}
+	return int(n.Int64)
+}
+
 // nullIfEmpty maps an empty string to SQL NULL, so "unknown" stays
 // distinguishable from "known to be empty".
 func nullIfEmpty(s string) any {
@@ -671,6 +713,10 @@ func (s *Store) SiteNextEpisode(showID int64) (int, *time.Time, error) {
 // Progress is max-based (see NextUnwatched): a gap in watched history is a
 // failed watch signal, not out-of-order viewing, so the gate never skips ahead
 // of a hole.
+//
+// Progress also carries the start-episode floor (see SetStartEpisode): a show
+// added mid-season with "start at the next episode" floors progress at that
+// episode, so the earlier-but-aired backlog is never treated as owed.
 func (s *Store) NextEpisode(showID int64) (int, *time.Time, error) {
 	siteN, siteAt, err := s.SiteNextEpisode(showID)
 	if err != nil {

@@ -240,7 +240,8 @@ A background job refreshes it weekly; a fresh container fetches once at
 startup so the panel is never empty. **Refresh** in the panel forces an
 immediate update.
 
-**Paste a URL.** An animeschedule.net URL (or a bare slug) does the same thing:
+**Paste a URL.** An animeschedule.net URL does the same thing as picking from
+Browse — the list builds the same URL from the show's slug:
 
 ```
 https://animeschedule.net/anime/re-zero-kara-hajimeru-isekai-seikatsu-4
@@ -253,6 +254,13 @@ attach one with `-backfill-slugs`.
 
 Only romanised names are imported as aliases. Japanese names cannot appear in
 release titles, and short abbreviations risk false matches.
+
+**Catching up a show already airing.** When a show you add already has episodes
+out, kishizu asks where to start: **Download from episode 1** to backfill the
+ones you missed, or **Start at episode N** to ignore the backlog and only track
+what airs from now on. The choice is a floor on the show, not a watch signal —
+skipped episodes are never hunted and never counted as watched, and the card's
+"airs" line still shows the season's real schedule.
 
 ## How matching works
 
