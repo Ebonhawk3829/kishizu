@@ -12,6 +12,34 @@ import (
 	"unicode"
 )
 
+// AudioKind is the language track a title advertises.
+//
+// It is deliberately separate from Audio, which is the audio CODEC. The two
+// answer different questions: Audio says how the sound is encoded, AudioKind
+// says whose voices are on it. A release can be x264 with Japanese audio, or
+// x264 with an English dub, and the policy cares about the latter.
+type AudioKind string
+
+const (
+	// AudioUnknown means the title does not say. Most releases are unknown:
+	// they carry no audio marker at all. Unknown is not "sub" or "original" —
+	// it is the absence of a claim, and the policy decides what to do with it.
+	AudioUnknown AudioKind = ""
+	// AudioOriginal is the show's original audio with subtitles: Japanese for
+	// an anime, Korean for a manhwa adaptation, and so on.
+	AudioOriginal AudioKind = "original"
+	// AudioDual carries both the original track and a dub. It includes the
+	// original, so a subs-only viewer can watch it.
+	AudioDual AudioKind = "dual"
+	// AudioEnglishDub is an English dub only. This is the one a subs-only
+	// viewer rejects: it replaces the original vocal performance.
+	AudioEnglishDub AudioKind = "english-dub"
+	// AudioOtherDub is a dub in a language other than English, such as a
+	// Japanese dub of a Korean show. The user's rule only rejects English
+	// dubs, so this stays acceptable.
+	AudioOtherDub AudioKind = "other-dub"
+)
+
 // Release is a parsed release title.
 type Release struct {
 	Title string // original title, unmodified
@@ -31,7 +59,10 @@ type Release struct {
 	// Audio is the audio codec: AAC, DDP, EAC3, FLAC, Opus. Same reasoning as
 	// Service: it is often the only difference between two otherwise identical
 	// releases, and it affects whether the file plays on the user's setup.
-	Audio        string
+	Audio string
+	// AudioKind is the language track: original, dual, english-dub or
+	// other-dub. Empty when the title does not say.
+	AudioKind    AudioKind
 	IsBatch      bool // multiple episode numbers, or an explicit range
 	IsUncensored bool
 }
@@ -67,7 +98,28 @@ var (
 	// with ordinary text if matched loosely.
 	reService = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(netflix|nf|amzn|amazon|crunchyroll|cr|dsnp|disney|hulu|bili|bilibili|iqiyi|adn|hidive|funimation|wakanim|animeonegai|max|hbo|paramount|peacock)(?:[^a-z0-9]|$)`)
 	// Audio codec. DDP2.0 / DDP5.1 / AAC2.0 all normalise to their base codec.
-	reAudio      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(e-?ac-?3|eac3|ddp|dd\+?|dolby|aac|flac|opus|mp3|ac3|truehd|dtshd|dts)(?:[ ._-]?\d(?:\.\d)?)?(?:[^a-z0-9]|$)`)
+	reAudio = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(e-?ac-?3|eac3|ddp|dd\+?|dolby|aac|flac|opus|mp3|ac3|truehd|dtshd|dts)(?:[ ._-]?\d(?:\.\d)?)?(?:[^a-z0-9]|$)`)
+	// Language track markers. Checked in this order: dual first because it
+	// includes the original, then a non-English dub, then explicit original
+	// audio, then the generic "dub" that Nyaa's English-translated category
+	// uses for English dubs.
+	//
+	// The dual pattern accepts bare "DUAL" (common in titles like
+	// "1080p DUAL AAC2.0") as well as "Dual Audio" and "Multi-Audio". It must
+	// NOT match "Multi-Subs": that says there are many subtitle languages, not
+	// that the audio has both tracks.
+	reDualAudio = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:dual(?:[ ._-]*audio)?|multi[ ._-]*audio)(?:[^a-z0-9]|$)`)
+	// A non-English dub. "Japanese Dub" on a Korean show is still a dub, but
+	// the user only rejects English dubs, so this is kept separate.
+	reOtherDub = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:japanese|jpn|jp|korean|kor|kr|chinese|chi|zh|mandarin|cantonese|taiwanese|thai|vietnamese|indonesian|spanish|french|german|italian|portuguese|russian|arabic|hindi)[ ._-]*(?:dub|dubbed)(?:[^a-z0-9]|$)`)
+	// Explicit original audio: "Japanese Audio", "Korean Audio", "Original
+	// Audio". Language names alone are too ambiguous (they can mean subtitle
+	// languages), so "audio" is required.
+	reOriginalAudio = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:original|japanese|jpn|jp|korean|kor|kr|chinese|chi|zh|mandarin|cantonese|taiwanese)[ ._-]*audio(?:[^a-z0-9]|$)`)
+	// English dub, either named explicitly or written as a bare "DUB". A bare
+	// dub on Nyaa's English-translated category is an English dub by
+	// convention; non-English dubs are caught above first.
+	reEnglishDub = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:english|eng|en)[ ._-]*(?:dub|dubbed|audio)(?:[^a-z0-9]|$)|(?:^|[^a-z0-9])(?:dub|dubbed)(?:[^a-z0-9]|$)`)
 	reUncensored = regexp.MustCompile(`(?i)uncensor`)
 	reBatchRange = regexp.MustCompile(`(?i)\(\s*\d{1,4}\s*-\s*\d{1,4}\s*\)|\b\d{1,4}\s*~\s*\d{1,4}\b|\bbatch\b|\bcomplete\b`)
 	// Trailing group: "H.264-VARYG", "...AAC2.0-Group". Some uploaders put the
@@ -162,10 +214,32 @@ func Parse(title string) Release {
 		r.Audio = normaliseAudio(m[1])
 	}
 
+	r.AudioKind = parseAudioKind(title)
+
 	r.IsUncensored = reUncensored.MatchString(title)
 	r.IsBatch = reBatchRange.MatchString(title)
 
 	return r
+}
+
+// parseAudioKind classifies the language track from explicit title markers.
+//
+// Order is the rule. Dual wins because it includes the original track; a
+// non-English dub wins over the generic "Dub" so "Japanese Dub" is not treated
+// as an English dub; explicit original audio wins over nothing. Unknown stays
+// empty: absence of a claim is not a claim of subs.
+func parseAudioKind(title string) AudioKind {
+	switch {
+	case reDualAudio.MatchString(title):
+		return AudioDual
+	case reOtherDub.MatchString(title):
+		return AudioOtherDub
+	case reOriginalAudio.MatchString(title):
+		return AudioOriginal
+	case reEnglishDub.MatchString(title):
+		return AudioEnglishDub
+	}
+	return AudioUnknown
 }
 
 // normaliseService maps the many spellings of a platform to one token, so

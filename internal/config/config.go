@@ -142,8 +142,11 @@ type QualityConfig struct {
 	CodecRank map[string]int `yaml:"codec_rank" json:"codec_rank"`
 	// ResolutionPenalty maps a resolution to a rank penalty. Lower is better.
 	ResolutionPenalty map[string]int `yaml:"resolution_penalty" json:"resolution_penalty"`
-	// PenaltyDub is added when a release is a dub-only encode.
+	// PenaltyDub is added when a release is an English-dub-only encode.
 	PenaltyDub *int `yaml:"penalty_dub" json:"penalty_dub"`
+	// RejectEnglishDub hard-excludes English-dub-only releases. Original
+	// audio, dual-audio and non-English dubs remain eligible.
+	RejectEnglishDub *bool `yaml:"reject_english_dub" json:"reject_english_dub"`
 	// PenaltyUncensored is added when a release is uncensored. Negative to
 	// prefer it.
 	PenaltyUncensored *int `yaml:"penalty_uncensored" json:"penalty_uncensored"`
@@ -343,6 +346,9 @@ func mergeServer(dst, src *Server) {
 	if src.Quality.PenaltyDub != nil {
 		dst.Quality.PenaltyDub = src.Quality.PenaltyDub
 	}
+	if src.Quality.RejectEnglishDub != nil {
+		dst.Quality.RejectEnglishDub = src.Quality.RejectEnglishDub
+	}
 	if src.Quality.PenaltyUncensored != nil {
 		dst.Quality.PenaltyUncensored = src.Quality.PenaltyUncensored
 	}
@@ -418,6 +424,7 @@ func DefaultServer() *Server {
 	prune := false
 	penaltyDub := 15
 	penaltyUncensored := -5
+	rejectEnglishDub := false
 	rejectBatch := true
 	seasonFolder := false
 	return &Server{
@@ -444,6 +451,7 @@ func DefaultServer() *Server {
 			ResolutionFloor:   "1080p",
 			GroupOrder:        []string{"VARYG", "Erai-Raws", "SubsPlease", "ToonsHub"},
 			PenaltyDub:        &penaltyDub,
+			RejectEnglishDub:  &rejectEnglishDub,
 			PenaltyUncensored: &penaltyUncensored,
 			RejectBatch:       &rejectBatch,
 		},

@@ -7,6 +7,7 @@ import (
 	"github.com/Ebonhawk3829/kishizu/internal/adapt"
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/nyaa"
+	"github.com/Ebonhawk3829/kishizu/internal/quality"
 	"github.com/Ebonhawk3829/kishizu/internal/release"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
 )
@@ -173,6 +174,65 @@ func TestBatchIsRejected(t *testing.T) {
 	}
 	if d.Reason != "batch" {
 		t.Errorf("reason = %q, want %q", d.Reason, "batch")
+	}
+}
+
+// TestEnglishDubIsRejectedByPolicy: the listener uses the same policy as the
+// rest of the picker. An English dub is dropped at the gate when the user asks
+// for it, while dual-audio and non-English dubs remain eligible.
+func TestEnglishDubIsRejectedByPolicy(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
+	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+
+	p := quality.Default()
+	p.RejectEnglishDub = true
+	l := NewWithPolicy(st, nil, p)
+	m := mustMatcher(t, st, sh)
+
+	dub := l.evaluate(sh, m,
+		item("H1", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL DUB"))
+	if dub.Grab {
+		t.Errorf("English dub grabbed: %+v", dub)
+	}
+	if dub.Reason != "English dub only" {
+		t.Errorf("reason = %q, want %q", dub.Reason, "English dub only")
+	}
+
+	dual := l.evaluate(sh, m,
+		item("H2", "[ToonsHub] Tomb Raider King S01E09 1080p Dual Audio WEB-DL"))
+	if !dual.Grab {
+		t.Errorf("dual-audio rejected: %+v", dual)
+	}
+
+	other := l.evaluate(sh, m,
+		item("H3", "[ToonsHub] Tomb Raider King S01E09 1080p WEB-DL (Dogul Wang, Japanese Dub)"))
+	if !other.Grab {
+		t.Errorf("non-English dub rejected: %+v", other)
+	}
+}
+
+// TestVocabularyRejectsLearnedEnglishDub: training's audio-kind vocabulary
+// must be applied where the decision is made, not only in the panel. A group's
+// unusual dub spelling becomes a picker reject after one correction.
+func TestVocabularyRejectsLearnedEnglishDub(t *testing.T) {
+	st := testStore(t)
+	sh, _ := st.CreateShow("Tomb Raider King", []string{"Tomb Raider King"})
+	_ = st.SetGroupOffset(sh.ID, "ToonsHub", 0, "training")
+	if err := st.LearnVocabulary("audio_kind", "ENVOICE", "english-dub"); err != nil {
+		t.Fatal(err)
+	}
+
+	p := quality.Default()
+	p.RejectEnglishDub = true
+	l := NewWithPolicy(st, nil, p)
+	d := l.evaluate(sh, mustMatcher(t, st, sh),
+		item("H1", "[ToonsHub] Tomb Raider King S01E09 1080p ENVOICE WEB-DL"))
+	if d.Grab {
+		t.Errorf("learned English-dub token grabbed: %+v", d)
+	}
+	if d.Reason != "English dub only" {
+		t.Errorf("reason = %q, want %q", d.Reason, "English dub only")
 	}
 }
 

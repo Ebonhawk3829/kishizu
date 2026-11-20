@@ -167,3 +167,39 @@ func TestVocabularyHyphenSegmentsNeedWords(t *testing.T) {
 		t.Errorf("codec = %q, want h.264", r.Codec)
 	}
 }
+
+// TestVocabularyLearnsAudioKind: a group can spell an English dub in a way the
+// parser does not know. Teaching the token makes every future release using it
+// classifiable, which is what lets the picker reject it.
+func TestVocabularyLearnsAudioKind(t *testing.T) {
+	title := `[Group] Show - 01 [1080p][ENVOICE]`
+
+	before := Parse(title)
+	if before.AudioKind != AudioUnknown {
+		t.Fatalf("setup: parser already classified %q as %q", title, before.AudioKind)
+	}
+
+	v := NewVocabulary()
+	v.Learn(VocabAudioKind, "ENVOICE", "english-dub")
+
+	after := Parse(title)
+	v.ApplyVocabulary(&after)
+	if after.AudioKind != AudioEnglishDub {
+		t.Errorf("audio kind = %q, want %q", after.AudioKind, AudioEnglishDub)
+	}
+}
+
+// TestVocabularyDoesNotOverrideKnownAudioKind: the parser's own reading wins.
+// If it already classified a title as an English dub, a learned token must not
+// silently turn it into an acceptable track.
+func TestVocabularyDoesNotOverrideKnownAudioKind(t *testing.T) {
+	v := NewVocabulary()
+	v.Learn(VocabAudioKind, "DUB", "other-dub")
+
+	r := Parse(`[Group] Show - 01 [1080p DUB]`)
+	v.ApplyVocabulary(&r)
+	if r.AudioKind != AudioEnglishDub {
+		t.Errorf("audio kind = %q, want %q; learned vocabulary must only fill gaps",
+			r.AudioKind, AudioEnglishDub)
+	}
+}

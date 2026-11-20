@@ -43,6 +43,7 @@ const (
 	AttrSource     Attribute = "source"
 	AttrService    Attribute = "service"
 	AttrAudio      Attribute = "audio"
+	AttrAudioKind  Attribute = "audio_kind"
 	AttrBatch      Attribute = "batch"
 	AttrUncensored Attribute = "uncensored"
 )
@@ -108,7 +109,8 @@ func InspectWithConfidence(title string, resolvedEp int, conf float64) GradedRel
 		{Key: AttrCodec, Label: "Codec", Value: r.Codec, Editable: true, Present: r.Codec != ""},
 		{Key: AttrSource, Label: "Source", Value: r.Source, Editable: true, Present: r.Source != ""},
 		{Key: AttrService, Label: "Service", Value: r.Service, Editable: true, Present: r.Service != ""},
-		{Key: AttrAudio, Label: "Audio", Value: r.Audio, Editable: true, Present: r.Audio != ""},
+		{Key: AttrAudio, Label: "Audio codec", Value: r.Audio, Editable: true, Present: r.Audio != ""},
+		{Key: AttrAudioKind, Label: "Audio track", Value: string(r.AudioKind), Editable: true, Present: r.AudioKind != ""},
 		{Key: AttrBatch, Label: "Batch", Value: strconv.FormatBool(r.IsBatch), Editable: true, Present: r.IsBatch},
 		{Key: AttrUncensored, Label: "Uncensored", Value: strconv.FormatBool(r.IsUncensored), Editable: true, Present: r.IsUncensored},
 	}
@@ -150,8 +152,8 @@ func episodeHint(resolved, raw int) string {
 // calibrates the parser: the episode and group attributes teach the
 // per-group offset, and corrections to other attributes are vocabulary
 // teaching, which the caller records via the vocab endpoint before calling
-// this. Quality verdicts (resolution, codec, batch, dub, uncensored) come
-// from the global policy, which owns them.
+// this. Quality verdicts (resolution, codec, audio track, batch, uncensored)
+// come from the global policy, which owns them.
 //
 // Returns a summary of what changed, for display.
 func (s *Session) ApplyGrades(g GradedRelease, grades map[Attribute]Grade, ep int) ([]string, error) {

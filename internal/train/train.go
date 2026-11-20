@@ -170,7 +170,7 @@ func (s *Session) novelty(title string) (float64, []string) {
 	}
 
 	// Quality tokens the model has no rule about yet.
-	for _, tok := range []string{r.Resolution, r.Codec, r.Source, r.Service, r.Audio} {
+	for _, tok := range []string{r.Resolution, r.Codec, r.Source, r.Service, r.Audio, string(r.AudioKind)} {
 		if tok == "" {
 			continue
 		}

@@ -164,6 +164,7 @@ server:
 
   quality:
     resolution_floor: 1080p      # below this is rejected, not demoted
+    reject_english_dub: true     # reject English dubs; original/dual/other dubs stay
     group_order:                 # best first; unlisted groups still eligible
       - SubsPlease
       - Erai-Raws
@@ -276,8 +277,10 @@ show in the UI.
 
 Training teaches the per-group episode offset and the title vocabulary — a
 mapping from tokens in a release title to canonical values, so every future
-release using that spelling is readable. Quality policy (resolution floor,
-group order, etc.) is configured globally and applies to every show the same
+release using that spelling is readable. That includes the audio track: a
+group's unusual spelling for an English dub can be taught once and rejected
+everywhere. Quality policy (resolution floor, group order, English-dub
+rejection, etc.) is configured globally and applies to every show the same
 way.
 
 A show starts hunting once it has at least one known group offset. Untrained

@@ -285,6 +285,61 @@ func TestSaveConfigAppliesUnderscoreFields(t *testing.T) {
 	}
 }
 
+// TestRejectEnglishDubRoundTrip: the setting is visible to the form and the
+// form's value reaches the file. It is a pointer, so false must not read as
+// "omitted" and silently restore the old value.
+func TestRejectEnglishDubRoundTrip(t *testing.T) {
+	srv, _, path := testServerWithConfig(t)
+	src := `server:
+  library: /media/anime
+  staging: /downloads/anime
+  quality:
+    resolution_floor: 1080p
+    group_order:
+      - SubsPlease
+    reject_english_dub: true
+`
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// GET exposes the current value to the form.
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
+	if rec.Code != 200 {
+		t.Fatalf("GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	quality := got["quality"].(map[string]any)
+	if quality["reject_english_dub"] != true {
+		t.Errorf("quality.reject_english_dub = %v, want true", quality["reject_english_dub"])
+	}
+
+	// POST can turn it off; the explicit false survives the file round-trip.
+	body := `{"library":"/media/anime","staging":"/downloads/anime","interval":"5m",
+"keep":0,"dry_run":false,
+"downloader":{"kind":"transmission"},"notifier":{"kind":"none"},
+"quality":{"resolution_floor":"1080p","group_order":["SubsPlease"],
+"reject_english_dub":false},
+"naming":{"preset":"kishizu","season_folder":false}}`
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/api/config", strings.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("POST status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	after, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.Server.Quality.RejectEnglishDub == nil || *after.Server.Quality.RejectEnglishDub {
+		t.Errorf("reject_english_dub = %v, want false", after.Server.Quality.RejectEnglishDub)
+	}
+}
+
 // TestSaveConfigRejectsInvalid: a config that cannot be loaded is worse than
 // one that was never edited — kishizu would refuse to start, and the user
 // would have to fix it by hand.

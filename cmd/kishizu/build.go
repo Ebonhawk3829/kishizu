@@ -79,6 +79,9 @@ func buildQuality(q config.QualityConfig) *quality.Policy {
 	if q.PenaltyDub != nil {
 		p.PenaltyDub = *q.PenaltyDub
 	}
+	if q.RejectEnglishDub != nil {
+		p.RejectEnglishDub = *q.RejectEnglishDub
+	}
 	if q.PenaltyUncensored != nil {
 		p.PenaltyUncensored = *q.PenaltyUncensored
 	}

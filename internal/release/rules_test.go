@@ -22,14 +22,49 @@ func TestResolutionQualityAscends(t *testing.T) {
 	}
 }
 
-// TestIsDubIgnoresDualAudio: dual-audio carries both tracks and is fine; only
-// a dub-only release replaces the original performance.
-func TestIsDubIgnoresDualAudio(t *testing.T) {
+// TestAudioKindClassifiesLanguageTracks: the policy only rejects English dubs.
+// Original audio, dual-audio, non-English dubs and titles that say nothing are
+// all acceptable, and "Multi-Subs" is about subtitles, not audio.
+func TestAudioKindClassifiesLanguageTracks(t *testing.T) {
+	cases := map[string]AudioKind{
+		"[Group] Show - 01 [1080p] (Dual Audio)":                                          AudioDual,
+		"[Group] Show - 01 [1080p] [Multi-Audio]":                                         AudioDual,
+		"[ToonsHub] Show S01E09 1080p DUAL AAC2.0 H.264":                                  AudioDual,
+		"[Group] Show - 01 [Dual Audio, Multi-Subs, Japanese Dub]":                        AudioDual,
+		"[Group] Show - 01 [1080p] [MultiSub]":                                            AudioUnknown,
+		"[Group] Show - 01 [1080p] [Multi-Subs]":                                          AudioUnknown,
+		"[Group] Show - 01 [1080p DUB]":                                                   AudioEnglishDub,
+		"[Group] Show - 01 [1080p Dubbed]":                                                AudioEnglishDub,
+		"[Group] Show - 01 [English Dub]":                                                 AudioEnglishDub,
+		"[Group] Show - 01 [ENG DUB]":                                                     AudioEnglishDub,
+		"[Group] Show - 01 [EN-DUB]":                                                      AudioEnglishDub,
+		"[Group] Show - 01 [English Audio]":                                               AudioEnglishDub,
+		"[Group] Show - 01 [Multi-Subs, Dub]":                                             AudioEnglishDub,
+		"[ToonsHub] Tomb Raider King S01E09 1080p (Dogul Wang, Multi-Subs, Japanese Dub)": AudioOtherDub,
+		"[Group] Show - 01 [French Dub]":                                                  AudioOtherDub,
+		"[Group] Show - 01 [Japanese Audio]":                                              AudioOriginal,
+		"[Group] Show - 01 [Original Audio]":                                              AudioOriginal,
+		"[ToonsHub] Tomb Raider King S01E09 1080p (Dogul Wang, Multi-Subs, Korean Audio)": AudioOriginal,
+		"[Group] Show - 01 [1080p]":                                                       AudioUnknown,
+		"[Group] Show - 01 [1080p] [RAW]":                                                 AudioUnknown,
+	}
+	for title, want := range cases {
+		if got := Parse(title).AudioKind; got != want {
+			t.Errorf("Parse(%q).AudioKind = %q, want %q", title, got, want)
+		}
+	}
+}
+
+// TestIsDubMeansEnglishDub: the compatibility helper keeps its old callers
+// working but now follows the UX rule — only an English dub is a dub.
+func TestIsDubMeansEnglishDub(t *testing.T) {
 	cases := map[string]bool{
-		"[Group] Show - 01 [1080p] (Dual Audio)": false, // dual: not a dub
-		"[Group] Show - 01 [1080p] [MultiSub]":   false, // multi: not a dub
-		"[Group] Show - 01 [1080p DUB]":          true,  // dub
-		"[Group] Show - 01 [1080p]":              false, // neither
+		"[Group] Show - 01 [1080p] (Dual Audio)":               false,
+		"[Group] Show - 01 [1080p] [MultiSub]":                 false,
+		"[Group] Show - 01 [1080p DUB]":                        true,
+		"[Group] Show - 01 [1080p] (Dogul Wang, Japanese Dub)": false,
+		"[Group] Show - 01 [1080p] (Dogul Wang, Korean Audio)": false,
+		"[Group] Show - 01 [1080p]":                            false,
 	}
 	for title, want := range cases {
 		if got := IsDub(title); got != want {

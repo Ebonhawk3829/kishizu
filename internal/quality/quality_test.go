@@ -61,9 +61,9 @@ func TestCodecRankPrefersSourceEncode(t *testing.T) {
 	}
 }
 
-// TestRejectOnlyHardCases: only a batch and a below-floor resolution are hard
-// rejects. Everything else is a demotion, so a watchable release is never
-// excluded outright.
+// TestRejectOnlyHardCases: with the default policy, only a batch and a
+// below-floor resolution are hard rejects. An English dub is a demotion until
+// the viewer opts into rejecting it. Everything else stays watchable.
 func TestRejectOnlyHardCases(t *testing.T) {
 	p := Default()
 	cases := []struct {
@@ -83,6 +83,56 @@ func TestRejectOnlyHardCases(t *testing.T) {
 		if got != c.want {
 			t.Errorf("Reject(%q) = %v, want %v", c.title, got, c.want)
 		}
+	}
+}
+
+// TestRejectEnglishDub: the opt-in hard gate applies only to an English dub.
+// Original audio, dual-audio, non-English dubs and unmarked audio stay
+// eligible, because the viewer wants the original performance with subs.
+func TestRejectEnglishDub(t *testing.T) {
+	p := Default()
+	p.RejectEnglishDub = true
+
+	cases := []struct {
+		title string
+		want  bool
+	}{
+		{"[Group] Show - 01 [1080p DUB]", true},
+		{"[Group] Show - 01 [English Dub]", true},
+		{"[Group] Show - 01 [1080p] (Dual Audio)", false},
+		{"[Group] Show - 01 [1080p] [Multi-Audio]", false},
+		{"[Group] Show - 01 [1080p] (Dogul Wang, Japanese Dub)", false},
+		{"[Group] Show - 01 [1080p] [Korean Audio]", false},
+		{"[Group] Show - 01 [1080p]", false},
+	}
+	for _, c := range cases {
+		r := release.Parse(c.title)
+		got, why := p.Reject(&r)
+		if got != c.want {
+			t.Errorf("Reject(%q) = %v (%s), want %v", c.title, got, why, c.want)
+		}
+	}
+
+	// With the option off, the same dub is only demoted.
+	p.RejectEnglishDub = false
+	r := release.Parse("[Group] Show - 01 [1080p DUB]")
+	if rejected, _ := p.Reject(&r); rejected {
+		t.Error("an English dub must not be rejected when the option is off")
+	}
+}
+
+// TestEnglishDubRejectReason: the reason names the rule, so a dry-run log
+// explains why a release disappeared.
+func TestEnglishDubRejectReason(t *testing.T) {
+	p := Default()
+	p.RejectEnglishDub = true
+	r := release.Parse("[Group] Show - 01 [1080p DUB]")
+	rejected, why := p.Reject(&r)
+	if !rejected {
+		t.Fatal("an English dub must be rejected")
+	}
+	if !strings.Contains(strings.ToLower(why), "english dub") {
+		t.Errorf("reason %q must name the English dub rule", why)
 	}
 }
 

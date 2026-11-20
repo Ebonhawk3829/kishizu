@@ -39,6 +39,9 @@ func TestExampleFileIsValid(t *testing.T) {
 	if f.Server.Quality.ResolutionFloor == "" || len(f.Server.Quality.GroupOrder) == 0 {
 		t.Error("example must show the quality policy")
 	}
+	if f.Server.Quality.RejectEnglishDub == nil {
+		t.Error("example must show the English-dub rejection policy")
+	}
 	if f.Server.Naming.Preset == "" {
 		t.Error("example must show a naming preset")
 	}

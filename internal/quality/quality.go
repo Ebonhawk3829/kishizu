@@ -73,8 +73,20 @@ type Policy struct {
 	RejectGroups []string
 
 	// Penalties applied to a release's rank. Lower total wins.
-	PenaltyDub        int // dub-only audio: penalise, subs are the point
+	PenaltyDub        int // English-dub-only audio: penalise, subs are the point
 	PenaltyUncensored int // uncensored present: prefer, so negative
+
+	// RejectEnglishDub excludes English-dub-only releases outright.
+	//
+	// The UX rule is not "no dubs": original audio, dual-audio and non-English
+	// dubs are all acceptable, because the viewer wants the original
+	// performance with English subtitles. Only an English dub replaces that
+	// performance, so it is the one that can be hard-rejected.
+	//
+	// Unknown audio is not rejected: most titles carry no marker at all, and
+	// treating silence as a dub would block the whole feed. The fix for a
+	// misread marker is training/vocabulary, not a blanket reject.
+	RejectEnglishDub bool
 
 	// RejectBatch excludes batches and season packs outright. They are out of
 	// scope: kishizu hunts one episode at a time while a season airs.
@@ -84,10 +96,10 @@ type Policy struct {
 // Default is the policy kishizu ships with.
 //
 // These are the preferences that hold for every show, so they never need
-// grading per release: batches are unwanted, dubs are unwanted, a re-encoded
-// x265 loses to the original x264. Asking those questions once per release
-// would let a per-release answer contradict a preference that was never in
-// doubt.
+// grading per release: batches are unwanted, English dubs are unwanted, a
+// re-encoded x265 loses to the original x264. Asking those questions once per
+// release would let a per-release answer contradict a preference that was
+// never in doubt.
 func Default() *Policy {
 	return &Policy{
 		ResolutionFloor: "1080p",
@@ -113,7 +125,11 @@ func Default() *Policy {
 		GroupOrder:        []string{"VARYG", "Erai-Raws", "SubsPlease", "ToonsHub"},
 		PenaltyDub:        15,
 		PenaltyUncensored: -5,
-		RejectBatch:       true,
+		// Off by default: an existing deployment keeps its current fallback
+		// to a dub when it is the only candidate. A subs-only viewer turns it
+		// on in Settings or with reject_english_dub: true.
+		RejectEnglishDub: false,
+		RejectBatch:      true,
 	}
 }
 
@@ -178,12 +194,15 @@ func (p *Policy) ResolutionRejected(res string) bool {
 // Reject reports whether a release is excluded by the policy, and why.
 //
 // Only a few things are hard rejects: a batch (out of scope entirely), a
-// resolution below the floor, and a resolution the parser could not read.
-// Everything else is a demotion, so a watchable release is never excluded
-// outright.
+// resolution below the floor, a resolution the parser could not read, and —
+// when the viewer asks for it — an English-dub-only release. Everything else
+// is a demotion, so a watchable release is never excluded outright.
 func (p *Policy) Reject(r *release.Release) (bool, string) {
 	if p.RejectBatch && r.IsBatch {
 		return true, "batch"
+	}
+	if p.RejectEnglishDub && r.AudioKind == release.AudioEnglishDub {
+		return true, "English dub only"
 	}
 	if p.GroupRejected(r.Group) {
 		return true, fmt.Sprintf("group %q is on the reject list", r.Group)
@@ -224,7 +243,7 @@ func (p *Policy) Rank(r *release.Release) int {
 	if rank, ok := p.ResolutionPenalty[strings.ToLower(r.Resolution)]; ok {
 		sum += rank
 	}
-	if release.IsDub(r.Title) {
+	if r.AudioKind == release.AudioEnglishDub {
 		sum += p.PenaltyDub
 	}
 	if r.IsUncensored {

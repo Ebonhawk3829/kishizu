@@ -100,8 +100,8 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	if req.Quality.ResolutionFloor == "" && len(req.Quality.GroupOrder) == 0 &&
 		len(req.Quality.RejectGroups) == 0 &&
 		len(req.Quality.CodecRank) == 0 && len(req.Quality.ResolutionPenalty) == 0 &&
-		req.Quality.PenaltyDub == nil && req.Quality.PenaltyUncensored == nil &&
-		req.Quality.RejectBatch == nil {
+		req.Quality.PenaltyDub == nil && req.Quality.RejectEnglishDub == nil &&
+		req.Quality.PenaltyUncensored == nil && req.Quality.RejectBatch == nil {
 		req.Quality = cur.Server.Quality
 	}
 
@@ -286,9 +286,10 @@ func (s *Server) configView(cfg *config.Server) map[string]any {
 			"min_interval": cfg.Indexer.MinInterval,
 		},
 		"quality": map[string]any{
-			"resolution_floor": cfg.Quality.ResolutionFloor,
-			"group_order":      cfg.Quality.GroupOrder,
-			"reject_groups":    cfg.Quality.RejectGroups,
+			"resolution_floor":   cfg.Quality.ResolutionFloor,
+			"group_order":        cfg.Quality.GroupOrder,
+			"reject_groups":      cfg.Quality.RejectGroups,
+			"reject_english_dub": boolVal(cfg.Quality.RejectEnglishDub),
 		},
 		"naming": map[string]any{
 			"preset":        cfg.Naming.Preset,

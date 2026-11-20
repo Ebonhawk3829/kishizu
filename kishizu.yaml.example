@@ -92,10 +92,15 @@ server:
     #   1080p: 0
     #   2160p: 10
     #   720p: 90
-    # Added to a release's rank. Dub is demoted, never excluded; uncensored
-    # is negative so it is preferred.
+    # Added to a release's rank. When English-dub rejection is off, an
+    # English dub is demoted rather than excluded; uncensored is negative so
+    # it is preferred.
     # penalty_dub: 15
     # penalty_uncensored: -5
+    # Reject English-dub-only releases outright. Original audio, dual-audio
+    # and non-English dubs remain eligible, because the viewer wants the
+    # original performance with English subtitles.
+    reject_english_dub: true
     # Exclude batches and season packs outright.
     # reject_batch: true
 

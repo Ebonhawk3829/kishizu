@@ -104,7 +104,7 @@ func main() {
 	case f.trainName != "":
 		runTrain(st, f, indexer)
 	default:
-		runReport(st, f, indexer)
+		runReport(st, cfg, f, indexer)
 	}
 }
 
@@ -300,7 +300,7 @@ func runTrain(st *store.Store, f *flags, indexer *nyaa.Client) {
 
 // runReport prints what the listener would grab right now, for every show or
 // just the one named by -show.
-func runReport(st *store.Store, f *flags, indexer *nyaa.Client) {
+func runReport(st *store.Store, cfg *config.File, f *flags, indexer *nyaa.Client) {
 	shows, err := st.ListShows()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list shows: %v\n", err)
@@ -317,7 +317,7 @@ func runReport(st *store.Store, f *flags, indexer *nyaa.Client) {
 			continue
 		}
 		any = true
-		reportShow(context.Background(), st, sh, indexer)
+		reportShow(context.Background(), st, cfg, sh, indexer)
 	}
 	if !any {
 		fmt.Fprintf(os.Stderr, "no show matched %q\n", f.show)
@@ -329,8 +329,8 @@ func runReport(st *store.Store, f *flags, indexer *nyaa.Client) {
 // the reason for every decision. It runs the same pipeline as the live loop,
 // so the report cannot drift from what -dry-run=false would do. Nothing is
 // handed to the downloader.
-func reportShow(ctx context.Context, st *store.Store, sh *store.Show, indexer *nyaa.Client) {
-	l := listen.New(st, indexer)
+func reportShow(ctx context.Context, st *store.Store, cfg *config.File, sh *store.Show, indexer *nyaa.Client) {
+	l := listen.NewWithPolicy(st, indexer, buildQuality(cfg.Server.Quality))
 
 	fmt.Printf("\n=== %s\n", sh.CanonicalName)
 

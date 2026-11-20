@@ -352,7 +352,7 @@ func (s *Server) handleTrainInspect(w http.ResponseWriter, r *http.Request) {
 // using that spelling readable, for every group and every show.
 func (s *Server) handleTrainVocab(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Kind      string `json:"kind"`      // resolution | codec | source | service | audio
+		Kind      string `json:"kind"`      // resolution | codec | source | service | audio | audio_kind
 		Token     string `json:"token"`     // as written in the title
 		Canonical string `json:"canonical"` // what kishizu calls it
 	}

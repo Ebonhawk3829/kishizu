@@ -60,6 +60,30 @@ func TestPartialServerConfigKeepsDefaults(t *testing.T) {
 	if len(f.Server.Quality.GroupOrder) == 0 {
 		t.Error("group order must keep its default, not become empty")
 	}
+	if f.Server.Quality.RejectEnglishDub == nil || *f.Server.Quality.RejectEnglishDub {
+		t.Error("reject_english_dub must default to false and stay configured")
+	}
+}
+
+// TestRejectEnglishDubParses: the setting is a pointer so an explicit true or
+// false is distinguishable from an omitted key. The default is false, so an
+// existing deployment keeps its current fallback to a dub.
+func TestRejectEnglishDubParses(t *testing.T) {
+	f, err := Parse([]byte("server:\n  quality:\n    reject_english_dub: true\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if f.Server.Quality.RejectEnglishDub == nil || !*f.Server.Quality.RejectEnglishDub {
+		t.Errorf("reject_english_dub = %v, want true", f.Server.Quality.RejectEnglishDub)
+	}
+
+	g, err := Parse([]byte("server:\n  quality:\n    reject_english_dub: false\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if g.Server.Quality.RejectEnglishDub == nil || *g.Server.Quality.RejectEnglishDub {
+		t.Errorf("reject_english_dub = %v, want an explicit false", g.Server.Quality.RejectEnglishDub)
+	}
 }
 
 // TestExplicitFalseIsNotMissing: the reason the optional booleans are

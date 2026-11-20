@@ -36,6 +36,7 @@ const (
 	VocabSource     = "source"
 	VocabService    = "service"
 	VocabAudio      = "audio"
+	VocabAudioKind  = "audio_kind"
 )
 
 // NewVocabulary builds an empty vocabulary.
@@ -47,6 +48,7 @@ func NewVocabulary() *Vocabulary {
 			VocabSource:     {},
 			VocabService:    {},
 			VocabAudio:      {},
+			VocabAudioKind:  {},
 		},
 	}
 }
@@ -146,6 +148,12 @@ func (v *Vocabulary) ApplyVocabulary(r *Release) {
 			if r.Audio == "" {
 				if c := v.Lookup(VocabAudio, key); c != "" {
 					r.Audio = c
+					continue
+				}
+			}
+			if r.AudioKind == AudioUnknown {
+				if c := v.Lookup(VocabAudioKind, key); c != "" {
+					r.AudioKind = AudioKind(c)
 					continue
 				}
 			}

@@ -1065,6 +1065,11 @@ function renderSettings() {
     <div class="fields">
       <div><label for="set-floor">Resolution floor</label><select id="set-floor">${opts(c.resolutions, v.quality.resolution_floor)}</select>
         <div class="hint">Releases below this are rejected outright.</div></div>
+      <div><label for="set-reject-dub">English dubs</label><select id="set-reject-dub">
+        <option value="false"${v.quality.reject_english_dub ? '' : ' selected'}>allow (ranked lower)</option>
+        <option value="true"${v.quality.reject_english_dub ? ' selected' : ''}>reject</option>
+      </select>
+        <div class="hint">Reject English-dub-only releases. Original audio, dual-audio and non-English dubs stay eligible.</div></div>
       <div><label>Preferred groups</label>
         <button type="button" class="btn ghost" id="btn-groups-open">Edit order (${(v.quality.group_order || []).length})</button>
         <div class="hint">Best first. Listed groups are preferred; unlisted ones are still eligible, just unprioritized.</div></div>
@@ -1298,6 +1303,7 @@ async function saveSettings() {
     // order comes from the editor's working list, not a text box.
     quality: {
       resolution_floor: el('set-floor').value,
+      reject_english_dub: el('set-reject-dub').value === 'true',
       // The editor's working list split at the reject line: above it is the
       // preference order, below it is the hard-exclusion list. If the editor
       // was never opened this session, fall back to what the view loaded
@@ -1563,8 +1569,8 @@ async function gradeDetail(index) {
 
 // The correction pass. Training teaches exactly two things: the offset for
 // a group, and the vocabulary a group writes in. Everything else — resolution,
-// codec, batch, dub, uncensored — is a global rule that holds for every show,
-// so it is never graded per release.
+// codec, audio track, batch, uncensored — is a global rule that holds for
+// every show, so it is never graded per release.
 //
 // Each attribute is presented as the parsed value plus a "correct" tick. The
 // tick is on by default: the common case is that the parser is right, so the
@@ -1605,6 +1611,7 @@ const ATTR_VALUES = {
                'hidive', 'funimation', 'wakanim', 'max', 'hbo', 'N/A'],
   audio:      ['aac', 'eac3', 'ddp', 'ac3', 'flac', 'opus', 'mp3', 'truehd',
                'dts', 'N/A'],
+  audio_kind: ['original', 'dual', 'english-dub', 'other-dub', 'N/A'],
   batch:      ['present', 'N/A'],
   uncensored: ['present', 'N/A'],
 };

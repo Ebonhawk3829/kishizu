@@ -247,8 +247,9 @@ one.
 
 ## Training
 
-Training teaches the per-group episode offsets and the title vocabulary. A show
-is not polled until it has at least one offset.
+Training teaches the per-group episode offsets and the title vocabulary,
+including audio-track markers such as an unusual spelling for an English dub.
+A show is not polled until it has at least one offset.
 
 | Endpoint | Purpose |
 |---|---|
