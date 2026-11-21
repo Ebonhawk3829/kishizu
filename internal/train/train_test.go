@@ -193,6 +193,33 @@ func TestProposeOrdersByNovelty(t *testing.T) {
 	}
 }
 
+// TestProposeExcludesOtherSeason: the training list must not offer a release
+// from a different season. Its title shares almost every token with the show,
+// so only the explicit season marker separates them.
+func TestProposeExcludesOtherSeason(t *testing.T) {
+	st := testStore(t)
+	sh := newShow(t, st, "Tensei Kizoku, Kantei Skill de Nariagaru 3rd Season", []string{
+		"As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World 3rd Season",
+		"As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 3",
+	})
+	s, _ := NewSession(st, sh, 3)
+	_ = s.Seed("[EMBER] Tensei Kizoku, Kantei Skill de Nariagaru S03E03 [1080p] [HEVC WEBRip]")
+
+	bad := item("[EMBER] Tensei Kizoku, Kantei Skill de Nariagaru S02E03 [1080p] [HEVC WEBRip] (As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 2)")
+	if got := s.Propose([]nyaa.Item{bad}, 3); len(got) != 0 {
+		t.Errorf("season-2 release proposed for a season-3 show: %+v", got)
+	}
+
+	good := item("[EMBER] Tensei Kizoku, Kantei Skill de Nariagaru S03E04 [1080p] [HEVC WEBRip]")
+	got := s.Propose([]nyaa.Item{good}, 3)
+	if len(got) != 1 {
+		t.Fatalf("season-3 release not proposed; got %d", len(got))
+	}
+	if got[0].Episode != 4 {
+		t.Errorf("episode = %d, want 4", got[0].Episode)
+	}
+}
+
 // TestNoveltyWeightsGroupAboveQuality: an unseen release group outranks unseen
 // quality tags, because the group drives the episode offset — the thing that
 // decides whether the right episode is downloaded at all.

@@ -179,6 +179,63 @@ func AliasGate(aliases []string, title string) (bool, string) {
 	return true, fmt.Sprintf("alias matched (%.2f)", score)
 }
 
+// showSeason is the season the show itself claims, 0 when it is
+// season-agnostic.
+//
+// The canonical name wins. When it has no numeric season marker — a roman
+// numeral, an English title, "Second Season" in words — the aliases are
+// consulted, because the schedule usually supplies a numeric spelling there.
+// Contradictory aliases make the show season-agnostic: rejecting on a guess
+// between them would drop valid releases.
+func showSeason(s Show) int {
+	if n := release.SeasonOf(s.CanonicalName()); n != 0 {
+		return n
+	}
+	found := 0
+	for _, a := range s.Aliases() {
+		n := release.SeasonOf(a)
+		if n == 0 {
+			continue
+		}
+		if found == 0 {
+			found = n
+			continue
+		}
+		if found != n {
+			return 0
+		}
+	}
+	return found
+}
+
+// seasonConflict reports whether a release names a different season than the
+// show, and no season-agnostic alias brings them together.
+//
+// A show known by a season-agnostic name — "Re:ZERO Starting Life in Another
+// World" rather than "... Season 4" — deliberately spans seasons. If such an
+// alias matches, an explicit season is not a contradiction. A show whose every
+// name carries a season has no such escape: "Show 3rd Season" must not accept
+// "Show S02E03", however many of the other tokens it shares.
+func seasonConflict(s Show, title string) (bool, string) {
+	want := showSeason(s)
+	if want == 0 {
+		return false, ""
+	}
+	got := release.SeasonOf(title)
+	if got == 0 || got == want {
+		return false, ""
+	}
+	for _, a := range s.Aliases() {
+		if release.SeasonOf(a) != 0 {
+			continue
+		}
+		if release.TitleScore([]string{a}, title) >= Threshold {
+			return false, ""
+		}
+	}
+	return true, fmt.Sprintf("release is season %d, show is season %d", got, want)
+}
+
 // Match decides whether a release belongs to a show, and which episode it is.
 //
 // The offset is applied PER GROUP, not per show. This is the single most
@@ -192,6 +249,16 @@ func Match(s Show, title string) Result {
 	}
 
 	r := release.Parse(title)
+
+	// A release that names its season must name the show's season. The alias
+	// gate is recall, so "Show 3rd Season" and "Show S02E03" share almost every
+	// token and clear it comfortably; the season number is the one token that
+	// tells them apart. Releases that do not name a season are still allowed,
+	// because most titles omit it.
+	if conflict, why := seasonConflict(s, title); conflict {
+		return Result{Reason: why}
+	}
+
 	raw := r.RawEpisode()
 	if raw == 0 {
 		// Eligible but the episode number is unreadable. This is the most

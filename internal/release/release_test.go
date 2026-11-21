@@ -198,6 +198,30 @@ func TestBareNumberAllowsVersionSuffix(t *testing.T) {
 	}
 }
 
+// TestSeasonNumber: an explicit season is identity, and SxxEyy wins over a
+// parenthetical alternate title. A zero means the title did not say, not
+// season zero.
+func TestSeasonNumber(t *testing.T) {
+	cases := []struct {
+		title string
+		want  int
+	}{
+		{"Show S02E03 1080p", 2},
+		{"Show 3rd Season - 03", 3},
+		{"Show Season 3 Part 2 - 03", 3},
+		{"Show S03E15 (Show 2nd Season Part 2)", 3},
+		{"Show - 03", 0},
+	}
+	for _, c := range cases {
+		if got := Parse(c.title).SeasonNumber(); got != c.want {
+			t.Errorf("Parse(%q).SeasonNumber() = %d, want %d", c.title, got, c.want)
+		}
+		if got := SeasonOf(c.title); got != c.want {
+			t.Errorf("SeasonOf(%q) = %d, want %d", c.title, got, c.want)
+		}
+	}
+}
+
 // TestSanitise: names must be safe on both Linux and Windows, since files
 // may be moved or synced between the two.
 func TestSanitise(t *testing.T) {

@@ -103,6 +103,65 @@ func TestUnseenGroupGeneralises(t *testing.T) {
 	}
 }
 
+// TestSeasonMismatchIsRejected: an explicitly numbered season is identity.
+// The alias gate is recall, so a third-season show and a second-season release
+// share almost every token; the season number is the one that tells them apart.
+func TestSeasonMismatchIsRejected(t *testing.T) {
+	s := &MemShow{
+		Name: "Tensei Kizoku, Kantei Skill de Nariagaru 3rd Season",
+		Alias: []string{
+			"As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World 3rd Season",
+			"As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 3",
+		},
+		Offsets:  map[string]int{},
+		Defaults: []int{0},
+	}
+
+	bad := "[EMBER] Tensei Kizoku, Kantei Skill de Nariagaru S02E03 [1080p] [HEVC WEBRip] (As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 2)"
+	if got := Match(s, bad); got.Matched {
+		t.Errorf("season-2 release matched a season-3 show: ep=%d (%s)", got.Episode, got.Reason)
+	}
+
+	good := "[EMBER] Tensei Kizoku, Kantei Skill de Nariagaru S03E03 [1080p] [HEVC WEBRip] (As a Reincarnated Aristocrat, I'll Use My Appraisal Skill to Rise in the World Season 3)"
+	if got := Match(s, good); !got.Matched || got.Episode != 3 {
+		t.Errorf("season-3 release did not match: matched=%v ep=%d (%s)", got.Matched, got.Episode, got.Reason)
+	}
+
+	// Most releases omit the season. Silence is not a conflicting claim.
+	unmarked := "[EMBER] Tensei Kizoku, Kantei Skill de Nariagaru - 03 [1080p] [HEVC WEBRip]"
+	if got := Match(s, unmarked); !got.Matched || got.Episode != 3 {
+		t.Errorf("unmarked season did not match: matched=%v ep=%d (%s)", got.Matched, got.Episode, got.Reason)
+	}
+
+	// A show known only by a season-agnostic name can still accept numbered
+	// seasons; there is no show season to contradict.
+	whole := &MemShow{
+		Name:     "Tensei Kizoku, Kantei Skill de Nariagaru",
+		Offsets:  map[string]int{},
+		Defaults: []int{0},
+	}
+	if got := Match(whole, bad); !got.Matched || got.Episode != 3 {
+		t.Errorf("season-agnostic show rejected a numbered season: matched=%v ep=%d (%s)", got.Matched, got.Episode, got.Reason)
+	}
+}
+
+// TestSeasonAgnosticAliasAllowsMismatch: a show that is also known by a
+// season-agnostic name deliberately spans seasons. The explicit season is not a
+// contradiction when the release matches that broader identity.
+func TestSeasonAgnosticAliasAllowsMismatch(t *testing.T) {
+	s := &MemShow{
+		Name:     "Show Season 4",
+		Alias:    []string{"Show"},
+		Offsets:  map[string]int{},
+		Defaults: []int{0},
+	}
+	got := Match(s, "Show S03E15 1080p")
+	if !got.Matched || got.Episode != 15 {
+		t.Errorf("season-agnostic alias should allow the broader identity: matched=%v ep=%d (%s)",
+			got.Matched, got.Episode, got.Reason)
+	}
+}
+
 // TestRejectsOtherShows guards against false positives. These are real titles
 // from the live feed that share tokens with the seed shows but are not them.
 func TestRejectsOtherShows(t *testing.T) {

@@ -327,6 +327,32 @@ func (r Release) RawEpisode() int {
 	return r.Bare
 }
 
+// SeasonNumber is the season the title explicitly claims, 0 when it makes no
+// claim.
+//
+// SxxEyy wins over a "Season N" word. A title like
+//
+//	Show S03E15 ... (Show 2nd Season Part 2)
+//
+// is season 3 by its numbering; the parenthetical is an alternate name, not a
+// second claim about the file.
+//
+// A zero is not "season 0": it means the title did not say, which is common and
+// must stay distinguishable from an explicit season.
+func (r Release) SeasonNumber() int {
+	if r.Season != 0 {
+		return r.Season
+	}
+	return r.SeasonWord
+}
+
+// SeasonOf reports the explicit season claim in a title. It is used for show
+// aliases, where only the text matters and the rest of a parsed release would
+// be noise.
+func SeasonOf(title string) int {
+	return Parse(title).SeasonNumber()
+}
+
 // Normalise lowercases, strips accents and punctuation, and collapses whitespace.
 // Used for both alias storage and title comparison so the two always agree.
 func Normalise(s string) string {
