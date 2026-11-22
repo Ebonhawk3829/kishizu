@@ -11,6 +11,7 @@
 package watch
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -205,15 +206,8 @@ func fileExists(path string) bool {
 
 // deleteFile removes one episode's file and marks the episode deleted.
 //
-// The path is opened through an os.Root confined to the library, so a
-// corrupted file_path cannot cause a delete outside it.
-//
-// The containment is os.Root rather than a string prefix check on the
-// absolute path. A prefix check does not resolve symlinks, so a link inside
-// the library pointing at a file outside it would pass the check and the
-// delete would go through — the exact failure the check exists to prevent.
-// os.Root resolves each path component against the root and refuses to follow
-// a link that escapes.
+// The path is confined to the library by removeInRoot, so a corrupted
+// file_path cannot cause a delete outside it.
 func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 	path := ep.FilePath
 	if path == "" {
@@ -228,17 +222,7 @@ func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 	// matters.
 	defer func() { _ = root.Close() }()
 
-	// Relative to the root: an absolute path, or one that climbs out with
-	// "..", is refused by Remove rather than resolved.
-	rel, err := filepath.Rel(h.Library, path)
-	if err != nil {
-		return fmt.Errorf("refusing to delete %q: not under library %q", path, h.Library)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to delete %q: outside library %q", path, h.Library)
-	}
-
-	if err := root.Remove(rel); err != nil && !os.IsNotExist(err) {
+	if err := removeInRoot(root, h.Library, path); err != nil {
 		return err
 	}
 	if err := h.st.UpsertEpisode(showID, ep.Number, episode.Deleted, "", ""); err != nil {
@@ -251,6 +235,72 @@ func (h *Handler) deleteFile(showID int64, ep *store.Episode) error {
 	}
 	if next := h.st.NextUnwatched(showID); next > 0 {
 		return h.st.StampExposure(showID, next)
+	}
+	return nil
+}
+
+// DeleteShowFiles removes every episode file recorded for a show.
+//
+// It is the "also delete episodes on disk" half of removing a show; the
+// caller deletes the show row afterwards. Best effort: one unreadable or
+// already-missing file must not stop the rest of the season being cleaned up.
+// The returned count is what was actually removed; failed lists the files
+// that survived, with why.
+//
+// Episode rows are left alone. The caller is about to delete the show, which
+// removes them in the same transaction, so writing "deleted" states here
+// would only be churn.
+func (h *Handler) DeleteShowFiles(showID int64) (deleted int, failed []string, err error) {
+	if h.Library == "" {
+		return 0, nil, errors.New("library is not configured")
+	}
+	eps, err := h.st.EpisodesForShow(showID)
+	if err != nil {
+		return 0, nil, err
+	}
+	root, err := os.OpenRoot(h.Library)
+	if err != nil {
+		return 0, nil, fmt.Errorf("open library root %q: %w", h.Library, err)
+	}
+	// A failed close on the way out has no recovery: the deletes have already
+	// happened or already failed, and the original error is the one that
+	// matters.
+	defer func() { _ = root.Close() }()
+
+	for _, ep := range eps {
+		if ep.FilePath == "" {
+			continue
+		}
+		if err := removeInRoot(root, h.Library, ep.FilePath); err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", ep.FilePath, err))
+			continue
+		}
+		deleted++
+	}
+	return deleted, failed, nil
+}
+
+// removeInRoot deletes one file through an os.Root confined to the library.
+//
+// The containment is os.Root rather than a string prefix check on the
+// absolute path. A prefix check does not resolve symlinks, so a link inside
+// the library pointing at a file outside it would pass the check and the
+// delete would go through — the exact failure the check exists to prevent.
+// os.Root resolves each path component against the root and refuses to follow
+// a link that escapes.
+func removeInRoot(root *os.Root, library, path string) error {
+	// Relative to the root: an absolute path, or one that climbs out with
+	// "..", is refused by Remove rather than resolved.
+	rel, err := filepath.Rel(library, path)
+	if err != nil {
+		return fmt.Errorf("refusing to delete %q: not under library %q", path, library)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to delete %q: outside library %q", path, library)
+	}
+
+	if err := root.Remove(rel); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }

@@ -120,7 +120,18 @@ same lookup add performs.
 {"id":1}
 ```
 
-Removes the show with its aliases, offsets, episodes and dedupe entries.
+Removes the show with its aliases, offsets, episodes and dedupe entries. Files
+on disk are left alone unless `delete_files` is set:
+
+```json
+{"id":1,"delete_files":true}
+```
+
+That also deletes every episode file recorded for the show. It requires
+`server.library` to be configured; without it the request is refused with
+`400` and the show is kept. Deletion is best effort: a file that cannot be
+removed is reported in `files_failed` and the show is still removed. The
+response reports `files_deleted`.
 
 ---
 

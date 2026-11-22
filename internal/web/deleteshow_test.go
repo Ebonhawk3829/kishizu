@@ -1,14 +1,17 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Ebonhawk3829/kishizu/internal/episode"
 	"github.com/Ebonhawk3829/kishizu/internal/store"
+	"github.com/Ebonhawk3829/kishizu/internal/watch"
 )
 
 // TestDeleteShowRemovesEverything: removing a show must take its aliases,
@@ -69,5 +72,120 @@ func TestDeleteShowUnknownID(t *testing.T) {
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 404 {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestDeleteShowDeletesFiles: the caller may ask for the show's episodes to
+// be removed from disk as part of the removal. The files go, the show row
+// goes, and the response reports how many were deleted.
+func TestDeleteShowDeletesFiles(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "library")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+
+	sh, _ := st.CreateShow("Show", nil)
+	if err := st.UpsertEpisode(sh.ID, 1, episode.Downloaded, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(lib, "Show - 01.mkv")
+	if err := os.WriteFile(path, []byte("episode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFilePath(sh.ID, 1, path); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{st: st, watch: watch.New(st, lib, 0, watch.DeleteOff, 0)}
+	body := fmt.Sprintf(`{"id":%d,"delete_files":true}`, sh.ID)
+	req := httptest.NewRequest("DELETE", "/api/shows", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("delete: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		FilesDeleted int `json:"files_deleted"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.FilesDeleted != 1 {
+		t.Errorf("files_deleted = %d, want 1", resp.FilesDeleted)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("episode file survived: %v", err)
+	}
+	if got, _ := st.GetShow(sh.ID); got != nil {
+		t.Error("show still present after delete")
+	}
+}
+
+// TestDeleteShowKeepsFilesByDefault: without the opt-in the episodes are left
+// alone. Removing a show stops tracking; it does not clean the disk.
+func TestDeleteShowKeepsFilesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "library")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+
+	sh, _ := st.CreateShow("Show", nil)
+	if err := st.UpsertEpisode(sh.ID, 1, episode.Downloaded, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(lib, "Show - 01.mkv")
+	if err := os.WriteFile(path, []byte("episode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFilePath(sh.ID, 1, path); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{st: st, watch: watch.New(st, lib, 0, watch.DeleteOff, 0)}
+	body := fmt.Sprintf(`{"id":%d}`, sh.ID)
+	req := httptest.NewRequest("DELETE", "/api/shows", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("delete: status %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("episode file should survive a default removal: %v", err)
+	}
+}
+
+// TestDeleteShowFilesRequiresLibrary: asking to delete files when no library
+// is configured is a 400 and leaves the show in place, because there is
+// nowhere safe to delete from.
+func TestDeleteShowFilesRequiresLibrary(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+
+	sh, _ := st.CreateShow("Show", nil)
+	s := &Server{st: st}
+	body := fmt.Sprintf(`{"id":%d,"delete_files":true}`, sh.ID)
+	req := httptest.NewRequest("DELETE", "/api/shows", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if got, _ := st.GetShow(sh.ID); got == nil {
+		t.Error("show was removed despite the failed request")
 	}
 }

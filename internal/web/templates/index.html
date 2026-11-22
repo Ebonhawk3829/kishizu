@@ -251,7 +251,7 @@
     color: var(--t1); font: inherit; font-size: 13.5px; padding: 7px 9px;
   }
   .acts button.danger:hover { color: var(--bad); }
-  .acts.confirming { opacity: 1; }
+  .acts.confirming { opacity: 1; flex-wrap: wrap; }
   .acts .ask { color: var(--t2); font-size: 13.5px; padding: 8px 4px 8px 13px; }
   .acts .yes { color: var(--bad); }
 
@@ -1773,14 +1773,46 @@ function watchedUpTo(showId, upto, name) {
   });
 }
 
+// removeShow asks how far the removal should go. Removing a show only stops
+// kishizu tracking it; deleting its episodes is a separate, destructive
+// choice. The count comes from the server and is zero when file deletion is
+// not configured, so the control is never offered when it cannot work.
 function removeShow(showId, name) {
-  askConfirm('row-' + showId, `Remove ${name}?`, async () => {
+  const s = showById(showId);
+  const files = s ? s.files : 0;
+  const row = el('row-' + showId);
+  const acts = row.querySelector('.acts');
+  const original = acts.innerHTML;
+  acts.classList.add('confirming');
+  const del = files > 0
+    ? `<button class="yes" type="button" data-choice="files">Delete ${files} file${files === 1 ? '' : 's'}</button>`
+    : '';
+  const keep = files > 0 ? 'Keep files' : 'Remove';
+  acts.innerHTML = `<span class="ask">Remove?</span>
+    <button type="button" data-choice="keep">${keep}</button>
+    ${del}
+    <button type="button" data-choice="cancel">Cancel</button>`;
+  const restore = () => { acts.innerHTML = original; acts.classList.remove('confirming'); };
+  const remove = async deleteFiles => {
+    restore();
     try {
-      await api('/api/shows', { id: showId }, 'DELETE');
-      toast(`Removed ${name}. Files on disk were left alone.`);
+      const r = await api('/api/shows', { id: showId, delete_files: deleteFiles }, 'DELETE');
+      let msg = `Removed ${name}.`;
+      if (deleteFiles) {
+        msg += ` ${r.files_deleted} file${r.files_deleted === 1 ? '' : 's'} deleted.`;
+      } else {
+        msg += ' Files on disk were left alone.';
+      }
+      if (r.warning) msg += ' ' + r.warning;
+      toast(msg, !!r.warning);
       loadShows();
     } catch (e) { toast(e.message, true); }
-  });
+  };
+  acts.querySelector('[data-choice="keep"]').onclick = () => remove(false);
+  acts.querySelector('[data-choice="cancel"]').onclick = restore;
+  const delBtn = acts.querySelector('[data-choice="files"]');
+  if (delBtn) delBtn.onclick = () => remove(true);
+  acts.querySelector('[data-choice="keep"]').focus();
 }
 
 // Reset training: clears the show's learned offsets so training can start

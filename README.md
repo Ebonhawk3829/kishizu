@@ -43,6 +43,7 @@ site is down.
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Adding shows](#adding-shows)
+- [Removing a show](#removing-a-show)
 - [How matching works](#how-matching-works)
 - [Episode states](#episode-states)
 - [Adopting a finished season](#adopting-a-finished-season)
@@ -262,6 +263,17 @@ ones you missed, or **Start at episode N** to ignore the backlog and only track
 what airs from now on. The choice is a floor on the show, not a watch signal —
 skipped episodes are never hunted and never counted as watched, and the card's
 "airs" line still shows the season's real schedule.
+
+## Removing a show
+
+**Remove** stops kishizu tracking a show and removes its aliases, offsets,
+episodes and dedupe entries. Files on disk are left alone by default: removing
+a show is about tracking, not storage.
+
+When the show has episodes on disk and `server.library` is configured, the
+confirm row also offers **Delete N files**, which removes those episode files
+as part of the removal. The show is removed either way; a file that cannot be
+deleted is reported and left behind rather than blocking the removal.
 
 ## How matching works
 

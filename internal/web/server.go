@@ -1300,11 +1300,15 @@ func (s *Server) enrichFromSchedule(sh *store.Show) {
 // handleDeleteShow removes a show and everything learned about it.
 //
 // Deleting is the only way to drop a season once it has finished, and the
-// only undo for one added by mistake. It does not touch files on disk —
-// removing a show stops kishizu tracking it, it does not delete episodes.
+// only undo for one added by mistake. By default it leaves files on disk —
+// removing a show stops kishizu tracking it. The caller may ask for the
+// episodes to be deleted too; that is best effort and never blocks the
+// removal, because leaving a show monitored because one file would not
+// delete is worse than leaving an orphan behind.
 func (s *Server) handleDeleteShow(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID int64 `json:"id"`
+		ID          int64 `json:"id"`
+		DeleteFiles bool  `json:"delete_files"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -1315,12 +1319,42 @@ func (s *Server) handleDeleteShow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("show %d not found", req.ID))
 		return
 	}
+
+	var (
+		filesDeleted int
+		filesFailed  []string
+		fileErr      error
+	)
+	if req.DeleteFiles {
+		if s.watch == nil || s.watch.Library == "" {
+			writeErr(w, http.StatusBadRequest,
+				errors.New("deleting files is not configured: set server.library"))
+			return
+		}
+		filesDeleted, filesFailed, fileErr = s.watch.DeleteShowFiles(sh.ID)
+	}
+
 	if err := s.st.DeleteShow(sh.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	log.Printf("delete-show: %s", sh.CanonicalName)
-	writeJSON(w, map[string]any{"deleted": sh.CanonicalName})
+
+	resp := map[string]any{
+		"deleted":       sh.CanonicalName,
+		"files_deleted": filesDeleted,
+	}
+	if len(filesFailed) > 0 {
+		resp["files_failed"] = len(filesFailed)
+		resp["warning"] = fmt.Sprintf("%d file(s) could not be deleted", len(filesFailed))
+		log.Printf("delete-show: %s: %d file(s) could not be deleted: %s",
+			sh.CanonicalName, len(filesFailed), strings.Join(filesFailed, "; "))
+	}
+	if fileErr != nil {
+		resp["warning"] = "files could not be deleted: " + fileErr.Error()
+		log.Printf("delete-show: %s: delete files: %v", sh.CanonicalName, fileErr)
+	}
+	writeJSON(w, resp)
 }
 
 type showJSON struct {
@@ -1352,6 +1386,10 @@ type showJSON struct {
 	Downloaded int `json:"downloaded"`
 	Watched    int `json:"watched"`
 	Deleted    int `json:"deleted"`
+	// Files is how many episode files removing the show could delete. Zero
+	// when file deletion is not configured, so the UI never offers a control
+	// that cannot work.
+	Files int `json:"files"`
 }
 
 type scheduleJSON struct {
@@ -1368,6 +1406,11 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	// File deletion needs both a handler and a library root. When either is
+	// missing, the count stays zero and the UI hides the option rather than
+	// offering a control that would fail.
+	canDeleteFiles := s.watch != nil && s.watch.Library != ""
 
 	out := make([]showJSON, 0, len(shows))
 	for _, sh := range shows {
@@ -1400,6 +1443,9 @@ func (s *Server) handleListShows(w http.ResponseWriter, r *http.Request) {
 			var states []cycle.State
 			for _, ep := range eps {
 				states = append(states, cycle.StateOf(ep, anchorEp, anchorAt, time.Now()))
+				if canDeleteFiles && ep.FilePath != "" {
+					j.Files++
+				}
 				switch episode.ParseState(string(ep.State)) {
 				case episode.Downloaded:
 					j.Downloaded++
